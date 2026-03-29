@@ -23,6 +23,10 @@ import TransportationSizes from "./TransportationSizes/reducer";
 import TransportationTypes from "./TransportationTypes/reducer";
 import TransportationCompanies from "./TransportationCompanies/reducer";
 import Quotations from "./Quotations/reducer";
+import QuotationDays from "./QuotationDays/reducer";
+import QuotationAccumidation from "./QuotationAccumidation/reducer";
+import ExtraServices from "./ExtraServices/reducer";
+import QuotationExtraServices from "./QuotationExtraServices/reducer";
 
 const rootReducer = combineReducers({
   // public
@@ -41,6 +45,10 @@ const rootReducer = combineReducers({
   TransportationTypes,
   TransportationCompanies,
   Quotations,
+  QuotationDays,
+  QuotationAccumidation,
+  ExtraServices,
+  QuotationExtraServices,
 });
 
 export default rootReducer;

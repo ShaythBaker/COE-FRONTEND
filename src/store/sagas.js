@@ -24,6 +24,10 @@ import TravelAgentsSaga from "./TravelAgents/saga";
 import PlacesSaga from "./Places/saga";
 import TransportationCompaniesSaga from "./TransportationCompanies/saga";
 import QuotationsSaga from "./Quotations/saga";
+import QuotationDaysSaga from "./QuotationDays/saga";
+import quotationAccumidationSaga from "./QuotationAccumidation/saga";
+import ExtraServicesSaga from "./ExtraServices/saga";
+import QuotationExtraServicesSaga from "./QuotationExtraServices/saga";
 
 
 
@@ -45,5 +49,9 @@ export default function* rootSaga() {
     fork(TransportationTypesSaga),
     fork(TransportationCompaniesSaga),
     fork(QuotationsSaga),
+    fork(QuotationDaysSaga),
+    fork(quotationAccumidationSaga),
+    fork(ExtraServicesSaga),
+    fork(QuotationExtraServicesSaga),
   ]);
 }

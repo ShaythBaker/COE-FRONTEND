@@ -84,6 +84,14 @@ export const TRAVEL_AGENT_BY_ID = (id) => `/agent/${id}`;
 export const PLACES = "/place";
 export const PLACE_BY_ID = (id) => `/place/${id}`;
 
+
+// EXTRA SERVICES
+export const EXTRA_SERVICES = "/extra_services";
+export const EXTRA_SERVICE_BY_ID = (id) => `/extra_services/${id}`;
+
+
 // QUOTATIONS
 export const QUOTATIONS = "/quotations";
 export const QUOTATION_BY_ID = id => `/quotations/${id}`;
+export const QUOTATION_ACCUMIDATION = "/quotation-accumidation";
+export const QUOTATION_ACCUMIDATION_BY_ID = id => `/quotation-accumidation/${id}`;

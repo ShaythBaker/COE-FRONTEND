@@ -58,6 +58,11 @@ const SidebarContent = (props) => {
     "CONTRACTING",
   ]);
 
+  const canManageExtraServices = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "CONTRACTING",
+  ]);
+
   const canSeePlaces = roles.length > 0;
 
   const isActive = (path) =>
@@ -253,6 +258,15 @@ const SidebarContent = (props) => {
                 >
                   <i className="bx bx-transfer-alt" />
                   <span>Transportation Types</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canManageExtraServices ? (
+              <li className={isActive("/extra-services") ? "mm-active" : ""}>
+                <Link to="/extra-services" className="waves-effect">
+                  <i className="bx bx-package" />
+                  <span>Extra Services</span>
                 </Link>
               </li>
             ) : null}

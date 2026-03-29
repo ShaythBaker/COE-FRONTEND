@@ -32,6 +32,9 @@ import TravelAgentDetails from "../pages/TravelAgents/TravelAgentDetails";
 import Places from "../pages/Places";
 import PlaceDetails from "../pages/Places/PlaceDetails";
 
+//Extra Services
+import ExtraServicesPage from "../pages/ExtraServices/index";
+
 import TransportationSizes from "../pages/Settings/TransportationSizes";
 import TransportationTypes from "../pages/Settings/TransportationTypes";
 
@@ -42,6 +45,9 @@ import TransportationCompanyDetails from "../pages/TransportationCompanies/Detai
 // Quotations
 import QuotationsList from "../pages/Quotations/List";
 import QuotationsDetails from "../pages/Quotations/Details";
+import PlanQuotation from "../pages/Quotations/Plan";
+import Accommodation from "../pages/Quotations/Accommodation";
+import ExtraServicesQuotation from "../pages/Quotations/ExtraServices";
 
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
@@ -71,6 +77,8 @@ const authProtectedRoutes = [
     component: <TransportationTypes />,
   },
 
+   { path: "/extra-services", component: <ExtraServicesPage /> },
+
   { path: "/hotels", component: <Hotels /> },
   { path: "/hotels/:id", component: <HotelDetails /> },
 
@@ -94,6 +102,10 @@ const authProtectedRoutes = [
 
   { path: "/quotations", component: <QuotationsList /> },
   { path: "/quotations/:id", component: <QuotationsDetails /> },
+  { path: "/quotations/:id/plan", component: <PlanQuotation /> },
+  { path: "/quotations/:id/accommodation", component: <Accommodation /> },
+   { path: "/quotations/:id/extra-services", component: <ExtraServicesQuotation /> },
+  
 
   { path: "/", exact: true, component: <Navigate to="/dashboard" /> },
 ];

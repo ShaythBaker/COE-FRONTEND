@@ -31,14 +31,24 @@ import {
   resetListItemsFlags,
 } from "../../../store/listItems/actions";
 
-const ALLOWED_LIST_KEYS = ["CITIES", "COUNTRIES", "HOTELSTARS", "HOTELCHAINS", "HOTELSEASONS", "RESTAURANTS_MEALS"];
+const ALLOWED_LIST_KEYS = [
+  "CITIES",
+  "COUNTRIES",
+  "HOTELSTARS",
+  "HOTELCHAINS",
+  "HOTELSEASONS",
+  "RESTAURANTS_MEALS",
+  "GUIDE_TYPE",
+];
 
 const DynamicListsPage = () => {
   document.title = "Dynamic Lists | COE";
 
   const dispatch = useDispatch();
 
-  const { items, loading, error, lastOp } = useSelector((state) => state?.ListItems || {});
+  const { items, loading, error, lastOp } = useSelector(
+    (state) => state?.ListItems || {},
+  );
   const [listKey, setListKey] = useState("CITIES");
 
   // Create/Edit modal
@@ -206,7 +216,11 @@ const DynamicListsPage = () => {
                     </Col>
                     <Col md="6" className="text-md-end">
                       <div className="mb-3">
-                        <Button color="primary" onClick={openAdd} disabled={loading}>
+                        <Button
+                          color="primary"
+                          onClick={openAdd}
+                          disabled={loading}
+                        >
                           <i className="bx bx-plus me-1" />
                           Add Item
                         </Button>
@@ -234,13 +248,20 @@ const DynamicListsPage = () => {
                         <tbody>
                           {sortedItems.length === 0 ? (
                             <tr>
-                              <td colSpan="5" className="text-center text-muted py-4">
+                              <td
+                                colSpan="5"
+                                className="text-center text-muted py-4"
+                              >
                                 No items found.
                               </td>
                             </tr>
                           ) : (
                             sortedItems.map((row) => {
-                              const key = row?.id ?? row?._id ?? row?.ID ?? `${row?.ITEM_VALUE}-${row?.SORT_ORDER}`;
+                              const key =
+                                row?.id ??
+                                row?._id ??
+                                row?.ID ??
+                                `${row?.ITEM_VALUE}-${row?.SORT_ORDER}`;
                               const active = !!row?.ACTIVE_STATUS;
                               return (
                                 <tr key={key}>
@@ -284,9 +305,7 @@ const DynamicListsPage = () => {
                   )}
 
                   {showInlineError ? (
-                    <div className="text-danger mt-3">
-                      {String(error)}
-                    </div>
+                    <div className="text-danger mt-3">{String(error)}</div>
                   ) : null}
                 </CardBody>
               </Card>
@@ -305,7 +324,9 @@ const DynamicListsPage = () => {
                     <div className="mb-3">
                       <Label className="form-label">List Key</Label>
                       <Input type="text" value={listKey} readOnly />
-                      <div className="form-text">This is based on the selected list type.</div>
+                      <div className="form-text">
+                        This is based on the selected list type.
+                      </div>
                     </div>
                   </Col>
 
@@ -317,9 +338,16 @@ const DynamicListsPage = () => {
                       <Input
                         type="text"
                         value={form.ITEM_VALUE}
-                        invalid={!!touched.ITEM_VALUE && !String(form.ITEM_VALUE || "").trim()}
-                        onBlur={() => setTouched((t) => ({ ...t, ITEM_VALUE: true }))}
-                        onChange={(e) => setForm((f) => ({ ...f, ITEM_VALUE: e.target.value }))}
+                        invalid={
+                          !!touched.ITEM_VALUE &&
+                          !String(form.ITEM_VALUE || "").trim()
+                        }
+                        onBlur={() =>
+                          setTouched((t) => ({ ...t, ITEM_VALUE: true }))
+                        }
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, ITEM_VALUE: e.target.value }))
+                        }
                         placeholder="Enter item value"
                       />
                       <FormFeedback>Item Name is required</FormFeedback>
@@ -332,7 +360,9 @@ const DynamicListsPage = () => {
                       <Input
                         type="text"
                         value={form.ITEM_KEY}
-                        onChange={(e) => setForm((f) => ({ ...f, ITEM_KEY: e.target.value }))}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, ITEM_KEY: e.target.value }))
+                        }
                         placeholder="Enter item key (optional)"
                       />
                     </div>
@@ -359,10 +389,16 @@ const DynamicListsPage = () => {
                         id="activeStatusSwitch"
                         checked={!!form.ACTIVE_STATUS}
                         onChange={(e) =>
-                          setForm((f) => ({ ...f, ACTIVE_STATUS: e.target.checked }))
+                          setForm((f) => ({
+                            ...f,
+                            ACTIVE_STATUS: e.target.checked,
+                          }))
                         }
                       />
-                      <Label className="form-check-label" htmlFor="activeStatusSwitch">
+                      <Label
+                        className="form-check-label"
+                        htmlFor="activeStatusSwitch"
+                      >
                         Active Status
                       </Label>
                     </div>
@@ -376,7 +412,12 @@ const DynamicListsPage = () => {
                 </Row>
               </ModalBody>
               <ModalFooter>
-                <Button color="light" type="button" onClick={closeUpsert} disabled={loading}>
+                <Button
+                  color="light"
+                  type="button"
+                  onClick={closeUpsert}
+                  disabled={loading}
+                >
                   Cancel
                 </Button>
                 <Button color="primary" type="submit" disabled={loading}>
@@ -398,7 +439,11 @@ const DynamicListsPage = () => {
               <Button color="light" onClick={closeDelete} disabled={loading}>
                 Cancel
               </Button>
-              <Button color="danger" onClick={onConfirmDelete} disabled={loading}>
+              <Button
+                color="danger"
+                onClick={onConfirmDelete}
+                disabled={loading}
+              >
                 {loading ? <Spinner size="sm" className="me-2" /> : null}
                 Delete
               </Button>
