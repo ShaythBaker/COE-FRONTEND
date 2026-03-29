@@ -10,7 +10,11 @@ import { LOGIN as LOGIN_URL, LOGOUT as LOGOUT_URL } from "../../../helpers/url_h
 
 import { getFirebaseBackend } from "../../../helpers/firebase_helper";
 
-import { setTokens, clearTokens, getRefreshToken } from "../../../helpers/coe_token_storage";
+import {
+  setTokens,
+  clearTokens,
+  getRefreshToken,
+} from "../../../helpers/coe_token_storage";
 import { decodeJwt } from "../../../helpers/coe_jwt";
 import { notifySuccess, notifyError } from "../../../helpers/notify";
 
@@ -27,26 +31,60 @@ function extractErrorMessage(error, fallback = "Request failed") {
   );
 }
 
+function setLegacyAuthUser(decoded, tokens) {
+  const legacyUser = {
+    id: decoded?.sub || null,
+    email: decoded?.EMAIL || null,
+    COMPANY_ID: decoded?.COMPANY_ID || null,
+    ROLES: Array.isArray(decoded?.ROLES) ? decoded.ROLES : [],
+    accessToken: tokens?.accessToken || null,
+    refreshToken: tokens?.refreshToken || null,
+  };
+
+  localStorage.setItem("user", JSON.stringify(legacyUser));
+  localStorage.setItem("authUser", JSON.stringify(legacyUser));
+}
+
+function clearLegacyAuthUser() {
+  localStorage.removeItem("user");
+  localStorage.removeItem("authUser");
+}
+
 function* loginUser({ payload: { user, history } }) {
   try {
     if (import.meta.env.VITE_APP_DEFAULTAUTH === "firebase") {
-      const response = yield call(fireBaseBackend.loginUser, user.email, user.password);
+      const response = yield call(
+        fireBaseBackend.loginUser,
+        user.email,
+        user.password
+      );
+
+      localStorage.setItem("authUser", JSON.stringify(response));
+      localStorage.setItem("user", JSON.stringify(response));
+
       yield put(loginSuccess({ decoded: null, tokens: null, raw: response }));
+      notifySuccess("Logged in successfully.");
       history("/dashboard");
       return;
     }
 
     if (import.meta.env.VITE_APP_DEFAULTAUTH === "jwt") {
-      // Backend contract: {email,password} -> {accessToken,refreshToken}
       const tokens = yield call(post, LOGIN_URL, {
         email: user.email,
         password: user.password,
       });
 
-      // Store tokens under required keys (rotation-safe)
       setTokens(tokens);
 
-      const decoded = decodeJwt(tokens.accessToken);
+      const decoded = decodeJwt(tokens?.accessToken);
+
+      if (!decoded) {
+        clearTokens();
+        clearLegacyAuthUser();
+        throw new Error("Invalid access token received from server.");
+      }
+
+      setLegacyAuthUser(decoded, tokens);
 
       yield put(loginSuccess({ decoded, tokens }));
       notifySuccess("Logged in successfully.");
@@ -54,32 +92,36 @@ function* loginUser({ payload: { user, history } }) {
       return;
     }
 
-    // If still using fake somewhere, keep error explicit
     throw new Error("Unsupported auth mode. Set VITE_APP_DEFAULTAUTH=jwt");
   } catch (error) {
     const msg = extractErrorMessage(error, "Login failed");
+    clearTokens();
+    clearLegacyAuthUser();
     yield put(apiError(msg));
+    notifyError(msg);
   }
 }
 
 function* logoutUser({ payload: { history } }) {
   try {
-    // Best effort logout call with refreshToken
     const rt = getRefreshToken();
+
     if (rt) {
       try {
         yield call(post, LOGOUT_URL, { refreshToken: rt });
       } catch {
-        // ignore errors, still clear locally
+        // ignore logout API failure
       }
     }
 
     clearTokens();
+    clearLegacyAuthUser();
     yield put(logoutUserSuccess());
-    notifyError("Logged out.");
+    notifyInfo("Logged out successfully.");
     history("/login");
   } catch (error) {
     clearTokens();
+    clearLegacyAuthUser();
     yield put(logoutUserSuccess());
     history("/login");
   }
@@ -89,8 +131,10 @@ function* socialLogin({ payload: { type, history } }) {
   try {
     if (import.meta.env.VITE_APP_DEFAULTAUTH === "firebase") {
       const response = yield call(fireBaseBackend.socialLoginUser, type);
+
       if (response) {
         localStorage.setItem("authUser", JSON.stringify(response));
+        localStorage.setItem("user", JSON.stringify(response));
         yield put(loginSuccess({ decoded: null, tokens: null, raw: response }));
         history("/dashboard");
       } else {
@@ -100,6 +144,7 @@ function* socialLogin({ payload: { type, history } }) {
   } catch (error) {
     const msg = extractErrorMessage(error, "Social login failed");
     yield put(apiError(msg));
+    notifyError(msg);
   }
 }
 
