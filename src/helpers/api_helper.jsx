@@ -8,6 +8,7 @@ import {
 } from "./coe_token_storage";
 import { REFRESH } from "./url_helper";
 import { notifyError } from "./notify";
+import { decodeJwt } from "./coe_jwt";
 
 const API_URL = import.meta.env.VITE_APP_API_URL;
 
@@ -17,16 +18,54 @@ const axiosApi = axios.create({
 
 let isRefreshing = false;
 let refreshQueue = [];
+let didShowSessionExpiredToast = false;
 
-const enqueue = (cb) => refreshQueue.push(cb);
+const enqueue = cb => refreshQueue.push(cb);
 
 const flushQueue = (err, newToken) => {
-  refreshQueue.forEach((cb) => cb(err, newToken));
+  refreshQueue.forEach(cb => cb(err, newToken));
   refreshQueue = [];
 };
 
-// Request interceptor: attach Authorization if access token exists
-axiosApi.interceptors.request.use((config) => {
+const setLegacyAuthUserFromTokenPair = ({ accessToken, refreshToken }) => {
+  const decoded = decodeJwt(accessToken);
+
+  if (!decoded) return;
+
+  const legacyUser = {
+    id: decoded?.sub || null,
+    email: decoded?.EMAIL || null,
+    COMPANY_ID: decoded?.COMPANY_ID || null,
+    ROLES: Array.isArray(decoded?.ROLES) ? decoded.ROLES : [],
+    accessToken: accessToken || null,
+    refreshToken: refreshToken || null,
+  };
+
+  localStorage.setItem("user", JSON.stringify(legacyUser));
+  localStorage.setItem("authUser", JSON.stringify(legacyUser));
+};
+
+const clearLegacyAuthUser = () => {
+  localStorage.removeItem("user");
+  localStorage.removeItem("authUser");
+};
+
+const redirectToLogin = () => {
+  clearTokens();
+  clearLegacyAuthUser();
+
+  if (!didShowSessionExpiredToast) {
+    didShowSessionExpiredToast = true;
+    notifyError("Session expired. Please login again.");
+    setTimeout(() => {
+      didShowSessionExpiredToast = false;
+    }, 1500);
+  }
+
+  window.location.href = "/login";
+};
+
+axiosApi.interceptors.request.use(config => {
   const token = getAccessToken();
 
   if (token) {
@@ -37,10 +76,9 @@ axiosApi.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor: on 401, refresh once and retry original request
 axiosApi.interceptors.response.use(
-  (response) => response,
-  async (error) => {
+  response => response,
+  async error => {
     const original = error?.config;
 
     if (!error?.response || !original) {
@@ -53,7 +91,6 @@ axiosApi.interceptors.response.use(
       url.includes("/auth/refresh") ||
       url.includes("/auth/logout");
 
-    // Never refresh on auth endpoints
     if (isAuthEndpoint) {
       return Promise.reject(error);
     }
@@ -64,13 +101,10 @@ axiosApi.interceptors.response.use(
       const rt = getRefreshToken();
 
       if (!rt) {
-        clearTokens();
-        notifyError("Session expired. Please login again.");
-        window.location.href = "/login";
+        redirectToLogin();
         return Promise.reject(error);
       }
 
-      // If refresh already running, wait then retry
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           enqueue((err, newAccessToken) => {
@@ -88,32 +122,29 @@ axiosApi.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        // Use raw axios to avoid interceptor recursion
         const res = await axios.post(`${API_URL}${REFRESH}`, {
           refreshToken: rt,
         });
 
-        // IMPORTANT: refresh token is rotated; replace BOTH
-        setTokens({
-          accessToken: res.data.accessToken,
-          refreshToken: res.data.refreshToken,
-        });
+        const newTokens = {
+          accessToken: res?.data?.accessToken,
+          refreshToken: res?.data?.refreshToken,
+        };
+
+        setTokens(newTokens);
+        setLegacyAuthUserFromTokenPair(newTokens);
 
         isRefreshing = false;
-        flushQueue(null, res.data.accessToken);
+        flushQueue(null, newTokens.accessToken);
 
         original.headers = original.headers || {};
-        original.headers.Authorization = `Bearer ${res.data.accessToken}`;
+        original.headers.Authorization = `Bearer ${newTokens.accessToken}`;
 
         return axiosApi(original);
       } catch (refreshErr) {
         isRefreshing = false;
         flushQueue(refreshErr, null);
-
-        clearTokens();
-        notifyError("Session expired. Please login again.");
-        window.location.href = "/login";
-
+        redirectToLogin();
         return Promise.reject(refreshErr);
       }
     }
@@ -122,21 +153,15 @@ axiosApi.interceptors.response.use(
   }
 );
 
-const normalizeRequestData = (data) => {
+const normalizeRequestData = data => {
   if (data === undefined) return {};
   if (data === null) return null;
 
-  if (
-    typeof FormData !== "undefined" &&
-    data instanceof FormData
-  ) {
+  if (typeof FormData !== "undefined" && data instanceof FormData) {
     return data;
   }
 
-  if (
-    typeof Blob !== "undefined" &&
-    data instanceof Blob
-  ) {
+  if (typeof Blob !== "undefined" && data instanceof Blob) {
     return data;
   }
 
@@ -151,32 +176,30 @@ const normalizeRequestData = (data) => {
   return data;
 };
 
-// Skote-style wrappers
 export async function get(url, config = {}) {
-  return axiosApi.get(url, { ...config }).then((response) => response.data);
+  return axiosApi.get(url, { ...config }).then(response => response.data);
 }
 
 export async function post(url, data, config = {}) {
   return axiosApi
     .post(url, normalizeRequestData(data), { ...config })
-    .then((response) => response.data);
+    .then(response => response.data);
 }
 
 export async function put(url, data, config = {}) {
   return axiosApi
     .put(url, normalizeRequestData(data), { ...config })
-    .then((response) => response.data);
+    .then(response => response.data);
 }
 
-// Added for PATCH endpoints (still uses the central axios instance + interceptors)
 export async function patch(url, data, config = {}) {
   return axiosApi
     .patch(url, normalizeRequestData(data), { ...config })
-    .then((response) => response.data);
+    .then(response => response.data);
 }
 
 export async function del(url, config = {}) {
-  return axiosApi.delete(url, { ...config }).then((response) => response.data);
+  return axiosApi.delete(url, { ...config }).then(response => response.data);
 }
 
 export { axiosApi };
