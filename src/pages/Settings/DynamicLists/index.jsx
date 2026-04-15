@@ -39,6 +39,7 @@ const ALLOWED_LIST_KEYS = [
   "HOTELSEASONS",
   "RESTAURANTS_MEALS",
   "GUIDE_TYPE",
+  "QUOTATION_TYPE",
 ];
 
 const DynamicListsPage = () => {

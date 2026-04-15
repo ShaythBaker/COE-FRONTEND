@@ -44,6 +44,13 @@ export const TRANSPORTATION_SIZE_BY_ID = (id) => `/transportation-sizes/${id}`;
 // =====================
 export const TRANSPORTATION_TYPES = "/transportation-types";
 export const TRANSPORTATION_TYPE_BY_ID = (id) => `/transportation-types/${id}`;
+export const TRANSPORTATION_COMPANIES_BEST_RATE = (pax, typeId, transportationCompanyId) =>
+  `/transportation-companies/best-rate?PAX=${encodeURIComponent(pax)}&TYPE=${encodeURIComponent(typeId)}${
+    transportationCompanyId
+      ? `&TRANSPORTATION_COMPANY_ID=${encodeURIComponent(transportationCompanyId)}`
+      : ""
+  }`;
+
 
 // =====================
 // Transportation Companies

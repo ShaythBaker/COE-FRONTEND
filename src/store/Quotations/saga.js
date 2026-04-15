@@ -17,12 +17,8 @@ import {
 } from "./actions";
 
 import { get, post, patch, del } from "../../helpers/api_helper";
-import {
-  QUOTATIONS,
-  QUOTATION_BY_ID,
-  TRAVEL_AGENTS,
-  TRANSPORTATION_COMPANIES,
-} from "../../helpers/url_helper";
+import { getListItems } from "../../helpers/coe_backend_helper";
+import { QUOTATIONS, QUOTATION_BY_ID, TRAVEL_AGENTS } from "../../helpers/url_helper";
 import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
@@ -53,7 +49,8 @@ const normalizeQuotation = item => {
     ...item,
     _id: unwrapId(item?._id),
     TRAVEL_AGENT_ID: unwrapId(item?.TRAVEL_AGENT_ID),
-    TRANSPORTATION_COMPANY_ID: unwrapId(item?.TRANSPORTATION_COMPANY_ID),
+    NATIONALITY: unwrapId(item?.NATIONALITY),
+    QUOTATION_TYPE: unwrapId(item?.QUOTATION_TYPE),
   };
 };
 
@@ -131,17 +128,17 @@ function* onDeleteQuotation({ payload }) {
 
 function* onFetchQuotationsLookups() {
   try {
-    const [travelAgents, transportationCompanies] = yield all([
+    const [travelAgents, countries, quotationTypes] = yield all([
       call(get, TRAVEL_AGENTS),
-      call(get, TRANSPORTATION_COMPANIES),
+      call(getListItems, "COUNTRIES"),
+      call(getListItems, "QUOTATION_TYPE"),
     ]);
 
     yield put(
       fetchQuotationsLookupsSuccess({
         travelAgents: Array.isArray(travelAgents) ? travelAgents : [],
-        transportationCompanies: Array.isArray(transportationCompanies)
-          ? transportationCompanies
-          : [],
+        COUNTRIES: Array.isArray(countries) ? countries : [],
+        QUOTATION_TYPE: Array.isArray(quotationTypes) ? quotationTypes : [],
       })
     );
   } catch (e) {

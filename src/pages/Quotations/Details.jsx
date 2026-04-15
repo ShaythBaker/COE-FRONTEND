@@ -1,15 +1,13 @@
 // path: src/pages/Quotations/Details.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   Badge,
-  Button,
   Card,
   CardBody,
   Col,
   Container,
-  Input,
   Label,
   Row,
   Spinner,
@@ -41,8 +39,17 @@ const getTravelAgentLabel = (item) =>
   item?.companyName ||
   "-";
 
-const getTransportationCompanyLabel = (item) =>
-  item?.COMPANY_NAME || item?.NAME || item?.companyName || "-";
+const getListItemValue = (item) => unwrapId(item?._id);
+
+const getListItemLabel = (item) =>
+  item?.ITEM_VALUE ||
+  item?.LIST_LABEL ||
+  item?.LABEL ||
+  item?.NAME ||
+  item?.TITLE ||
+  item?.VALUE ||
+  item?.CODE ||
+  "-";
 
 const formatDateInput = (value) => {
   if (!value) return "";
@@ -118,7 +125,6 @@ const LoadingState = ({ text = "Loading..." }) => (
 const QuotationsDetails = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
-  const navigate = useNavigate();
 
   const { selected, loading, lookups } = useSelector((s) => s.Quotations || {});
 
@@ -146,12 +152,18 @@ const QuotationsDetails = () => {
         const [daysRes, accommodationRes, extrasRes] = await Promise.all([
           get(`/quotation-days/quotation/${id}`),
           get(`/quotation-accumidation?QUOTATION_ID=${encodeURIComponent(id)}`),
-          get(`/quotation_extra_services?QUOTATION_ID=${encodeURIComponent(id)}`),
+          get(
+            `/quotation_extra_services?QUOTATION_ID=${encodeURIComponent(id)}`,
+          ),
         ]);
 
         if (ignore) return;
 
-        setDaysRoutes(asArray(daysRes).sort((a, b) => (a?.DAY_ORDER || 0) - (b?.DAY_ORDER || 0)));
+        setDaysRoutes(
+          asArray(daysRes).sort(
+            (a, b) => (a?.DAY_ORDER || 0) - (b?.DAY_ORDER || 0),
+          ),
+        );
 
         const allAccommodation = asArray(accommodationRes);
         const normalizedOptions = allAccommodation.flatMap((entry) =>
@@ -160,7 +172,9 @@ const QuotationsDetails = () => {
             totalNights: option?.TOTAL_NIGHTS || 0,
             totals: option?.TOTALS || {},
             hotels: asArray(option?.HOTELS),
-            stays: asArray(option?.STAYS).sort((a, b) => (a?.ORDER || 0) - (b?.ORDER || 0)),
+            stays: asArray(option?.STAYS).sort(
+              (a, b) => (a?.ORDER || 0) - (b?.ORDER || 0),
+            ),
             arrivingDate: entry?.ARRAIVING_DATE,
             departureDate: entry?.DEPARTURE_DATE,
             totalOptions: entry?.TOTAL_OPTIONS || 0,
@@ -171,7 +185,9 @@ const QuotationsDetails = () => {
         setExtraServices(asArray(extrasRes));
       } catch (error) {
         if (!ignore) {
-          notifyError(getErrorMessage(error, "Failed to load quotation summary."));
+          notifyError(
+            getErrorMessage(error, "Failed to load quotation summary."),
+          );
         }
       } finally {
         if (!ignore) {
@@ -195,10 +211,18 @@ const QuotationsDetails = () => {
     return map;
   }, [lookups]);
 
-  const transportationCompanyMap = useMemo(() => {
+  const nationalityMap = useMemo(() => {
     const map = new Map();
-    (lookups?.transportationCompanies || []).forEach((item) => {
-      map.set(unwrapId(item?._id), getTransportationCompanyLabel(item));
+    (lookups?.COUNTRIES || []).forEach((item) => {
+      map.set(getListItemValue(item), getListItemLabel(item));
+    });
+    return map;
+  }, [lookups]);
+
+  const quotationTypeMap = useMemo(() => {
+    const map = new Map();
+    (lookups?.QUOTATION_TYPE || []).forEach((item) => {
+      map.set(getListItemValue(item), getListItemLabel(item));
     });
     return map;
   }, [lookups]);
@@ -214,122 +238,7 @@ const QuotationsDetails = () => {
           <Row>
             <Col xl="8">
               <Card>
-                <CardBody>
-                  <div className="d-flex justify-content-between align-items-center mb-3">
-                    <div>
-                      <h4 className="card-title mb-1">Quotation Details</h4>
-                      <p className="card-title-desc mb-0">
-                        Main quotation information with a readable trip summary.
-                      </p>
-                    </div>
-
-                    <Button
-                      color="light"
-                      type="button"
-                      onClick={() => navigate("/quotations")}
-                    >
-                      Exit
-                    </Button>
-                  </div>
-
-                  {loading && !selected ? (
-                    <LoadingState />
-                  ) : (
-                    <Row>
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">Reference Number</Label>
-                          <Input
-                            value={selected?.REFERANCE_NUMBER || ""}
-                            disabled
-                          />
-                        </div>
-                      </Col>
-
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">Quotation Status</Label>
-                          <Input
-                            value={selected?.QUOTATION_STATUS || "-"}
-                            disabled
-                          />
-                        </div>
-                      </Col>
-
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">Travel Agent</Label>
-                          <Input
-                            value={
-                              travelAgentMap.get(selected?.TRAVEL_AGENT_ID) || "-"
-                            }
-                            disabled
-                          />
-                        </div>
-                      </Col>
-
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">
-                            Transportation Company
-                          </Label>
-                          <Input
-                            value={
-                              transportationCompanyMap.get(
-                                selected?.TRANSPORTATION_COMPANY_ID,
-                              ) || "-"
-                            }
-                            disabled
-                          />
-                        </div>
-                      </Col>
-
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">Arriving Date</Label>
-                          <Input
-                            value={
-                              formatDateInput(selected?.ARRAIVING_DATE) || ""
-                            }
-                            disabled
-                          />
-                        </div>
-                      </Col>
-
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">Departure Date</Label>
-                          <Input
-                            value={
-                              formatDateInput(selected?.DEPARTURE_DATE) || ""
-                            }
-                            disabled
-                          />
-                        </div>
-                      </Col>
-
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">Created On</Label>
-                          <Input
-                            value={formatDateInput(selected?.CREATED_ON) || ""}
-                            disabled
-                          />
-                        </div>
-                      </Col>
-
-                      <Col md="6">
-                        <div className="mb-3">
-                          <Label className="form-label">Updated On</Label>
-                          <Input
-                            value={formatDateInput(selected?.UPDATED_ON) || ""}
-                            disabled
-                          />
-                        </div>
-                      </Col>
-                    </Row>
-                  )}
-                </CardBody>
+                <CardBody></CardBody>
               </Card>
             </Col>
 
@@ -349,13 +258,6 @@ const QuotationsDetails = () => {
 
                   <div className="mb-3">
                     <Label className="form-label text-muted mb-1">
-                      Quotation Status
-                    </Label>
-                    <div>{selected?.QUOTATION_STATUS || "-"}</div>
-                  </div>
-
-                  <div className="mb-3">
-                    <Label className="form-label text-muted mb-1">
                       Travel Agent
                     </Label>
                     <div>
@@ -365,46 +267,77 @@ const QuotationsDetails = () => {
 
                   <div className="mb-3">
                     <Label className="form-label text-muted mb-1">
-                      Transportation Company
+                      Nationality
                     </Label>
                     <div>
-                      {transportationCompanyMap.get(
-                        selected?.TRANSPORTATION_COMPANY_ID,
-                      ) || "-"}
+                      {nationalityMap.get(selected?.NATIONALITY) || "-"}
                     </div>
                   </div>
 
                   <div className="mb-3">
                     <Label className="form-label text-muted mb-1">
-                      Arriving Date
+                      Quotation Type
                     </Label>
                     <div>
-                      {formatDateInput(selected?.ARRAIVING_DATE) || "-"}
+                      {quotationTypeMap.get(selected?.QUOTATION_TYPE) || "-"}
                     </div>
                   </div>
 
                   <div className="mb-3">
                     <Label className="form-label text-muted mb-1">
-                      Departure Date
+                      Start Date
                     </Label>
                     <div>
-                      {formatDateInput(selected?.DEPARTURE_DATE) || "-"}
+                      {formatDateInput(selected?.QUOTATION_START_DATE) || "-"}
                     </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <Label className="form-label text-muted mb-1">
+                      End Date
+                    </Label>
+                    <div>
+                      {formatDateInput(selected?.QUOTATION_END_DATE) || "-"}
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <Label className="form-label text-muted mb-1">
+                      Duration
+                    </Label>
+                    <div>
+                      {selected?.QUOTATION_DURATION_DAYS ??
+                        selected?.DURATION_IN_DAYS ??
+                        "-"}
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <Label className="form-label text-muted mb-1">
+                      Number of Pax
+                    </Label>
+                    <div>{selected?.NUMBER_OF_PAX ?? "-"}</div>
                   </div>
 
                   <div className="row g-3 pt-2">
                     <div className="col-6">
-                      <div className="border rounded p-3 text-center h-100">
-                        <div className="text-muted mb-1">Days</div>
-                        <h4 className="mb-0">{daysRoutes.length}</h4>
-                      </div>
+                      <Link
+                        to={`/quotations/${selected?._id || id}/plan`}
+                        className="btn btn-info w-100 border rounded p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center"
+                      >
+                        <div className="text-white mb-1">Routs And Days</div>
+                      </Link>
                     </div>
+
                     <div className="col-6">
-                      <div className="border rounded p-3 text-center h-100">
-                        <div className="text-muted mb-1">Hotel Options</div>
-                        <h4 className="mb-0">{accommodationOptions.length}</h4>
-                      </div>
+                      <Link
+                        to={`/quotations/${selected?._id || id}/accommodation`}
+                        className="btn btn-info w-100 border rounded p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center"
+                      >
+                        <div className="text-white mb-1">Accommodation</div>
+                      </Link>
                     </div>
+
                     <div className="col-12">
                       <div className="border rounded p-3 text-center h-100">
                         <div className="text-muted mb-1">Extra Services</div>
@@ -435,8 +368,8 @@ const QuotationsDetails = () => {
                     <Row className="g-3">
                       {daysRoutes.map((day) => {
                         const transportLabel =
-                          day?.TRANSPORTATION_RESOLVED?.[0]?.TRANSPORTATION_TYPE_NAME ||
-                          "-";
+                          day?.TRANSPORTATION_RESOLVED?.[0]
+                            ?.TRANSPORTATION_TYPE_NAME || "-";
                         const places = asArray(day?.PLACES)
                           .map((place) => place?.PLACE_NAME)
                           .filter(Boolean);
@@ -459,7 +392,10 @@ const QuotationsDetails = () => {
                                     </div>
                                   </div>
 
-                                  <Badge color="soft-primary" className="font-size-12">
+                                  <Badge
+                                    color="soft-primary"
+                                    className="font-size-12"
+                                  >
                                     {transportLabel}
                                   </Badge>
                                 </div>
@@ -469,7 +405,9 @@ const QuotationsDetails = () => {
                                     <i className="bx bx-car me-1" />
                                     Transportation Type
                                   </div>
-                                  <div className="fw-medium">{transportLabel}</div>
+                                  <div className="fw-medium">
+                                    {transportLabel}
+                                  </div>
                                 </div>
 
                                 <div className="mb-3">
@@ -490,7 +428,9 @@ const QuotationsDetails = () => {
                                       ))}
                                     </div>
                                   ) : (
-                                    <div className="fw-medium">No places added</div>
+                                    <div className="fw-medium">
+                                      No places added
+                                    </div>
                                   )}
                                 </div>
 
@@ -500,7 +440,8 @@ const QuotationsDetails = () => {
                                     Guide
                                   </div>
                                   <div className="fw-medium">
-                                    {day?.GUIDE_TYPE_NAME || "No guide selected"}
+                                    {day?.GUIDE_TYPE_NAME ||
+                                      "No guide selected"}
                                   </div>
                                 </div>
 
@@ -522,7 +463,9 @@ const QuotationsDetails = () => {
                                       ))}
                                     </div>
                                   ) : (
-                                    <div className="fw-medium">No meals added</div>
+                                    <div className="fw-medium">
+                                      No meals added
+                                    </div>
                                   )}
                                 </div>
                               </CardBody>
@@ -554,14 +497,18 @@ const QuotationsDetails = () => {
                   ) : (
                     <Row className="g-3">
                       {accommodationOptions.map((option, index) => (
-                        <Col xl="12" key={`${option?.optionName || "option"}-${index}`}>
+                        <Col
+                          xl="12"
+                          key={`${option?.optionName || "option"}-${index}`}
+                        >
                           <Card className="border shadow-none mb-0">
                             <CardBody>
                               <div className="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
                                 <div>
                                   <h5 className="mb-1">
                                     <i className="bx bx-door-open me-1 text-primary" />
-                                    {option?.optionName || `Option ${index + 1}`}
+                                    {option?.optionName ||
+                                      `Option ${index + 1}`}
                                   </h5>
                                   <p className="text-muted mb-0">
                                     {formatDateLabel(option?.arrivingDate)} to{" "}
@@ -595,13 +542,16 @@ const QuotationsDetails = () => {
                                     </h6>
 
                                     {option.hotels.length === 0 ? (
-                                      <div className="text-muted">No hotels added</div>
+                                      <div className="text-muted">
+                                        No hotels added
+                                      </div>
                                     ) : (
                                       option.hotels.map((hotel, hotelIndex) => (
                                         <div
                                           key={`${hotel?.HOTEL_NAME || "hotel"}-${hotelIndex}`}
                                           className={
-                                            hotelIndex === option.hotels.length - 1
+                                            hotelIndex ===
+                                            option.hotels.length - 1
                                               ? ""
                                               : "border-bottom pb-3 mb-3"
                                           }
@@ -623,17 +573,41 @@ const QuotationsDetails = () => {
                                           </div>
 
                                           <div className="d-flex flex-wrap gap-2">
-                                            <Badge color="light" className="p-2">
-                                              BB: {formatCurrency(hotel?.TOTALS?.BB)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              BB:{" "}
+                                              {formatCurrency(
+                                                hotel?.TOTALS?.BB,
+                                              )}
                                             </Badge>
-                                            <Badge color="light" className="p-2">
-                                              HB: {formatCurrency(hotel?.TOTALS?.HB)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              HB:{" "}
+                                              {formatCurrency(
+                                                hotel?.TOTALS?.HB,
+                                              )}
                                             </Badge>
-                                            <Badge color="light" className="p-2">
-                                              FB: {formatCurrency(hotel?.TOTALS?.FB)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              FB:{" "}
+                                              {formatCurrency(
+                                                hotel?.TOTALS?.FB,
+                                              )}
                                             </Badge>
-                                            <Badge color="light" className="p-2">
-                                              SS: {formatCurrency(hotel?.TOTALS?.SS)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              SS:{" "}
+                                              {formatCurrency(
+                                                hotel?.TOTALS?.SS,
+                                              )}
                                             </Badge>
                                           </div>
                                         </div>
@@ -650,13 +624,16 @@ const QuotationsDetails = () => {
                                     </h6>
 
                                     {option.stays.length === 0 ? (
-                                      <div className="text-muted">No stay breakdown found</div>
+                                      <div className="text-muted">
+                                        No stay breakdown found
+                                      </div>
                                     ) : (
                                       option.stays.map((stay, stayIndex) => (
                                         <div
                                           key={`${stay?.HOTEL_NAME || "stay"}-${stayIndex}`}
                                           className={
-                                            stayIndex === option.stays.length - 1
+                                            stayIndex ===
+                                            option.stays.length - 1
                                               ? ""
                                               : "border-bottom pb-3 mb-3"
                                           }
@@ -682,17 +659,33 @@ const QuotationsDetails = () => {
                                           </div>
 
                                           <div className="d-flex flex-wrap gap-2">
-                                            <Badge color="light" className="p-2">
-                                              BB: {formatCurrency(stay?.TOTALS?.BB)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              BB:{" "}
+                                              {formatCurrency(stay?.TOTALS?.BB)}
                                             </Badge>
-                                            <Badge color="light" className="p-2">
-                                              HB: {formatCurrency(stay?.TOTALS?.HB)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              HB:{" "}
+                                              {formatCurrency(stay?.TOTALS?.HB)}
                                             </Badge>
-                                            <Badge color="light" className="p-2">
-                                              FB: {formatCurrency(stay?.TOTALS?.FB)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              FB:{" "}
+                                              {formatCurrency(stay?.TOTALS?.FB)}
                                             </Badge>
-                                            <Badge color="light" className="p-2">
-                                              SS: {formatCurrency(stay?.TOTALS?.SS)}
+                                            <Badge
+                                              color="light"
+                                              className="p-2"
+                                            >
+                                              SS:{" "}
+                                              {formatCurrency(stay?.TOTALS?.SS)}
                                             </Badge>
                                           </div>
                                         </div>
@@ -729,7 +722,11 @@ const QuotationsDetails = () => {
                   ) : (
                     <Row className="g-3">
                       {extraServices.map((service, index) => (
-                        <Col md="6" xl="4" key={service?._id || `service-${index}`}>
+                        <Col
+                          md="6"
+                          xl="4"
+                          key={service?._id || `service-${index}`}
+                        >
                           <Card className="border shadow-none h-100 mb-0">
                             <CardBody>
                               <div className="d-flex align-items-start justify-content-between gap-2 mb-3">
@@ -738,15 +735,22 @@ const QuotationsDetails = () => {
                                 </div>
                                 {service?.SERVICE_COST_PP !== undefined &&
                                 service?.SERVICE_COST_PP !== null ? (
-                                  <Badge color="soft-success" className="font-size-12">
-                                    {formatCurrency(service?.SERVICE_COST_PP)} pp
+                                  <Badge
+                                    color="soft-success"
+                                    className="font-size-12"
+                                  >
+                                    {formatCurrency(service?.SERVICE_COST_PP)}{" "}
+                                    pp
                                   </Badge>
                                 ) : null}
                               </div>
 
-                              <h5 className="mb-2">{service?.SERVICE_NAME || "-"}</h5>
+                              <h5 className="mb-2">
+                                {service?.SERVICE_NAME || "-"}
+                              </h5>
                               <p className="text-muted mb-0">
-                                {service?.SERVICE_DESCRIPTION || "No description provided."}
+                                {service?.SERVICE_DESCRIPTION ||
+                                  "No description provided."}
                               </p>
                             </CardBody>
                           </Card>

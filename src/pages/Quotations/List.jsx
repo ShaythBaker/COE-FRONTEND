@@ -1,12 +1,8 @@
-
-
-
 // path: src/pages/Quotations/List.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
-  Badge,
   Button,
   Card,
   CardBody,
@@ -29,6 +25,7 @@ import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 import {
   createQuotation,
+  deleteQuotation,
   fetchQuotations,
   fetchQuotationsLookups,
   updateQuotation,
@@ -38,9 +35,12 @@ const ALLOWED_ROLES = ["COMPANY_ADMIN", "CONTRACTING"];
 
 const emptyForm = {
   TRAVEL_AGENT_ID: "",
-  TRANSPORTATION_COMPANY_ID: "",
-  ARRAIVING_DATE: "",
-  DEPARTURE_DATE: "",
+  NATIONALITY: "",
+  QUOTATION_TYPE: "",
+  QUOTATION_START_DATE: "",
+  QUOTATION_END_DATE: "",
+  QUOTATION_DURATION_DAYS: "",
+  NUMBER_OF_PAX: "",
 };
 
 const unwrapId = value => {
@@ -62,10 +62,16 @@ const getTravelAgentLabel = item =>
   item?.companyName ||
   "-";
 
-const getTransportationCompanyLabel = item =>
-  item?.COMPANY_NAME ||
+const getListItemValue = item => unwrapId(item?._id);
+
+const getListItemLabel = item =>
+  item?.ITEM_VALUE ||
+  item?.LIST_LABEL ||
+  item?.LABEL ||
   item?.NAME ||
-  item?.companyName ||
+  item?.TITLE ||
+  item?.VALUE ||
+  item?.CODE ||
   "-";
 
 const formatDateInput = value => {
@@ -75,33 +81,12 @@ const formatDateInput = value => {
   return date.toISOString().slice(0, 10);
 };
 
-const getQuotationStatus = item => String(item?.QUOTATION_STATUS || "").trim().toUpperCase() || "-";
-
-const getStatusBadgeColor = (status) => {
-  switch (status) {
-    case "DRAFT":
-      return "secondary";
-    case "SHARED_WITH_AGENT":
-      return "info";
-    case "APPROVED":
-      return "success";
-    case "REJECTED":
-      return "danger";
-    case "CANCELLED":
-      return "warning";
-    case "EXPIRED":
-      return "dark";
-    case "SENT_FOR_APPROVAL":
-      return "primary";
-
-    default:
-      return "light";
-  }
-};
-
 const QuotationsList = () => {
   const dispatch = useDispatch();
-  const { items, loading, lookups, lookupsLoading } = useSelector(s => s.Quotations || {});
+  const navigate = useNavigate();
+  const { items, loading, lookups, lookupsLoading } = useSelector(
+    s => s.Quotations || {}
+  );
   const roles = useSelector(s => s.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
 
@@ -127,12 +112,32 @@ const QuotationsList = () => {
     return map;
   }, [lookups]);
 
-  const transportationCompanyMap = useMemo(() => {
+  const nationalityMap = useMemo(() => {
     const map = new Map();
-    (lookups?.transportationCompanies || []).forEach(item => {
-      map.set(unwrapId(item?._id), getTransportationCompanyLabel(item));
+    (lookups?.COUNTRIES || []).forEach(item => {
+      map.set(getListItemValue(item), getListItemLabel(item));
     });
     return map;
+  }, [lookups]);
+
+  const quotationTypeMap = useMemo(() => {
+    const map = new Map();
+    (lookups?.QUOTATION_TYPE || []).forEach(item => {
+      map.set(getListItemValue(item), getListItemLabel(item));
+    });
+    return map;
+  }, [lookups]);
+
+  const nationalityOptions = useMemo(() => {
+    const rows = Array.isArray(lookups?.COUNTRIES) ? [...lookups.COUNTRIES] : [];
+    return rows.sort((a, b) => Number(a?.SORT_ORDER || 0) - Number(b?.SORT_ORDER || 0));
+  }, [lookups]);
+
+  const quotationTypeOptions = useMemo(() => {
+    const rows = Array.isArray(lookups?.QUOTATION_TYPE)
+      ? [...lookups.QUOTATION_TYPE]
+      : [];
+    return rows.sort((a, b) => Number(a?.SORT_ORDER || 0) - Number(b?.SORT_ORDER || 0));
   }, [lookups]);
 
   const filteredItems = useMemo(() => {
@@ -141,20 +146,24 @@ const QuotationsList = () => {
 
     return (items || []).filter(item => {
       const ref = String(item?.REFERANCE_NUMBER || "").toLowerCase();
-      const agent = String(travelAgentMap.get(item?.TRAVEL_AGENT_ID) || "").toLowerCase();
-      const company = String(
-        transportationCompanyMap.get(item?.TRANSPORTATION_COMPANY_ID) || ""
+      const agent = String(
+        travelAgentMap.get(item?.TRAVEL_AGENT_ID) || ""
       ).toLowerCase();
-      const status = String(item?.QUOTATION_STATUS || "").toLowerCase();
+      const nationality = String(
+        nationalityMap.get(item?.NATIONALITY) || ""
+      ).toLowerCase();
+      const quotationType = String(
+        quotationTypeMap.get(item?.QUOTATION_TYPE) || ""
+      ).toLowerCase();
 
       return (
         ref.includes(q) ||
         agent.includes(q) ||
-        company.includes(q) ||
-        status.includes(q)
+        nationality.includes(q) ||
+        quotationType.includes(q)
       );
     });
-  }, [items, search, travelAgentMap, transportationCompanyMap]);
+  }, [items, search, travelAgentMap, nationalityMap, quotationTypeMap]);
 
   const errors = useMemo(() => {
     const next = {};
@@ -162,21 +171,35 @@ const QuotationsList = () => {
     if (!String(form.TRAVEL_AGENT_ID || "").trim()) {
       next.TRAVEL_AGENT_ID = "Required";
     }
-    if (!String(form.TRANSPORTATION_COMPANY_ID || "").trim()) {
-      next.TRANSPORTATION_COMPANY_ID = "Required";
+    if (!String(form.NATIONALITY || "").trim()) {
+      next.NATIONALITY = "Required";
     }
-    if (!String(form.ARRAIVING_DATE || "").trim()) {
-      next.ARRAIVING_DATE = "Required";
+    if (!String(form.QUOTATION_TYPE || "").trim()) {
+      next.QUOTATION_TYPE = "Required";
     }
-    if (!String(form.DEPARTURE_DATE || "").trim()) {
-      next.DEPARTURE_DATE = "Required";
+    if (!String(form.QUOTATION_START_DATE || "").trim()) {
+      next.QUOTATION_START_DATE = "Required";
     }
+    if (!String(form.QUOTATION_END_DATE || "").trim()) {
+      next.QUOTATION_END_DATE = "Required";
+    }
+    if (!String(form.QUOTATION_DURATION_DAYS || "").trim()) {
+      next.QUOTATION_DURATION_DAYS = "Required";
+    } else if (Number(form.QUOTATION_DURATION_DAYS) <= 0) {
+      next.QUOTATION_DURATION_DAYS = "Duration must be greater than 0";
+    }
+    if (!String(form.NUMBER_OF_PAX || "").trim()) {
+      next.NUMBER_OF_PAX = "Required";
+    } else if (Number(form.NUMBER_OF_PAX) <= 0) {
+      next.NUMBER_OF_PAX = "Number of Pax must be greater than 0";
+    }
+
     if (
-      form.ARRAIVING_DATE &&
-      form.DEPARTURE_DATE &&
-      new Date(form.DEPARTURE_DATE) < new Date(form.ARRAIVING_DATE)
+      form.QUOTATION_START_DATE &&
+      form.QUOTATION_END_DATE &&
+      new Date(form.QUOTATION_END_DATE) < new Date(form.QUOTATION_START_DATE)
     ) {
-      next.DEPARTURE_DATE = "Departure date must be on or after arriving date";
+      next.QUOTATION_END_DATE = "End date must be on or after start date";
     }
 
     return next;
@@ -208,18 +231,26 @@ const QuotationsList = () => {
       return;
     }
 
-    if (getQuotationStatus(row) === "CANCELLED") {
-      notifyError("Cancelled quotations cannot be edited.");
-      return;
-    }
-
     setEditing(row);
     setTouched({});
     setForm({
+      ...emptyForm,
       TRAVEL_AGENT_ID: row?.TRAVEL_AGENT_ID || "",
-      TRANSPORTATION_COMPANY_ID: row?.TRANSPORTATION_COMPANY_ID || "",
-      ARRAIVING_DATE: formatDateInput(row?.ARRAIVING_DATE),
-      DEPARTURE_DATE: formatDateInput(row?.DEPARTURE_DATE),
+      NATIONALITY: row?.NATIONALITY || "",
+      QUOTATION_TYPE: row?.QUOTATION_TYPE || "",
+      QUOTATION_START_DATE: formatDateInput(row?.QUOTATION_START_DATE),
+      QUOTATION_END_DATE: formatDateInput(row?.QUOTATION_END_DATE),
+      QUOTATION_DURATION_DAYS:
+        row?.QUOTATION_DURATION_DAYS !== undefined &&
+        row?.QUOTATION_DURATION_DAYS !== null
+          ? String(row.QUOTATION_DURATION_DAYS)
+          : row?.DURATION_IN_DAYS !== undefined && row?.DURATION_IN_DAYS !== null
+          ? String(row.DURATION_IN_DAYS)
+          : "",
+      NUMBER_OF_PAX:
+        row?.NUMBER_OF_PAX !== undefined && row?.NUMBER_OF_PAX !== null
+          ? String(row.NUMBER_OF_PAX)
+          : "",
     });
     setEditOpen(true);
   };
@@ -232,11 +263,6 @@ const QuotationsList = () => {
 
     if (!row?._id) {
       notifyError("Quotation id is missing.");
-      return;
-    }
-
-    if (getQuotationStatus(row) === "CANCELLED") {
-      notifyError("Quotation is already cancelled.");
       return;
     }
 
@@ -253,11 +279,24 @@ const QuotationsList = () => {
   const touchAll = () => {
     setTouched({
       TRAVEL_AGENT_ID: true,
-      TRANSPORTATION_COMPANY_ID: true,
-      ARRAIVING_DATE: true,
-      DEPARTURE_DATE: true,
+      NATIONALITY: true,
+      QUOTATION_TYPE: true,
+      QUOTATION_START_DATE: true,
+      QUOTATION_END_DATE: true,
+      QUOTATION_DURATION_DAYS: true,
+      NUMBER_OF_PAX: true,
     });
   };
+
+  const buildPayload = () => ({
+    TRAVEL_AGENT_ID: form.TRAVEL_AGENT_ID,
+    NATIONALITY: form.NATIONALITY,
+    QUOTATION_TYPE: form.QUOTATION_TYPE,
+    QUOTATION_START_DATE: form.QUOTATION_START_DATE,
+    QUOTATION_END_DATE: form.QUOTATION_END_DATE,
+    QUOTATION_DURATION_DAYS: Number(form.QUOTATION_DURATION_DAYS),
+    NUMBER_OF_PAX: Number(form.NUMBER_OF_PAX),
+  });
 
   const handleCreate = e => {
     e.preventDefault();
@@ -269,19 +308,15 @@ const QuotationsList = () => {
     }
 
     dispatch(
-      createQuotation(
-        {
-          TRAVEL_AGENT_ID: form.TRAVEL_AGENT_ID,
-          TRANSPORTATION_COMPANY_ID: form.TRANSPORTATION_COMPANY_ID,
-          ARRAIVING_DATE: form.ARRAIVING_DATE,
-          DEPARTURE_DATE: form.DEPARTURE_DATE,
-        },
-        () => {
-          setCreateOpen(false);
-          resetFormState();
-          dispatch(fetchQuotations());
+      createQuotation(buildPayload(), created => {
+        setCreateOpen(false);
+        resetFormState();
+        if (created?._id) {
+          navigate(`/quotations/${created._id}`);
+          return;
         }
-      )
+        dispatch(fetchQuotations());
+      })
     );
   };
 
@@ -300,21 +335,14 @@ const QuotationsList = () => {
     }
 
     dispatch(
-      updateQuotation(
-        editing._id,
-        {
-          TRAVEL_AGENT_ID: form.TRAVEL_AGENT_ID,
-          TRANSPORTATION_COMPANY_ID: form.TRANSPORTATION_COMPANY_ID,
-          ARRAIVING_DATE: form.ARRAIVING_DATE,
-          DEPARTURE_DATE: form.DEPARTURE_DATE,
-        },
-        () => {
-          setEditOpen(false);
-          setEditing(null);
-          resetFormState();
+      updateQuotation(editing._id, buildPayload(), updated => {
+        setEditOpen(false);
+        setEditing(null);
+        resetFormState();
+        if (!updated?._id) {
           dispatch(fetchQuotations());
         }
-      )
+      })
     );
   };
 
@@ -325,15 +353,10 @@ const QuotationsList = () => {
     }
 
     dispatch(
-      updateQuotation(
-        deleting._id,
-        { QUOTATION_STATUS: "CANCELLED" },
-        () => {
-          setDeleteOpen(false);
-          setDeleting(null);
-          dispatch(fetchQuotations());
-        }
-      )
+      deleteQuotation(deleting._id, () => {
+        setDeleteOpen(false);
+        setDeleting(null);
+      })
     );
   };
 
@@ -353,7 +376,7 @@ const QuotationsList = () => {
                     <div>
                       <h4 className="card-title mb-1">Quotations</h4>
                       <p className="card-title-desc mb-0">
-                        List quotations, create, edit, cancel, and plan days.
+                        List quotations, create, edit, delete, and plan days.
                       </p>
                     </div>
 
@@ -382,96 +405,86 @@ const QuotationsList = () => {
                           <th style={{ width: 70 }}>#</th>
                           <th>Reference Number</th>
                           <th>Travel Agent</th>
-                          <th>Transportation Company</th>
-                          <th>Arriving Date</th>
-                          <th>Departure Date</th>
-                          <th>Quotation Status</th>
+                          <th>Nationality</th>
+                          <th>Quotation Type</th>
+                          <th>Start Date</th>
+                          <th>End Date</th>
+                          <th>Duration</th>
+                          <th>Number of Pax</th>
                           <th style={{ width: 330 }}>Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {loading ? (
                           <tr>
-                            <td colSpan="8" className="text-center py-4">
+                            <td colSpan="10" className="text-center py-4">
                               <Spinner size="sm" className="me-2" />
                               Loading...
                             </td>
                           </tr>
                         ) : filteredItems.length === 0 ? (
                           <tr>
-                            <td colSpan="8" className="text-center text-muted py-4">
+                            <td colSpan="10" className="text-center text-muted py-4">
                               No quotations found.
                             </td>
                           </tr>
                         ) : (
-                          filteredItems.map((row, index) => {
-                            const quotationStatus = getQuotationStatus(row);
-                            const isCancelled = quotationStatus === "CANCELLED";
+                          filteredItems.map((row, index) => (
+                            <tr key={row?._id || index}>
+                              <td>{index + 1}</td>
+                              <td className="fw-semibold">
+                                {row?.REFERANCE_NUMBER || "-"}
+                              </td>
+                              <td>{travelAgentMap.get(row?.TRAVEL_AGENT_ID) || "-"}</td>
+                              <td>{nationalityMap.get(row?.NATIONALITY) || "-"}</td>
+                              <td>{quotationTypeMap.get(row?.QUOTATION_TYPE) || "-"}</td>
+                              <td>{formatDateInput(row?.QUOTATION_START_DATE) || "-"}</td>
+                              <td>{formatDateInput(row?.QUOTATION_END_DATE) || "-"}</td>
+                              <td>
+                                {row?.QUOTATION_DURATION_DAYS ??
+                                  row?.DURATION_IN_DAYS ??
+                                  "-"}
+                              </td>
+                              <td>{row?.NUMBER_OF_PAX ?? "-"}</td>
+                              <td>
+                                <div className="d-flex gap-2 flex-wrap">
+                                  <Link
+                                    to={`/quotations/${row?._id}`}
+                                    className="btn btn-sm btn-primary"
+                                  >
+                                    Details
+                                  </Link>
 
-                            return (
-                              <tr key={row?._id || index}>
-                                <td>{index + 1}</td>
-                                <td className="fw-semibold">{row?.REFERANCE_NUMBER || "-"}</td>
-                                <td>{travelAgentMap.get(row?.TRAVEL_AGENT_ID) || "-"}</td>
-                                <td>
-                                  {transportationCompanyMap.get(
-                                    row?.TRANSPORTATION_COMPANY_ID
-                                  ) || "-"}
-                                </td>
-                                <td>{formatDateInput(row?.ARRAIVING_DATE) || "-"}</td>
-                                <td>{formatDateInput(row?.DEPARTURE_DATE) || "-"}</td>
-                                <td>
-                                  <Badge color={getStatusBadgeColor(quotationStatus)} pill>
-                                    {quotationStatus}
-                                  </Badge>
-                                </td>
-                                <td>
-                                  <div className="d-flex gap-2 flex-wrap">
-                                    <Link
-                                      to={`/quotations/${row?._id}`}
-                                      className="btn btn-sm btn-primary"
-                                    >
-                                      Details
-                                    </Link>
+                                  <Link
+                                    to={`/quotations/${row?._id}/plan`}
+                                    className="btn btn-sm btn-info"
+                                  >
+                                    Plan
+                                  </Link>
 
-                                    <Link
-                                      to={`/quotations/${row?._id}/plan`}
-                                      className={`btn btn-sm btn-info ${isCancelled ? "disabled" : ""}`}
-                                      aria-disabled={isCancelled}
-                                      onClick={e => {
-                                        if (isCancelled) {
-                                          e.preventDefault();
-                                          notifyError("Cancelled quotations cannot be planned.");
-                                        }
-                                      }}
-                                    >
-                                      Plan
-                                    </Link>
+                                  <Button
+                                    size="sm"
+                                    color="warning"
+                                    outline
+                                    onClick={() => openEdit(row)}
+                                    disabled={!canMutate}
+                                  >
+                                    Edit
+                                  </Button>
 
-                                    <Button
-                                      size="sm"
-                                      color="warning"
-                                      outline
-                                      onClick={() => openEdit(row)}
-                                      disabled={!canMutate || isCancelled}
-                                    >
-                                      Edit
-                                    </Button>
-
-                                    <Button
-                                      size="sm"
-                                      color="danger"
-                                      outline
-                                      onClick={() => openDelete(row)}
-                                      disabled={!canMutate || isCancelled}
-                                    >
-                                      Delete
-                                    </Button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })
+                                  <Button
+                                    size="sm"
+                                    color="danger"
+                                    outline
+                                    onClick={() => openDelete(row)}
+                                    disabled={!canMutate}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
                         )}
                       </tbody>
                     </Table>
@@ -485,7 +498,9 @@ const QuotationsList = () => {
 
       <Modal isOpen={createOpen} toggle={() => setCreateOpen(false)} centered>
         <Form onSubmit={handleCreate}>
-          <ModalHeader toggle={() => setCreateOpen(false)}>Add Quotation</ModalHeader>
+          <ModalHeader toggle={() => setCreateOpen(false)}>
+            Add Quotation
+          </ModalHeader>
           <ModalBody>
             <div className="mb-3">
               <Label className="form-label">Travel Agent</Label>
@@ -507,65 +522,151 @@ const QuotationsList = () => {
               <FormFeedback>{errors.TRAVEL_AGENT_ID}</FormFeedback>
             </div>
 
+            <Row>
+              <Col md="6">
+                <div className="mb-3">
+                  <Label className="form-label">Nationality</Label>
+                  <Input
+                    type="select"
+                    name="NATIONALITY"
+                    value={form.NATIONALITY}
+                    onChange={handleChange}
+                    invalid={!!(touched.NATIONALITY && errors.NATIONALITY)}
+                  >
+                    <option value="">Select Nationality</option>
+                    {nationalityOptions.map((item, index) => {
+                      const value = getListItemValue(item);
+                      const label = getListItemLabel(item);
+                      return (
+                        <option key={`${value || "country"}-${index}`} value={value}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </Input>
+                  <FormFeedback>{errors.NATIONALITY}</FormFeedback>
+                </div>
+              </Col>
+
+              <Col md="6">
+                <div className="mb-3">
+                  <Label className="form-label">Quotation Type</Label>
+                  <Input
+                    type="select"
+                    name="QUOTATION_TYPE"
+                    value={form.QUOTATION_TYPE}
+                    onChange={handleChange}
+                    invalid={!!(touched.QUOTATION_TYPE && errors.QUOTATION_TYPE)}
+                  >
+                    <option value="">Select Quotation Type</option>
+                    {quotationTypeOptions.map((item, index) => {
+                      const value = getListItemValue(item);
+                      const label = getListItemLabel(item);
+                      return (
+                        <option key={`${value || "quotation-type"}-${index}`} value={value}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </Input>
+                  <FormFeedback>{errors.QUOTATION_TYPE}</FormFeedback>
+                </div>
+              </Col>
+            </Row>
+
             <div className="mb-3">
-              <Label className="form-label">Transportation Company</Label>
-              <Input
-                type="select"
-                name="TRANSPORTATION_COMPANY_ID"
-                value={form.TRANSPORTATION_COMPANY_ID}
-                onChange={handleChange}
-                invalid={
-                  !!(
-                    touched.TRANSPORTATION_COMPANY_ID &&
-                    errors.TRANSPORTATION_COMPANY_ID
-                  )
-                }
-                required
-              >
-                <option value="">Select Transportation Company</option>
-                {(lookups?.transportationCompanies || []).map(item => (
-                  <option key={unwrapId(item?._id)} value={unwrapId(item?._id)}>
-                    {getTransportationCompanyLabel(item)}
-                  </option>
-                ))}
-              </Input>
-              <FormFeedback>{errors.TRANSPORTATION_COMPANY_ID}</FormFeedback>
+              <Label className="form-label d-block">Quotation Range</Label>
+              <Row>
+                <Col md="6">
+                  <div className="mb-3 mb-md-0">
+                    <Label className="form-label">Start Date</Label>
+                    <Input
+                      type="date"
+                      name="QUOTATION_START_DATE"
+                      value={form.QUOTATION_START_DATE}
+                      onChange={handleChange}
+                      invalid={
+                        !!(
+                          touched.QUOTATION_START_DATE &&
+                          errors.QUOTATION_START_DATE
+                        )
+                      }
+                    />
+                    <FormFeedback>{errors.QUOTATION_START_DATE}</FormFeedback>
+                  </div>
+                </Col>
+
+                <Col md="6">
+                  <div>
+                    <Label className="form-label">End Date</Label>
+                    <Input
+                      type="date"
+                      name="QUOTATION_END_DATE"
+                      value={form.QUOTATION_END_DATE}
+                      onChange={handleChange}
+                      invalid={
+                        !!(
+                          touched.QUOTATION_END_DATE &&
+                          errors.QUOTATION_END_DATE
+                        )
+                      }
+                    />
+                    <FormFeedback>{errors.QUOTATION_END_DATE}</FormFeedback>
+                  </div>
+                </Col>
+              </Row>
             </div>
 
             <Row>
               <Col md="6">
                 <div className="mb-3">
-                  <Label className="form-label">Arriving Date</Label>
+                  <Label className="form-label">Quotation Duration on Days</Label>
                   <Input
-                    type="date"
-                    name="ARRAIVING_DATE"
-                    value={form.ARRAIVING_DATE}
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="QUOTATION_DURATION_DAYS"
+                    value={form.QUOTATION_DURATION_DAYS}
                     onChange={handleChange}
-                    invalid={!!(touched.ARRAIVING_DATE && errors.ARRAIVING_DATE)}
-                    required
+                    placeholder="Enter duration in days"
+                    invalid={
+                      !!(
+                        touched.QUOTATION_DURATION_DAYS &&
+                        errors.QUOTATION_DURATION_DAYS
+                      )
+                    }
                   />
-                  <FormFeedback>{errors.ARRAIVING_DATE}</FormFeedback>
+                  <FormFeedback>{errors.QUOTATION_DURATION_DAYS}</FormFeedback>
                 </div>
               </Col>
 
               <Col md="6">
-                <div className="mb-0">
-                  <Label className="form-label">Departure Date</Label>
+                <div className="mb-3">
+                  <Label className="form-label">Number of Pax</Label>
                   <Input
-                    type="date"
-                    name="DEPARTURE_DATE"
-                    value={form.DEPARTURE_DATE}
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="NUMBER_OF_PAX"
+                    value={form.NUMBER_OF_PAX}
                     onChange={handleChange}
-                    invalid={!!(touched.DEPARTURE_DATE && errors.DEPARTURE_DATE)}
-                    required
+                    placeholder="Enter number of pax"
+                    invalid={!!(touched.NUMBER_OF_PAX && errors.NUMBER_OF_PAX)}
                   />
-                  <FormFeedback>{errors.DEPARTURE_DATE}</FormFeedback>
+                  <FormFeedback>{errors.NUMBER_OF_PAX}</FormFeedback>
                 </div>
               </Col>
             </Row>
           </ModalBody>
           <ModalFooter>
-            <Button color="light" type="button" onClick={() => setCreateOpen(false)}>
+            <Button
+              color="light"
+              type="button"
+              onClick={() => {
+                setCreateOpen(false);
+                resetFormState();
+              }}
+            >
               Cancel
             </Button>
             <Button color="primary" type="submit" disabled={loading}>
@@ -577,103 +678,167 @@ const QuotationsList = () => {
 
       <Modal isOpen={editOpen} toggle={() => setEditOpen(false)} centered size="lg">
         <Form onSubmit={handleEdit}>
-          <ModalHeader toggle={() => setEditOpen(false)}>Edit Quotation</ModalHeader>
+          <ModalHeader toggle={() => setEditOpen(false)}>
+            Edit Quotation
+          </ModalHeader>
           <ModalBody>
+            <div className="mb-3">
+              <Label className="form-label">Reference Number</Label>
+              <Input value={editing?.REFERANCE_NUMBER || ""} disabled />
+            </div>
+
+            <div className="mb-3">
+              <Label className="form-label">Travel Agent</Label>
+              <Input
+                type="select"
+                name="TRAVEL_AGENT_ID"
+                value={form.TRAVEL_AGENT_ID}
+                onChange={handleChange}
+                invalid={!!(touched.TRAVEL_AGENT_ID && errors.TRAVEL_AGENT_ID)}
+                required
+              >
+                <option value="">Select Travel Agent</option>
+                {(lookups?.travelAgents || []).map(item => (
+                  <option key={unwrapId(item?._id)} value={unwrapId(item?._id)}>
+                    {getTravelAgentLabel(item)}
+                  </option>
+                ))}
+              </Input>
+              <FormFeedback>{errors.TRAVEL_AGENT_ID}</FormFeedback>
+            </div>
+
             <Row>
               <Col md="6">
                 <div className="mb-3">
-                  <Label className="form-label">Reference Number</Label>
-                  <Input value={editing?.REFERANCE_NUMBER || ""} disabled />
+                  <Label className="form-label">Nationality</Label>
+                  <Input
+                    type="select"
+                    name="NATIONALITY"
+                    value={form.NATIONALITY}
+                    onChange={handleChange}
+                    invalid={!!(touched.NATIONALITY && errors.NATIONALITY)}
+                  >
+                    <option value="">Select Nationality</option>
+                    {nationalityOptions.map((item, index) => {
+                      const value = getListItemValue(item);
+                      const label = getListItemLabel(item);
+                      return (
+                        <option key={`${value || "country"}-${index}`} value={value}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </Input>
+                  <FormFeedback>{errors.NATIONALITY}</FormFeedback>
                 </div>
               </Col>
 
               <Col md="6">
                 <div className="mb-3">
-                  <Label className="form-label">Quotation Status</Label>
-                  <Input value={getQuotationStatus(editing)} disabled />
+                  <Label className="form-label">Quotation Type</Label>
+                  <Input
+                    type="select"
+                    name="QUOTATION_TYPE"
+                    value={form.QUOTATION_TYPE}
+                    onChange={handleChange}
+                    invalid={!!(touched.QUOTATION_TYPE && errors.QUOTATION_TYPE)}
+                  >
+                    <option value="">Select Quotation Type</option>
+                    {quotationTypeOptions.map((item, index) => {
+                      const value = getListItemValue(item);
+                      const label = getListItemLabel(item);
+                      return (
+                        <option key={`${value || "quotation-type"}-${index}`} value={value}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </Input>
+                  <FormFeedback>{errors.QUOTATION_TYPE}</FormFeedback>
                 </div>
               </Col>
             </Row>
 
+            <div className="mb-3">
+              <Label className="form-label d-block">Quotation Range</Label>
+              <Row>
+                <Col md="6">
+                  <div className="mb-3 mb-md-0">
+                    <Label className="form-label">Start Date</Label>
+                    <Input
+                      type="date"
+                      name="QUOTATION_START_DATE"
+                      value={form.QUOTATION_START_DATE}
+                      onChange={handleChange}
+                      invalid={
+                        !!(
+                          touched.QUOTATION_START_DATE &&
+                          errors.QUOTATION_START_DATE
+                        )
+                      }
+                    />
+                    <FormFeedback>{errors.QUOTATION_START_DATE}</FormFeedback>
+                  </div>
+                </Col>
+
+                <Col md="6">
+                  <div>
+                    <Label className="form-label">End Date</Label>
+                    <Input
+                      type="date"
+                      name="QUOTATION_END_DATE"
+                      value={form.QUOTATION_END_DATE}
+                      onChange={handleChange}
+                      invalid={
+                        !!(
+                          touched.QUOTATION_END_DATE &&
+                          errors.QUOTATION_END_DATE
+                        )
+                      }
+                    />
+                    <FormFeedback>{errors.QUOTATION_END_DATE}</FormFeedback>
+                  </div>
+                </Col>
+              </Row>
+            </div>
+
             <Row>
               <Col md="6">
                 <div className="mb-3">
-                  <Label className="form-label">Travel Agent</Label>
+                  <Label className="form-label">Quotation Duration on Days</Label>
                   <Input
-                    type="select"
-                    name="TRAVEL_AGENT_ID"
-                    value={form.TRAVEL_AGENT_ID}
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="QUOTATION_DURATION_DAYS"
+                    value={form.QUOTATION_DURATION_DAYS}
                     onChange={handleChange}
-                    invalid={!!(touched.TRAVEL_AGENT_ID && errors.TRAVEL_AGENT_ID)}
-                    required
-                  >
-                    <option value="">Select Travel Agent</option>
-                    {(lookups?.travelAgents || []).map(item => (
-                      <option key={unwrapId(item?._id)} value={unwrapId(item?._id)}>
-                        {getTravelAgentLabel(item)}
-                      </option>
-                    ))}
-                  </Input>
-                  <FormFeedback>{errors.TRAVEL_AGENT_ID}</FormFeedback>
-                </div>
-              </Col>
-
-              <Col md="6">
-                <div className="mb-3">
-                  <Label className="form-label">Transportation Company</Label>
-                  <Input
-                    type="select"
-                    name="TRANSPORTATION_COMPANY_ID"
-                    value={form.TRANSPORTATION_COMPANY_ID}
-                    onChange={handleChange}
+                    placeholder="Enter duration in days"
                     invalid={
                       !!(
-                        touched.TRANSPORTATION_COMPANY_ID &&
-                        errors.TRANSPORTATION_COMPANY_ID
+                        touched.QUOTATION_DURATION_DAYS &&
+                        errors.QUOTATION_DURATION_DAYS
                       )
                     }
-                    required
-                  >
-                    <option value="">Select Transportation Company</option>
-                    {(lookups?.transportationCompanies || []).map(item => (
-                      <option key={unwrapId(item?._id)} value={unwrapId(item?._id)}>
-                        {getTransportationCompanyLabel(item)}
-                      </option>
-                    ))}
-                  </Input>
-                  <FormFeedback>{errors.TRANSPORTATION_COMPANY_ID}</FormFeedback>
-                </div>
-              </Col>
-            </Row>
-
-            <Row>
-              <Col md="6">
-                <div className="mb-3">
-                  <Label className="form-label">Arriving Date</Label>
-                  <Input
-                    type="date"
-                    name="ARRAIVING_DATE"
-                    value={form.ARRAIVING_DATE}
-                    onChange={handleChange}
-                    invalid={!!(touched.ARRAIVING_DATE && errors.ARRAIVING_DATE)}
-                    required
                   />
-                  <FormFeedback>{errors.ARRAIVING_DATE}</FormFeedback>
+                  <FormFeedback>{errors.QUOTATION_DURATION_DAYS}</FormFeedback>
                 </div>
               </Col>
 
               <Col md="6">
                 <div className="mb-0">
-                  <Label className="form-label">Departure Date</Label>
+                  <Label className="form-label">Number of Pax</Label>
                   <Input
-                    type="date"
-                    name="DEPARTURE_DATE"
-                    value={form.DEPARTURE_DATE}
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="NUMBER_OF_PAX"
+                    value={form.NUMBER_OF_PAX}
                     onChange={handleChange}
-                    invalid={!!(touched.DEPARTURE_DATE && errors.DEPARTURE_DATE)}
-                    required
+                    placeholder="Enter number of pax"
+                    invalid={!!(touched.NUMBER_OF_PAX && errors.NUMBER_OF_PAX)}
                   />
-                  <FormFeedback>{errors.DEPARTURE_DATE}</FormFeedback>
+                  <FormFeedback>{errors.NUMBER_OF_PAX}</FormFeedback>
                 </div>
               </Col>
             </Row>
@@ -698,12 +863,43 @@ const QuotationsList = () => {
       </Modal>
 
       <Modal isOpen={deleteOpen} toggle={() => setDeleteOpen(false)} centered>
-        <ModalHeader toggle={() => setDeleteOpen(false)}>Confirm Delete</ModalHeader>
+        <ModalHeader toggle={() => setDeleteOpen(false)}>
+          Confirm Delete
+        </ModalHeader>
         <ModalBody>
           Are you sure you want to delete quotation{" "}
           <b>{deleting?.REFERANCE_NUMBER || "-"}</b>?
           <div className="text-muted mt-2">
-            This will update quotation status to <b>CANCELLED</b> on the backend.
+            This action will permanently delete the quotation.
+          </div>
+
+          <div className="mt-3 border rounded p-3 bg-light">
+            <div className="mb-2">
+              <span className="fw-semibold">Travel Agent:</span>{" "}
+              {travelAgentMap.get(deleting?.TRAVEL_AGENT_ID) || "-"}
+            </div>
+            <div className="mb-2">
+              <span className="fw-semibold">Nationality:</span>{" "}
+              {nationalityMap.get(deleting?.NATIONALITY) || "-"}
+            </div>
+            <div className="mb-2">
+              <span className="fw-semibold">Quotation Type:</span>{" "}
+              {quotationTypeMap.get(deleting?.QUOTATION_TYPE) || "-"}
+            </div>
+            <div className="mb-2">
+              <span className="fw-semibold">Start Date:</span>{" "}
+              {formatDateInput(deleting?.QUOTATION_START_DATE) || "-"}
+            </div>
+            <div className="mb-2">
+              <span className="fw-semibold">End Date:</span>{" "}
+              {formatDateInput(deleting?.QUOTATION_END_DATE) || "-"}
+            </div>
+            <div className="mb-0">
+              <span className="fw-semibold">Duration:</span>{" "}
+              {deleting?.QUOTATION_DURATION_DAYS ??
+                deleting?.DURATION_IN_DAYS ??
+                "-"}
+            </div>
           </div>
         </ModalBody>
         <ModalFooter>
@@ -717,7 +913,12 @@ const QuotationsList = () => {
           >
             Cancel
           </Button>
-          <Button color="danger" type="button" onClick={handleDelete} disabled={loading}>
+          <Button
+            color="danger"
+            type="button"
+            onClick={handleDelete}
+            disabled={loading}
+          >
             Delete
           </Button>
         </ModalFooter>
