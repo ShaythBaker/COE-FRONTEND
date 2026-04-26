@@ -41,6 +41,7 @@ import TransportationTypes from "../pages/Settings/TransportationTypes";
 // Transportation Companies
 import TransportationCompaniesList from "../pages/TransportationCompanies/List";
 import TransportationCompanyDetails from "../pages/TransportationCompanies/Details";
+import Pricing from "../pages/Quotations/Pricing";
 
 // Quotations
 import QuotationsList from "../pages/Quotations/List";
@@ -65,6 +66,14 @@ const authProtectedRoutes = [
       </RoleProtected>
     ),
   },
+  {
+  path: "/quotations-pricing",
+  component: (
+    <RoleProtected allowedRoles={["COMPANY_ADMIN", "ACCOUNTING"]}>
+      <Pricing />
+    </RoleProtected>
+  ),
+},
 
   // Settings
   {
