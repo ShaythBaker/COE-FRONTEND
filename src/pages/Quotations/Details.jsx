@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useParams } from "react-router-dom";
 import {
+  Alert,
   Badge,
   Card,
   CardBody,
@@ -19,6 +20,12 @@ import {
 } from "../../store/Quotations/actions";
 import { get } from "../../helpers/api_helper";
 import { notifyError } from "../../helpers/notify";
+import {
+  getQuotationReadOnlyMessage,
+  getQuotationStatus,
+  getQuotationStatusBadgeColor,
+  isQuotationReadOnly,
+} from "../../helpers/quotation_pricing_helper";
 
 const unwrapId = (value) => {
   if (!value) return "";
@@ -152,17 +159,15 @@ const QuotationsDetails = () => {
         const [daysRes, accommodationRes, extrasRes] = await Promise.all([
           get(`/quotation-days/quotation/${id}`),
           get(`/quotation-accumidation?QUOTATION_ID=${encodeURIComponent(id)}`),
-          get(
-            `/quotation_extra_services?QUOTATION_ID=${encodeURIComponent(id)}`,
-          ),
+          get(`/quotation_extra_services?QUOTATION_ID=${encodeURIComponent(id)}`),
         ]);
 
         if (ignore) return;
 
         setDaysRoutes(
           asArray(daysRes).sort(
-            (a, b) => (a?.DAY_ORDER || 0) - (b?.DAY_ORDER || 0),
-          ),
+            (a, b) => (a?.DAY_ORDER || 0) - (b?.DAY_ORDER || 0)
+          )
         );
 
         const allAccommodation = asArray(accommodationRes);
@@ -173,12 +178,12 @@ const QuotationsDetails = () => {
             totals: option?.TOTALS || {},
             hotels: asArray(option?.HOTELS),
             stays: asArray(option?.STAYS).sort(
-              (a, b) => (a?.ORDER || 0) - (b?.ORDER || 0),
+              (a, b) => (a?.ORDER || 0) - (b?.ORDER || 0)
             ),
             arrivingDate: entry?.ARRAIVING_DATE,
             departureDate: entry?.DEPARTURE_DATE,
             totalOptions: entry?.TOTAL_OPTIONS || 0,
-          })),
+          }))
         );
 
         setAccommodationOptions(normalizedOptions);
@@ -186,7 +191,7 @@ const QuotationsDetails = () => {
       } catch (error) {
         if (!ignore) {
           notifyError(
-            getErrorMessage(error, "Failed to load quotation summary."),
+            getErrorMessage(error, "Failed to load quotation summary.")
           );
         }
       } finally {
@@ -227,6 +232,10 @@ const QuotationsDetails = () => {
     return map;
   }, [lookups]);
 
+  const quotationStatus = getQuotationStatus(selected);
+  const readOnly = isQuotationReadOnly(selected);
+  const readOnlyMessage = getQuotationReadOnlyMessage(selected);
+
   document.title = "Quotation Details | Skote";
 
   return (
@@ -235,10 +244,18 @@ const QuotationsDetails = () => {
         <Container fluid>
           <Breadcrumbs title="Quotations" breadcrumbItem="Quotation Details" />
 
+          {readOnly ? (
+            <Alert color="warning" className="mb-4">
+              {readOnlyMessage}
+            </Alert>
+          ) : null}
+
           <Row>
             <Col xl="8">
               <Card>
-                <CardBody></CardBody>
+                <CardBody>
+                  {loading ? <LoadingState text="Loading quotation details..." /> : null}
+                </CardBody>
               </Card>
             </Col>
 
@@ -253,6 +270,19 @@ const QuotationsDetails = () => {
                     </Label>
                     <div className="fw-semibold">
                       {selected?.REFERANCE_NUMBER || "-"}
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <Label className="form-label text-muted mb-1">Status</Label>
+                    <div>
+                      {quotationStatus ? (
+                        <Badge color={getQuotationStatusBadgeColor(quotationStatus)} pill>
+                          {quotationStatus}
+                        </Badge>
+                      ) : (
+                        "-"
+                      )}
                     </div>
                   </div>
 
@@ -405,9 +435,7 @@ const QuotationsDetails = () => {
                                     <i className="bx bx-car me-1" />
                                     Transportation Type
                                   </div>
-                                  <div className="fw-medium">
-                                    {transportLabel}
-                                  </div>
+                                  <div className="fw-medium">{transportLabel}</div>
                                 </div>
 
                                 <div className="mb-3">
@@ -428,9 +456,7 @@ const QuotationsDetails = () => {
                                       ))}
                                     </div>
                                   ) : (
-                                    <div className="fw-medium">
-                                      No places added
-                                    </div>
+                                    <div className="fw-medium">No places added</div>
                                   )}
                                 </div>
 
@@ -440,8 +466,7 @@ const QuotationsDetails = () => {
                                     Guide
                                   </div>
                                   <div className="fw-medium">
-                                    {day?.GUIDE_TYPE_NAME ||
-                                      "No guide selected"}
+                                    {day?.GUIDE_TYPE_NAME || "No guide selected"}
                                   </div>
                                 </div>
 
@@ -463,9 +488,7 @@ const QuotationsDetails = () => {
                                       ))}
                                     </div>
                                   ) : (
-                                    <div className="fw-medium">
-                                      No meals added
-                                    </div>
+                                    <div className="fw-medium">No meals added</div>
                                   )}
                                 </div>
                               </CardBody>
@@ -507,8 +530,7 @@ const QuotationsDetails = () => {
                                 <div>
                                   <h5 className="mb-1">
                                     <i className="bx bx-door-open me-1 text-primary" />
-                                    {option?.optionName ||
-                                      `Option ${index + 1}`}
+                                    {option?.optionName || `Option ${index + 1}`}
                                   </h5>
                                   <p className="text-muted mb-0">
                                     {formatDateLabel(option?.arrivingDate)} to{" "}
@@ -542,16 +564,13 @@ const QuotationsDetails = () => {
                                     </h6>
 
                                     {option.hotels.length === 0 ? (
-                                      <div className="text-muted">
-                                        No hotels added
-                                      </div>
+                                      <div className="text-muted">No hotels added</div>
                                     ) : (
                                       option.hotels.map((hotel, hotelIndex) => (
                                         <div
                                           key={`${hotel?.HOTEL_NAME || "hotel"}-${hotelIndex}`}
                                           className={
-                                            hotelIndex ===
-                                            option.hotels.length - 1
+                                            hotelIndex === option.hotels.length - 1
                                               ? ""
                                               : "border-bottom pb-3 mb-3"
                                           }
@@ -573,41 +592,17 @@ const QuotationsDetails = () => {
                                           </div>
 
                                           <div className="d-flex flex-wrap gap-2">
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              BB:{" "}
-                                              {formatCurrency(
-                                                hotel?.TOTALS?.BB,
-                                              )}
+                                            <Badge color="light" className="p-2">
+                                              BB: {formatCurrency(hotel?.TOTALS?.BB)}
                                             </Badge>
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              HB:{" "}
-                                              {formatCurrency(
-                                                hotel?.TOTALS?.HB,
-                                              )}
+                                            <Badge color="light" className="p-2">
+                                              HB: {formatCurrency(hotel?.TOTALS?.HB)}
                                             </Badge>
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              FB:{" "}
-                                              {formatCurrency(
-                                                hotel?.TOTALS?.FB,
-                                              )}
+                                            <Badge color="light" className="p-2">
+                                              FB: {formatCurrency(hotel?.TOTALS?.FB)}
                                             </Badge>
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              SS:{" "}
-                                              {formatCurrency(
-                                                hotel?.TOTALS?.SS,
-                                              )}
+                                            <Badge color="light" className="p-2">
+                                              SS: {formatCurrency(hotel?.TOTALS?.SS)}
                                             </Badge>
                                           </div>
                                         </div>
@@ -632,8 +627,7 @@ const QuotationsDetails = () => {
                                         <div
                                           key={`${stay?.HOTEL_NAME || "stay"}-${stayIndex}`}
                                           className={
-                                            stayIndex ===
-                                            option.stays.length - 1
+                                            stayIndex === option.stays.length - 1
                                               ? ""
                                               : "border-bottom pb-3 mb-3"
                                           }
@@ -649,9 +643,9 @@ const QuotationsDetails = () => {
                                           <div className="text-muted mb-1">
                                             <i className="bx bx-calendar me-1" />
                                             {stay?.SEASON_LABEL ||
-                                              `${formatDateLabel(stay?.START_DATE)} to ${formatDateLabel(
-                                                stay?.END_DATE,
-                                              )}`}
+                                              `${formatDateLabel(
+                                                stay?.START_DATE
+                                              )} to ${formatDateLabel(stay?.END_DATE)}`}
                                           </div>
                                           <div className="text-muted mb-2">
                                             <i className="bx bx-moon me-1" />
@@ -659,33 +653,17 @@ const QuotationsDetails = () => {
                                           </div>
 
                                           <div className="d-flex flex-wrap gap-2">
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              BB:{" "}
-                                              {formatCurrency(stay?.TOTALS?.BB)}
+                                            <Badge color="light" className="p-2">
+                                              BB: {formatCurrency(stay?.TOTALS?.BB)}
                                             </Badge>
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              HB:{" "}
-                                              {formatCurrency(stay?.TOTALS?.HB)}
+                                            <Badge color="light" className="p-2">
+                                              HB: {formatCurrency(stay?.TOTALS?.HB)}
                                             </Badge>
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              FB:{" "}
-                                              {formatCurrency(stay?.TOTALS?.FB)}
+                                            <Badge color="light" className="p-2">
+                                              FB: {formatCurrency(stay?.TOTALS?.FB)}
                                             </Badge>
-                                            <Badge
-                                              color="light"
-                                              className="p-2"
-                                            >
-                                              SS:{" "}
-                                              {formatCurrency(stay?.TOTALS?.SS)}
+                                            <Badge color="light" className="p-2">
+                                              SS: {formatCurrency(stay?.TOTALS?.SS)}
                                             </Badge>
                                           </div>
                                         </div>
@@ -739,8 +717,7 @@ const QuotationsDetails = () => {
                                     color="soft-success"
                                     className="font-size-12"
                                   >
-                                    {formatCurrency(service?.SERVICE_COST_PP)}{" "}
-                                    pp
+                                    {formatCurrency(service?.SERVICE_COST_PP)} pp
                                   </Badge>
                                 ) : null}
                               </div>

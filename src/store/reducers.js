@@ -1,3 +1,4 @@
+// path: src/store/reducers.js
 import { combineReducers } from "redux";
 
 // Front
@@ -27,9 +28,9 @@ import QuotationDays from "./QuotationDays/reducer";
 import QuotationAccumidation from "./QuotationAccumidation/reducer";
 import ExtraServices from "./ExtraServices/reducer";
 import QuotationExtraServices from "./QuotationExtraServices/reducer";
+import QuotationPricing from "./QuotationPricing/reducer";
 
 const rootReducer = combineReducers({
-  // public
   Layout,
   Login,
   Account,
@@ -49,6 +50,7 @@ const rootReducer = combineReducers({
   QuotationAccumidation,
   ExtraServices,
   QuotationExtraServices,
+  QuotationPricing,
 });
 
 export default rootReducer;
