@@ -33,6 +33,7 @@ import {
 import {
   sendQuotationForPricing,
   cancelQuotationPricing,
+  fetchQuotationPricingQueue,
 } from "../../store/QuotationPricing/actions";
 import {
   canSendQuotationForPricing,
@@ -115,6 +116,9 @@ const QuotationsList = () => {
   const pricingSaving = useSelector(
     s => s.QuotationPricing?.saving || false
   );
+  const rejectedPricingItems = useSelector(
+    s => s.QuotationPricing?.items || []
+  );
   const roles = useSelector(s => s.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
 
@@ -133,6 +137,7 @@ const QuotationsList = () => {
   useEffect(() => {
     dispatch(fetchQuotationsLookups());
     dispatch(fetchQuotations());
+    dispatch(fetchQuotationPricingQueue("REJECTED"));
   }, [dispatch]);
 
   useEffect(() => {
@@ -173,6 +178,20 @@ const QuotationsList = () => {
     });
     return map;
   }, [lookups]);
+
+  const rejectReasonMap = useMemo(() => {
+    const map = new Map();
+
+    (rejectedPricingItems || []).forEach(item => {
+      const quotationId = unwrapId(item?.QUOTATION_ID);
+      const reason = String(item?.REJECT_REASON || "").trim();
+      if (quotationId && reason) {
+        map.set(quotationId, reason);
+      }
+    });
+
+    return map;
+  }, [rejectedPricingItems]);
 
   const nationalityOptions = useMemo(() => {
     const rows = Array.isArray(lookups?.COUNTRIES) ? [...lookups.COUNTRIES] : [];
@@ -233,6 +252,8 @@ const QuotationsList = () => {
     return (items || [])
       .filter(item => !shouldHideQuotationRow(item))
       .filter(item => {
+        const rejectReason = String(rejectReasonMap.get(item?._id) || "").toLowerCase();
+
         if (!q) return true;
 
         const ref = String(item?.REFERANCE_NUMBER || "").toLowerCase();
@@ -248,7 +269,8 @@ const QuotationsList = () => {
           agent.includes(q) ||
           nationality.includes(q) ||
           quotationType.includes(q) ||
-          status.includes(q)
+          status.includes(q) ||
+          rejectReason.includes(q)
         );
       });
   }, [
@@ -259,6 +281,7 @@ const QuotationsList = () => {
     quotationTypeMap,
     statusOverrides,
     hiddenQuotationIds,
+    rejectReasonMap,
   ]);
 
   const errors = useMemo(() => {
@@ -590,7 +613,7 @@ const QuotationsList = () => {
                           <th>End Date</th>
                           <th>Duration</th>
                           <th>Number of Pax</th>
-                          <th>Status</th>
+                          <th>Status / Reject Reason</th>
                           <th style={{ width: 420 }}>Action</th>
                         </tr>
                       </thead>
@@ -615,6 +638,10 @@ const QuotationsList = () => {
                             const readOnly = isQuotationReadOnly(rowWithEffectiveStatus);
                             const showSendForPricing = canShowSendForPricingButton(row);
                             const showCancel = canShowCancelButton(row);
+                            const rejectReason =
+                              normalizeStatus(effectiveStatus) === "REJECTED"
+                                ? rejectReasonMap.get(row?._id) || ""
+                                : "";
 
                             return (
                               <tr key={row?._id || index}>
@@ -637,12 +664,22 @@ const QuotationsList = () => {
                                 <td>{row?.NUMBER_OF_PAX ?? "-"}</td>
                                 <td>
                                   {effectiveStatus ? (
-                                    <Badge
-                                      color={getQuotationStatusBadgeColor(effectiveStatus)}
-                                      pill
-                                    >
-                                      {effectiveStatus}
-                                    </Badge>
+                                    <>
+                                      <Badge
+                                        color={getQuotationStatusBadgeColor(effectiveStatus)}
+                                        pill
+                                      >
+                                        {effectiveStatus}
+                                      </Badge>
+                                      {rejectReason ? (
+                                        <div
+                                          className="text-danger mt-2"
+                                          style={{ whiteSpace: "normal", maxWidth: 240 }}
+                                        >
+                                          <strong>Reason:</strong> {rejectReason}
+                                        </div>
+                                      ) : null}
+                                    </>
                                   ) : (
                                     "-"
                                   )}

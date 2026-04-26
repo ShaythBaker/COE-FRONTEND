@@ -32,7 +32,11 @@ export const isQuotationReadOnly = quotation => {
 
 export const canSendQuotationForPricing = quotation => {
   const status = getQuotationStatus(quotation);
-  return status === QUOTATION_PRICING_STATUS.DRAFT || !status;
+  return (
+    status === QUOTATION_PRICING_STATUS.DRAFT ||
+    status === QUOTATION_PRICING_STATUS.REJECTED ||
+    !status
+  );
 };
 
 export const getQuotationStatusBadgeColor = status => {

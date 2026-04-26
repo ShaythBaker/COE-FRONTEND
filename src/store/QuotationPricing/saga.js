@@ -1,5 +1,5 @@
 // path: src/store/QuotationPricing/saga.js
-import { all, call, put, takeLatest } from "redux-saga/effects";
+import { all, call, put, select, takeLatest } from "redux-saga/effects";
 import { get, post } from "../../helpers/api_helper";
 import {
   QUOTATION_PRICING,
@@ -56,6 +56,8 @@ function normalizePricing(item) {
       0,
   };
 }
+
+const selectPricingSelected = state => state?.QuotationPricing?.selected || null;
 
 function* onFetchQueue({ payload }) {
   try {
@@ -140,10 +142,7 @@ function* onCancelPricing({ payload }) {
       payload.onDone(normalized);
     }
   } catch (error) {
-    const msg = extractErrorMessage(
-      error,
-      "Failed to cancel quotation."
-    );
+    const msg = extractErrorMessage(error, "Failed to cancel quotation.");
     yield put(cancelQuotationPricingFail(msg));
     notifyError(msg);
   }
@@ -177,6 +176,18 @@ function* onUpdateProfit({ payload }) {
 function* onApprove({ payload }) {
   try {
     const quotationId = payload?.quotationId;
+    const current = yield select(selectPricingSelected);
+
+    const profitType = String(current?.PROFIT_TYPE || "").toUpperCase().trim();
+    const profitValue = Number(current?.PROFIT_VALUE ?? 0);
+
+    if (!["PERCENT", "FIXED"].includes(profitType) || profitValue <= 0) {
+      const msg = "Set a valid profit before approving this quotation.";
+      yield put(approveQuotationPricingFail(msg));
+      notifyError(msg);
+      return;
+    }
+
     const item = yield call(post, QUOTATION_PRICING_DECISION(quotationId), {
       DECISION: "APPROVE",
     });

@@ -106,10 +106,31 @@ const SectionHeader = ({ icon, title, subtitle }) => (
   </div>
 );
 
-const InfoPill = ({ label, value }) => (
-  <div className="border rounded px-3 py-2 bg-light">
-    <div className="text-muted small">{label}</div>
-    <div className="fw-semibold">{value}</div>
+const SummaryInfoCard = ({ label, value, accent = false }) => (
+  <div
+    className={`h-100 rounded-3 border px-3 py-3 ${
+      accent ? "bg-primary border-primary text-white" : "bg-light border-light"
+    }`}
+  >
+    <div className={`small mb-1 ${accent ? "text-white text-opacity-75" : "text-muted"}`}>
+      {label}
+    </div>
+    <div className={`fw-semibold ${accent ? "text-white" : ""}`}>{value}</div>
+  </div>
+);
+
+const SidePanelSectionTitle = ({ icon, title, subtitle }) => (
+  <div className="mb-3">
+    <div className="d-flex align-items-center gap-2 mb-1">
+      <div
+        className="rounded-circle d-flex align-items-center justify-content-center bg-light"
+        style={{ width: 34, height: 34 }}
+      >
+        <i className={`${icon} text-primary`} />
+      </div>
+      <h5 className="mb-0">{title}</h5>
+    </div>
+    {subtitle ? <div className="text-muted small">{subtitle}</div> : null}
   </div>
 );
 
@@ -137,6 +158,13 @@ const QuotationPricingDetails = () => {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectTouched, setRejectTouched] = useState(false);
+
+  useEffect(() => {
+    if (!canAccess) {
+      notifyError("Permission/role mismatch");
+      navigate("/dashboard");
+    }
+  }, [canAccess, navigate]);
 
   useEffect(() => {
     if (!canAccess || !quotationId) return;
@@ -519,7 +547,6 @@ const QuotationPricingDetails = () => {
   };
 
   if (!canAccess) {
-    notifyError("Permission/role mismatch");
     return null;
   }
 
@@ -531,10 +558,10 @@ const QuotationPricingDetails = () => {
         <Container fluid>
           <Breadcrumbs title="Quotation Pricing" breadcrumbItem="Details" />
 
-          <Row className="mb-3">
+          <Row className="g-3 mb-4">
             <Col xl="8">
-              <Card className="border-0 shadow-sm">
-                <CardBody>
+              <Card className="border-0 shadow-sm h-100">
+                <CardBody className="p-4">
                   {loading && !selected ? (
                     <div className="text-center py-4">
                       <Spinner size="sm" className="me-2" />
@@ -549,43 +576,86 @@ const QuotationPricingDetails = () => {
                     </Alert>
                   ) : (
                     <>
-                      <SectionHeader
-                        icon="bx bx-dollar-circle"
-                        title="Quotation Prices"
-                        subtitle="Simple per-person pricing view for accommodation, routes and days, and extra services."
-                      />
+                      <div className="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+                        <div className="d-flex align-items-start gap-3">
+                          <div
+                            className="rounded-circle d-flex align-items-center justify-content-center bg-light"
+                            style={{ width: 58, height: 58, minWidth: 58 }}
+                          >
+                            <i className="bx bx-dollar-circle font-size-24 text-primary" />
+                          </div>
 
-                      <div className="d-flex flex-wrap gap-2 mb-4">
-                        <Badge color={getStatusColor(selected?.STATUS)} pill>
-                          {selected?.STATUS || "-"}
-                        </Badge>
-                        <Badge color="light" className="text-dark" pill>
-                          {financeData?.ACCOMMODATION?.REFERANCE_NUMBER ||
-                            selected?.SNAPSHOT?.QUOTATION?.REFERANCE_NUMBER ||
-                            "-"}
-                        </Badge>
-                        <Badge color="light" className="text-dark" pill>
-                          {selected?.BOARD_BASIS || "-"}
-                        </Badge>
+                          <div>
+                            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                              <h3 className="mb-0">Quotation Prices</h3>
+                              <Badge color={getStatusColor(selected?.STATUS)} pill>
+                                {selected?.STATUS || "-"}
+                              </Badge>
+                              <Badge color="light" className="text-dark border" pill>
+                                {financeData?.ACCOMMODATION?.REFERANCE_NUMBER ||
+                                  selected?.SNAPSHOT?.QUOTATION?.REFERANCE_NUMBER ||
+                                  "-"}
+                              </Badge>
+                              <Badge color="light" className="text-dark border" pill>
+                                {selected?.BOARD_BASIS || "-"}
+                              </Badge>
+                            </div>
+
+                            <p className="text-muted mb-0">
+                              Simple per-person pricing view for accommodation, routes and
+                              days, and extra services.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-xl-end">
+                          <div className="text-muted small mb-1">Final Total</div>
+                          <div className="fw-bold font-size-24 text-primary">
+                            {formatCurrency(
+                              selected?.FINAL_TOTAL || pricingView?.baseTotal || 0
+                            )}
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="d-flex flex-wrap gap-3">
-                        <InfoPill
-                          label="Reference Number"
-                          value={
-                            financeData?.ACCOMMODATION?.REFERANCE_NUMBER ||
-                            selected?.SNAPSHOT?.QUOTATION?.REFERANCE_NUMBER ||
-                            "-"
-                          }
-                        />
-                        <InfoPill label="Pax" value={pax || "-"} />
-                        <InfoPill label="Board Basis" value={selected?.BOARD_BASIS || "-"} />
-                        <InfoPill label="Sent On" value={formatDateTime(selected?.SENT_ON)} />
-                        <InfoPill
-                          label="Quotation Status"
-                          value={quotation?.STATUS || selected?.STATUS || "-"}
-                        />
-                      </div>
+                      <Row className="g-3">
+                        <Col md="6" xl="3">
+                          <SummaryInfoCard
+                            label="Reference Number"
+                            value={
+                              financeData?.ACCOMMODATION?.REFERANCE_NUMBER ||
+                              selected?.SNAPSHOT?.QUOTATION?.REFERANCE_NUMBER ||
+                              "-"
+                            }
+                            accent
+                          />
+                        </Col>
+
+                        <Col md="6" xl="2">
+                          <SummaryInfoCard label="Pax" value={pax || "-"} />
+                        </Col>
+
+                        <Col md="6" xl="2">
+                          <SummaryInfoCard
+                            label="Board Basis"
+                            value={selected?.BOARD_BASIS || "-"}
+                          />
+                        </Col>
+
+                        <Col md="6" xl="3">
+                          <SummaryInfoCard
+                            label="Sent On"
+                            value={formatDateTime(selected?.SENT_ON)}
+                          />
+                        </Col>
+
+                        <Col md="6" xl="2">
+                          <SummaryInfoCard
+                            label="Quotation Status"
+                            value={quotation?.STATUS || selected?.STATUS || "-"}
+                          />
+                        </Col>
+                      </Row>
 
                       {selected?.REJECT_REASON ? (
                         <Alert color="danger" className="mt-4 mb-0">
@@ -607,58 +677,96 @@ const QuotationPricingDetails = () => {
             </Col>
 
             <Col xl="4">
-              <Card className="border-0 shadow-sm">
-                <CardBody>
-                  <h4 className="card-title mb-3">Quick Access</h4>
-                  <div className="d-grid gap-2">
+              <Card
+                className="border-0 shadow-sm"
+                style={{ position: "sticky", top: "90px" }}
+              >
+                <CardBody className="p-4">
+                  <div className="d-flex align-items-center justify-content-between mb-4">
+                    <div>
+                      <h4 className="mb-1">Workflow Panel</h4>
+                      <p className="text-muted mb-0 small">
+                        Fast navigation and approval actions.
+                      </p>
+                    </div>
+                    <div
+                      className="rounded-circle d-flex align-items-center justify-content-center bg-light"
+                      style={{ width: 42, height: 42 }}
+                    >
+                      <i className="bx bx-grid-alt text-primary font-size-18" />
+                    </div>
+                  </div>
+
+                  <SidePanelSectionTitle
+                    icon="bx bx-link-alt"
+                    title="Quick Access"
+                    subtitle="Move quickly between related pages."
+                  />
+
+                  <div className="d-grid gap-2 mb-4">
                     <Button
                       color="light"
+                      className="fw-semibold"
                       type="button"
                       onClick={() => navigate("/quotation-pricing")}
                     >
+                      <i className="bx bx-arrow-back me-1" />
                       Back to Queue
                     </Button>
 
                     <Button
                       color="primary"
+                      className="fw-semibold"
                       type="button"
                       onClick={() => navigate(`/quotations/${quotationId}`)}
                     >
+                      <i className="bx bx-file me-1" />
                       Quotation Details
                     </Button>
                   </div>
-                </CardBody>
-              </Card>
 
-              <Card className="border-0 shadow-sm">
-                <CardBody>
-                  <h4 className="card-title mb-3">Actions</h4>
+                  <div className="border-top pt-4">
+                    <SidePanelSectionTitle
+                      icon="bx bx-check-shield"
+                      title="Actions"
+                      subtitle={
+                        isTerminalStatus
+                          ? "This record is finalized."
+                          : "Approve or reject this quotation pricing."
+                      }
+                    />
 
-                  {isTerminalStatus ? (
-                    <Alert color="info" className="mb-0">
-                      This quotation pricing record is already finalized and cannot be changed.
-                    </Alert>
-                  ) : (
-                    <div className="d-grid gap-2">
-                      <Button
-                        color="success"
-                        onClick={handleApprove}
-                        disabled={saving || loading}
-                      >
-                        {saving ? <Spinner size="sm" className="me-2" /> : null}
-                        Approve
-                      </Button>
+                    {isTerminalStatus ? (
+                      <Alert color="info" className="mb-0">
+                        This quotation pricing record is already finalized and cannot be
+                        changed.
+                      </Alert>
+                    ) : (
+                      <div className="d-grid gap-2">
+                        <Button
+                          color="success"
+                          className="fw-semibold"
+                          onClick={handleApprove}
+                          disabled={saving || loading}
+                        >
+                          {saving ? <Spinner size="sm" className="me-2" /> : null}
+                          <i className="bx bx-check-circle me-1" />
+                          Approve
+                        </Button>
 
-                      <Button
-                        color="danger"
-                        outline
-                        onClick={() => setRejectOpen(true)}
-                        disabled={saving || loading}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  )}
+                        <Button
+                          color="danger"
+                          outline
+                          className="fw-semibold"
+                          onClick={() => setRejectOpen(true)}
+                          disabled={saving || loading}
+                        >
+                          <i className="bx bx-x-circle me-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </CardBody>
               </Card>
             </Col>

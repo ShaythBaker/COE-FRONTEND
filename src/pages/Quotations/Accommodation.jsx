@@ -1341,36 +1341,19 @@ const Accommodation = () => {
                         </div>
                       ) : (
                         <Row className="g-3">
-                          <Col md="3" sm="6">
+                          <Col md="4" sm="6">
                             <Label className="form-label text-muted mb-1">Reference Number</Label>
                             <div className="fw-semibold">{quotation?.REFERANCE_NUMBER || "-"}</div>
                           </Col>
 
-                          <Col md="3" sm="6">
-                            <Label className="form-label text-muted mb-1">Arriving Date</Label>
-                            <div>{arrivingDate || "-"}</div>
-                          </Col>
-
-                          <Col md="3" sm="6">
-                            <Label className="form-label text-muted mb-1">Departure Date</Label>
-                            <div>{departureDate || "-"}</div>
-                          </Col>
-
-                          <Col md="3" sm="6">
-                            <Label className="form-label text-muted mb-1">
-                              Quotation Total Nights
-                            </Label>
-                            <div className="fw-semibold">{totalNights}</div>
-                          </Col>
-
-                          <Col md="3" sm="6">
+                          <Col md="4" sm="6">
                             <Label className="form-label text-muted mb-1">
                               Overnight Total Nights
                             </Label>
                             <div className="fw-semibold">{overnightTotalNights}</div>
                           </Col>
 
-                          <Col md="3" sm="6">
+                          <Col md="4" sm="6">
                             <Label className="form-label text-muted mb-1">Saved Record</Label>
                             <div className="fw-semibold">
                               {!savedAccumidationLoaded || savedAccumidationLoading
@@ -1380,9 +1363,6 @@ const Accommodation = () => {
                                 : "No"}
                             </div>
                           </Col>
-
-                          <Col md="3" sm="6" />
-                          <Col md="3" sm="6" />
 
                           <Col md="12">
                             <Label className="form-label text-muted mb-1">Overnight Cities</Label>
@@ -1404,7 +1384,6 @@ const Accommodation = () => {
                                   >
                                     {city?.OVERNIGHT_CITY_NAME || city?.CITY_NAME || "-"}:{" "}
                                     {toNumber(city?.TOTAL_NIGHTS)} night(s)
-                                    {city?.OVERNIGHT_DATE ? ` - ${city?.OVERNIGHT_DATE}` : ""}
                                   </Badge>
                                 ))}
                               </div>
