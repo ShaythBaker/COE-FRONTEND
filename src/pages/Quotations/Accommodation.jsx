@@ -13,13 +13,12 @@ import {
   FormFeedback,
   Input,
   Label,
-  Row,
-  Spinner,
-  Table,
   Modal,
-  ModalHeader,
   ModalBody,
   ModalFooter,
+  ModalHeader,
+  Row,
+  Spinner,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { hasAnyRole } from "../../helpers/coe_roles";
@@ -123,17 +122,6 @@ const extractErrorMessage = (error, fallback = "Something went wrong.") =>
   error?.message ||
   fallback;
 
-const getListItemValue = item =>
-  String(item?.ITEM_VALUE ?? item?.value ?? item?.VALUE ?? getId(item?._id) ?? "");
-
-const getListItemLabel = item =>
-  item?.ITEM_VALUE ||
-  item?.ITEM_LABEL ||
-  item?.label ||
-  item?.NAME ||
-  item?.TITLE ||
-  "-";
-
 const getStarLabel = value => {
   const v = String(value || "").trim();
   if (!v) return "-";
@@ -163,20 +151,6 @@ const getSeasonLabel = season => {
   if (from && to) return `${from} → ${to}`;
   return "-";
 };
-
-const createStay = () => ({
-  HOTEL_ID: "",
-  HOTEL_NAME: "",
-  HOTEL_STARS: "",
-  HOTEL_CHAIN: "",
-  HOTEL_CHAIN_VALUE: "",
-  HOTEL_CITY: "",
-  HOTEL_CITY_VALUE: "",
-  SEASON_ID: "",
-  SEASON_NAME: "",
-  NIGHTS: "",
-  OVERNIGHT_DATE: "",
-});
 
 const normalizeOvernightCities = (response, fallbackStartDate = "") => {
   const rows = asArray(response?.OVERNIGHTS || response?.overnights || response?.data || [])
@@ -220,33 +194,8 @@ const normalizeOvernightCities = (response, fallbackStartDate = "") => {
   });
 };
 
-const normalizeHotelSeasons = hotel => {
-  const raw =
-    hotel?.seasons ||
-    hotel?.SEASONS ||
-    hotel?.HOTEL_SEASONS ||
-    hotel?.seasonRates ||
-    hotel?.SEASON_RATES ||
-    [];
-
-  return asArray(raw).map(item => ({
-    ...item,
-    _id: item?._id || item?.SEASON_ID || item?.id || "",
-    SEASON_NAME:
-      item?.SEASON_NAME ||
-      item?.HOTEL_SEASON_VALUE ||
-      item?.HOTELSEASON_VALUE ||
-      item?.ITEM_VALUE ||
-      "",
-    FROM_DATE: toDateOnly(item?.FROM_DATE || item?.START_DATE || item?.DATE_FROM || ""),
-    TO_DATE: toDateOnly(item?.TO_DATE || item?.END_DATE || item?.DATE_TO || ""),
-  }));
-};
-
 const normalizeSearchResultsFromOvernights = (response, chainNameById = {}) => {
-  const overnights = Array.isArray(response?.OVERNIGHTS)
-    ? response.OVERNIGHTS
-    : [];
+  const overnights = Array.isArray(response?.OVERNIGHTS) ? response.OVERNIGHTS : [];
 
   const directCandidates = [
     ...asArray(response?.HOTELS),
@@ -279,9 +228,7 @@ const normalizeSearchResultsFromOvernights = (response, chainNameById = {}) => {
       overnight?.CITY_NAME ||
       "-";
 
-    const chainId = asId(
-      hotel?.HOTEL_CHAIN || hotel?.HOTEL_CHAIN_ID || hotel?.CHAIN_ID
-    );
+    const chainId = asId(hotel?.HOTEL_CHAIN || hotel?.HOTEL_CHAIN_ID || hotel?.CHAIN_ID);
 
     const seasonsRaw =
       hotel?.seasons ||
@@ -301,18 +248,10 @@ const normalizeSearchResultsFromOvernights = (response, chainNameById = {}) => {
         item?.HOTELSEASON_VALUE ||
         item?.ITEM_VALUE ||
         "",
-      FROM_DATE: toDateOnly(
-        item?.FROM_DATE || item?.START_DATE || item?.DATE_FROM || ""
-      ),
-      TO_DATE: toDateOnly(
-        item?.TO_DATE || item?.END_DATE || item?.DATE_TO || ""
-      ),
-      START_DATE: toDateOnly(
-        item?.START_DATE || item?.FROM_DATE || item?.DATE_FROM || ""
-      ),
-      END_DATE: toDateOnly(
-        item?.END_DATE || item?.TO_DATE || item?.DATE_TO || ""
-      ),
+      FROM_DATE: toDateOnly(item?.FROM_DATE || item?.START_DATE || item?.DATE_FROM || ""),
+      TO_DATE: toDateOnly(item?.TO_DATE || item?.END_DATE || item?.DATE_TO || ""),
+      START_DATE: toDateOnly(item?.START_DATE || item?.FROM_DATE || item?.DATE_FROM || ""),
+      END_DATE: toDateOnly(item?.END_DATE || item?.TO_DATE || item?.DATE_TO || ""),
     }));
 
     const normalizedHotel = {
@@ -389,22 +328,13 @@ const createOption = (index, overnightCities = []) => ({
   touched: {},
   cityGroups: (overnightCities || []).map((city, cityIndex) => ({
     localId: `city-${Date.now()}-${index}-${cityIndex}`,
-    CITY_ID: asId(
-      city?.CITY_ID ||
-      city?._id ||
-      city?.id ||
-      city?.OVERNIGHT_CITY
-    ),
-    CITY_NAME:
-      city?.CITY_NAME ||
-      city?.OVERNIGHT_CITY_NAME ||
-      city?.name ||
-      "-",
+    CITY_ID: asId(city?.CITY_ID || city?._id || city?.id || city?.OVERNIGHT_CITY),
+    CITY_NAME: city?.CITY_NAME || city?.OVERNIGHT_CITY_NAME || city?.name || "-",
     TOTAL_NIGHTS: toNumber(
       city?.TOTAL_NIGHTS ||
-      city?.CITY_TOTAL_NIGHTS_LIMIT ||
-      city?.ALLOWED_NIGHTS ||
-      0
+        city?.CITY_TOTAL_NIGHTS_LIMIT ||
+        city?.ALLOWED_NIGHTS ||
+        0
     ),
     OVERNIGHT_DATE: city?.OVERNIGHT_DATE || "",
     selectedHotelIds: [],
@@ -412,12 +342,7 @@ const createOption = (index, overnightCities = []) => ({
   })),
 });
 
-const buildStayFromHotel = (
-  hotel,
-  cityGroup,
-  option,
-  findMatchingSeasonFn
-) => {
+const buildStayFromHotel = (hotel, cityGroup, option, findMatchingSeasonFn) => {
   if (!hotel) return null;
 
   const autoSeason = findMatchingSeasonFn
@@ -427,26 +352,11 @@ const buildStayFromHotel = (
   return {
     HOTEL_ID: String(asId(hotel?._id || hotel?.HOTEL_ID || hotel?.id) || ""),
     HOTEL_NAME: getHotelLabel(hotel),
-    HOTEL_STARS:
-      String(
-        hotel?.HOTEL_STARS ??
-        option?.SELECTED_HOTEL_STARS ??
-        ""
-      ).trim(),
+    HOTEL_STARS: String(hotel?.HOTEL_STARS ?? option?.SELECTED_HOTEL_STARS ?? "").trim(),
     HOTEL_CHAIN: asId(hotel?.HOTEL_CHAIN || hotel?.HOTEL_CHAIN_ID),
-    HOTEL_CHAIN_VALUE:
-      hotel?.HOTEL_CHAIN_VALUE ||
-      hotel?.HOTEL_CHAIN_NAME ||
-      "",
-    HOTEL_CITY: asId(
-      hotel?.HOTEL_CITY ||
-      hotel?.CITY_ID ||
-      cityGroup?.CITY_ID
-    ),
-    HOTEL_CITY_VALUE:
-      hotel?.HOTEL_CITY_VALUE ||
-      cityGroup?.CITY_NAME ||
-      "",
+    HOTEL_CHAIN_VALUE: hotel?.HOTEL_CHAIN_VALUE || hotel?.HOTEL_CHAIN_NAME || "",
+    HOTEL_CITY: asId(hotel?.HOTEL_CITY || hotel?.CITY_ID || cityGroup?.CITY_ID),
+    HOTEL_CITY_VALUE: hotel?.HOTEL_CITY_VALUE || cityGroup?.CITY_NAME || "",
     SEASON_ID: asId(autoSeason?._id || autoSeason?.SEASON_ID),
     SEASON_NAME: getSeasonLabel(autoSeason),
     NIGHTS: "1",
@@ -481,16 +391,10 @@ const syncCityGroupStaysFromSelected = (
 
       const hotel =
         (hotels || []).find(
-          h =>
-            String(asId(h?._id || h?.HOTEL_ID || h?.id) || "") === hotelId
+          h => String(asId(h?._id || h?.HOTEL_ID || h?.id) || "") === hotelId
         ) || null;
 
-      return buildStayFromHotel(
-        hotel,
-        cityGroup,
-        option,
-        findMatchingSeasonFn
-      );
+      return buildStayFromHotel(hotel, cityGroup, option, findMatchingSeasonFn);
     })
     .filter(Boolean);
 
@@ -608,21 +512,9 @@ const Accommodation = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const hydratedRef = useRef(false);
+
   const [removeOptionConfirmId, setRemoveOptionConfirmId] = useState("");
-
-  const quotation = useSelector(state => state.Quotations?.selected || null);
-  const quotationLoading = useSelector(state => state.Quotations?.loading);
-  const roles = useSelector(state => state.Login?.roles || []);
-  const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
-  const readOnly = isQuotationReadOnly(quotation);
-  const canEditQuotation = canMutate && !readOnly;
-
-  const accumidationState = useSelector(state => state.QuotationAccumidation || {});
-  const savedAccumidation = accumidationState?.selected || null;
-  const savedAccumidationLoading = !!accumidationState?.loading;
-  const savedAccumidationLoaded = !!accumidationState?.loaded;
-  const savedAccumidationSaving = !!accumidationState?.saving;
-
   const [lookupLoading, setLookupLoading] = useState(false);
   const [overnightsLoading, setOvernightsLoading] = useState(false);
   const [overnightsLoaded, setOvernightsLoaded] = useState(false);
@@ -652,7 +544,18 @@ const Accommodation = () => {
   const [options, setOptions] = useState([]);
   const [overnightResponse, setOvernightResponse] = useState(null);
 
-  const hydratedRef = useRef(false);
+  const quotation = useSelector(state => state.Quotations?.selected || null);
+  const quotationLoading = useSelector(state => state.Quotations?.loading);
+  const roles = useSelector(state => state.Login?.roles || []);
+  const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const readOnly = isQuotationReadOnly(quotation);
+  const canEditQuotation = canMutate && !readOnly;
+
+  const accumidationState = useSelector(state => state.QuotationAccumidation || {});
+  const savedAccumidation = accumidationState?.selected || null;
+  const savedAccumidationLoading = !!accumidationState?.loading;
+  const savedAccumidationLoaded = !!accumidationState?.loaded;
+  const savedAccumidationSaving = !!accumidationState?.saving;
 
   const savedForCurrentQuotation = useMemo(() => {
     if (!savedAccumidation) return null;
@@ -688,17 +591,6 @@ const Accommodation = () => {
     [overnightCities]
   );
 
-  const cityNameById = useMemo(() => {
-    const map = {};
-    (lookups.CITIES || []).forEach(item => {
-      const itemId = getId(item?._id);
-      if (itemId) {
-        map[itemId] = item?.ITEM_VALUE || "-";
-      }
-    });
-    return map;
-  }, [lookups.CITIES]);
-
   const chainNameById = useMemo(() => {
     const map = {};
     (lookups.HOTELCHAINS || []).forEach(item => {
@@ -711,48 +603,7 @@ const Accommodation = () => {
   }, [lookups.HOTELCHAINS]);
 
   useEffect(() => {
-    if (id) {
-      dispatch(fetchQuotation(id));
-      dispatch(fetchQuotationAccumidation(id));
-    }
-  }, [dispatch, id]);
-
-  useEffect(() => {
-    let ignore = false;
-
-    const loadLookups = async () => {
-      setLookupLoading(true);
-
-      try {
-        const [stars, cities, chains] = await Promise.all([
-          fetchListItems("HOTELSTARS"),
-          fetchListItems("CITIES"),
-          fetchListItems("HOTELCHAINS"),
-        ]);
-
-        if (ignore) return;
-
-        setLookups({
-          HOTELSTARS: asArray(stars),
-          CITIES: asArray(cities),
-          HOTELCHAINS: asArray(chains),
-        });
-      } catch (error) {
-        if (!ignore) {
-          notifyError(extractErrorMessage(error, "Failed to load lookup data."));
-        }
-      } finally {
-        if (!ignore) {
-          setLookupLoading(false);
-        }
-      }
-    };
-
-    loadLookups();
-
-    return () => {
-      ignore = true;
-    };
+    document.title = "Quotation Accumidation | Skote";
   }, []);
 
   useEffect(() => {
@@ -886,19 +737,6 @@ const Accommodation = () => {
     });
   }, [filters, searchResults]);
 
-  const hotelsMap = useMemo(() => {
-    const map = new Map();
-
-    (searchResults || []).forEach(hotel => {
-      const idValue = String(asId(hotel?._id || hotel?.HOTEL_ID) || "");
-      if (idValue) {
-        map.set(idValue, hotel);
-      }
-    });
-
-    return map;
-  }, [searchResults]);
-
   const findMatchingSeason = (hotel, overnightDate) => {
     const date = toDateOnly(overnightDate);
     const seasons = asArray(hotel?.seasons);
@@ -917,9 +755,7 @@ const Accommodation = () => {
   const handleFilterChange = e => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -934,9 +770,7 @@ const Accommodation = () => {
   const handleSearch = async (silent = false) => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -985,9 +819,7 @@ const Accommodation = () => {
   const addOption = () => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1004,9 +836,7 @@ const Accommodation = () => {
   const removeOption = optionId => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1021,24 +851,31 @@ const Accommodation = () => {
   };
 
   const openRemoveOptionConfirm = optionId => {
-  if (options.length === 1) {
-    notifyError("At least one accumidation option is required.");
-    return;
-  }
+    if (!canEditQuotation) {
+      notifyError(
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
+      );
+      return;
+    }
 
-  setRemoveOptionConfirmId(optionId);
-};
+    if (options.length === 1) {
+      notifyError("At least one accumidation option is required.");
+      return;
+    }
 
-const closeRemoveOptionConfirm = () => {
-  setRemoveOptionConfirmId("");
-};
+    setRemoveOptionConfirmId(optionId);
+  };
 
-const confirmRemoveOption = () => {
-  if (!removeOptionConfirmId) return;
+  const closeRemoveOptionConfirm = () => {
+    setRemoveOptionConfirmId("");
+  };
 
-  removeOption(removeOptionConfirmId);
-  setRemoveOptionConfirmId("");
-};
+  const confirmRemoveOption = () => {
+    if (!removeOptionConfirmId) return;
+
+    removeOption(removeOptionConfirmId);
+    setRemoveOptionConfirmId("");
+  };
 
   const updateOption = (optionId, updater) => {
     setOptions(prev => prev.map(option => (option.localId === optionId ? updater(option) : option)));
@@ -1047,9 +884,7 @@ const confirmRemoveOption = () => {
   const handleOptionNameChange = (optionId, value) => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1063,9 +898,7 @@ const confirmRemoveOption = () => {
   const handleOptionStarsChange = (optionId, value) => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1081,12 +914,29 @@ const confirmRemoveOption = () => {
     }));
   };
 
+  const openHotelPicker = (optionLocalId, cityId) => {
+    if (!canEditQuotation) {
+      notifyError(
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
+      );
+      return;
+    }
+
+    setHotelPickerContext({ optionLocalId, cityId });
+    setHotelSearchTerm("");
+    setHotelPickerOpen(true);
+  };
+
+  const closeHotelPicker = () => {
+    setHotelPickerOpen(false);
+    setHotelSearchTerm("");
+    setHotelPickerContext({ optionLocalId: "", cityId: "" });
+  };
+
   const handleOptionStarsChangeAndOpen = (optionId, value) => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1109,7 +959,7 @@ const confirmRemoveOption = () => {
     const cityKey = asId(cityId);
     const starsKey = String(stars || "").trim();
 
-    return (searchResults || []).filter(hotel => {
+    return (filteredHotels || []).filter(hotel => {
       const hotelCityKey = asId(hotel?.HOTEL_CITY);
       const hotelStarsKey = String(
         hotel?.HOTEL_STARS ??
@@ -1128,9 +978,7 @@ const confirmRemoveOption = () => {
   const toggleHotelSelection = (optionId, cityId, hotelId) => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1177,9 +1025,7 @@ const confirmRemoveOption = () => {
   const handleStayChange = (optionId, cityId, stayIndex, field, value) => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1211,48 +1057,13 @@ const confirmRemoveOption = () => {
   const handleHotelCheckboxToggle = (optionId, cityId, hotelId) => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
 
     toggleHotelSelection(optionId, cityId, hotelId);
   };
-
-  const grandTotals = useMemo(() => {
-    const totalOptions = options.length;
-    const totalHotels = options.reduce(
-      (sum, option) =>
-        sum +
-        (option.cityGroups || []).reduce(
-          (citySum, city) => citySum + asArray(city?.stays).length,
-          0
-        ),
-      0
-    );
-    const totalSelectedNights = options.reduce(
-      (sum, option) =>
-        sum +
-        (option.cityGroups || []).reduce(
-          (citySum, city) =>
-            citySum +
-            asArray(city?.stays).reduce(
-              (staySum, stay) => staySum + toNumber(stay?.NIGHTS),
-              0
-            ),
-          0
-        ),
-      0
-    );
-
-    return {
-      TOTAL_OPTIONS: totalOptions,
-      TOTAL_SELECTED_HOTELS: totalHotels,
-      TOTAL_SELECTED_NIGHTS: totalSelectedNights,
-    };
-  }, [options]);
 
   const optionValidation = useMemo(() => {
     return options.map(option => {
@@ -1281,7 +1092,10 @@ const confirmRemoveOption = () => {
           cityErrors.STAYS = `Please select at least one hotel for ${cityGroup?.CITY_NAME || "this city"}.`;
         }
 
-        const citySelectedNights = stays.reduce((citySum, stay) => citySum + toNumber(stay?.NIGHTS), 0);
+        const citySelectedNights = stays.reduce(
+          (citySum, stay) => citySum + toNumber(stay?.NIGHTS),
+          0
+        );
 
         stays.forEach(stay => {
           const rowError = {};
@@ -1343,7 +1157,8 @@ const confirmRemoveOption = () => {
 
       const optionTotalNights = cityGroups.reduce(
         (sum, group) =>
-          sum + asArray(group?.STAYS).reduce((staySum, stay) => staySum + toNumber(stay?.NIGHTS), 0),
+          sum +
+          asArray(group?.STAYS).reduce((staySum, stay) => staySum + toNumber(stay?.NIGHTS), 0),
         0
       );
 
@@ -1367,9 +1182,7 @@ const confirmRemoveOption = () => {
     });
 
     const firstOvernightDate = toDateOnly(
-      sortedOvernightCities[0]?.OVERNIGHT_DATE ||
-        sortedOvernightCities[0]?.CITY_DATE ||
-        ""
+      sortedOvernightCities[0]?.OVERNIGHT_DATE || sortedOvernightCities[0]?.CITY_DATE || ""
     );
 
     const lastOvernightDate = toDateOnly(
@@ -1409,7 +1222,6 @@ const confirmRemoveOption = () => {
         TOTAL_NIGHTS: toNumber(city?.TOTAL_NIGHTS),
       })),
       TOTAL_OPTIONS: payloadOptions.length,
-      //GRAND_TOTALS: grandTotals,
       OPTIONS: payloadOptions,
     };
   };
@@ -1417,9 +1229,7 @@ const confirmRemoveOption = () => {
   const handleSave = () => {
     if (!canEditQuotation) {
       notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
+        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
       );
       return;
     }
@@ -1473,31 +1283,6 @@ const confirmRemoveOption = () => {
     );
   };
 
-  document.title = "Quotation Accumidation | Skote";
-
-  document.title = "Quotation Accumidation | Skote";
-
-  const openHotelPicker = (optionLocalId, cityId) => {
-    if (!canEditQuotation) {
-      notifyError(
-        readOnly
-          ? getQuotationReadOnlyMessage(quotation)
-          : "Permission/role mismatch"
-      );
-      return;
-    }
-
-    setHotelPickerContext({ optionLocalId, cityId });
-    setHotelSearchTerm("");
-    setHotelPickerOpen(true);
-  };
-
-  const closeHotelPicker = () => {
-    setHotelPickerOpen(false);
-    setHotelSearchTerm("");
-    setHotelPickerContext({ optionLocalId: "", cityId: "" });
-  };
-
   const activePickerOption = options.find(
     item => item.localId === hotelPickerContext.optionLocalId
   );
@@ -1549,88 +1334,83 @@ const confirmRemoveOption = () => {
                         </Button>
                       </div>
 
-<<<<<<< HEAD
                       {quotationLoading && !quotation ? (
                         <div className="text-center py-4">
                           <Spinner size="sm" className="me-2" />
                           Loading...
                         </div>
                       ) : (
-                        <>
-                          <Row className="g-3">
-                            <Col md="3" sm="6">
-                              <Label className="form-label text-muted mb-1">Reference Number</Label>
-                              <div className="fw-semibold">{quotation?.REFERANCE_NUMBER || "-"}</div>
-                            </Col>
+                        <Row className="g-3">
+                          <Col md="3" sm="6">
+                            <Label className="form-label text-muted mb-1">Reference Number</Label>
+                            <div className="fw-semibold">{quotation?.REFERANCE_NUMBER || "-"}</div>
+                          </Col>
 
-                            <Col md="3" sm="6">
-                              <Label className="form-label text-muted mb-1">Arriving Date</Label>
-                              <div>{arrivingDate || "-"}</div>
-                            </Col>
+                          <Col md="3" sm="6">
+                            <Label className="form-label text-muted mb-1">Arriving Date</Label>
+                            <div>{arrivingDate || "-"}</div>
+                          </Col>
 
-                            <Col md="3" sm="6">
-                              <Label className="form-label text-muted mb-1">Departure Date</Label>
-                              <div>{departureDate || "-"}</div>
-                            </Col>
-=======
-                          
+                          <Col md="3" sm="6">
+                            <Label className="form-label text-muted mb-1">Departure Date</Label>
+                            <div>{departureDate || "-"}</div>
+                          </Col>
 
-                          
->>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
+                          <Col md="3" sm="6">
+                            <Label className="form-label text-muted mb-1">
+                              Quotation Total Nights
+                            </Label>
+                            <div className="fw-semibold">{totalNights}</div>
+                          </Col>
 
-                            <Col md="3" sm="6">
-                              <Label className="form-label text-muted mb-1">Quotation Total Nights</Label>
-                              <div className="fw-semibold">{totalNights}</div>
-                            </Col>
+                          <Col md="3" sm="6">
+                            <Label className="form-label text-muted mb-1">
+                              Overnight Total Nights
+                            </Label>
+                            <div className="fw-semibold">{overnightTotalNights}</div>
+                          </Col>
 
-                            <Col md="3" sm="6">
-                              <Label className="form-label text-muted mb-1">Overnight Total Nights</Label>
-                              <div className="fw-semibold">{overnightTotalNights}</div>
-                            </Col>
+                          <Col md="3" sm="6">
+                            <Label className="form-label text-muted mb-1">Saved Record</Label>
+                            <div className="fw-semibold">
+                              {!savedAccumidationLoaded || savedAccumidationLoading
+                                ? "Loading..."
+                                : savedForCurrentQuotation?._id
+                                ? "Yes"
+                                : "No"}
+                            </div>
+                          </Col>
 
-                            <Col md="3" sm="6">
-                              <Label className="form-label text-muted mb-1">Saved Record</Label>
-                              <div className="fw-semibold">
-                                {!savedAccumidationLoaded || savedAccumidationLoading
-                                  ? "Loading..."
-                                  : savedForCurrentQuotation?._id
-                                  ? "Yes"
-                                  : "No"}
+                          <Col md="3" sm="6" />
+                          <Col md="3" sm="6" />
+
+                          <Col md="12">
+                            <Label className="form-label text-muted mb-1">Overnight Cities</Label>
+
+                            {overnightsLoading ? (
+                              <div>
+                                <Spinner size="sm" className="me-2" />
+                                Loading...
                               </div>
-                            </Col>
-
-<<<<<<< HEAD
-                            <Col md="3" sm="6" />
-                            <Col md="3" sm="6" />
-
-                            <Col md="12">
-                              <Label className="form-label text-muted mb-1">Overnight Cities</Label>
-
-                              {overnightsLoading ? (
-                                <div>
-                                  <Spinner size="sm" className="me-2" />
-                                  Loading...
-                                </div>
-                              ) : overnightCities.length === 0 ? (
-                                <div className="text-muted">No overnight cities found.</div>
-                              ) : (
-                                <div className="d-flex flex-wrap gap-2">
-                                  {overnightCities.map(city => (
-                                    <Badge
-                                      key={getId(city?.OVERNIGHT_CITY || city?.CITY_ID)}
-                                      color="light"
-                                      className="text-dark"
-                                    >
-                                      {city?.OVERNIGHT_CITY_NAME || city?.CITY_NAME || "-"}:{" "}
-                                      {toNumber(city?.TOTAL_NIGHTS)} night(s)
-                                      {city?.OVERNIGHT_DATE ? ` - ${city?.OVERNIGHT_DATE}` : ""}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              )}
-                            </Col>
-                          </Row>
-                        </>
+                            ) : overnightCities.length === 0 ? (
+                              <div className="text-muted">No overnight cities found.</div>
+                            ) : (
+                              <div className="d-flex flex-wrap gap-2">
+                                {overnightCities.map(city => (
+                                  <Badge
+                                    key={getId(city?.OVERNIGHT_CITY || city?.CITY_ID)}
+                                    color="light"
+                                    className="text-dark"
+                                  >
+                                    {city?.OVERNIGHT_CITY_NAME || city?.CITY_NAME || "-"}:{" "}
+                                    {toNumber(city?.TOTAL_NIGHTS)} night(s)
+                                    {city?.OVERNIGHT_DATE ? ` - ${city?.OVERNIGHT_DATE}` : ""}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </Col>
+                        </Row>
                       )}
                     </CardBody>
                   </Card>
@@ -1677,54 +1457,6 @@ const confirmRemoveOption = () => {
                             )}
                           </Button>
                         </div>
-=======
-                          <Col md="12">
-  <Label className="form-label text-muted mb-1">Overnight Cities</Label>
-
-  {overnightsLoading ? (
-    <div>
-      <Spinner size="sm" className="me-2" />
-      Loading...
-    </div>
-  ) : overnightCities.length === 0 ? (
-    <div className="text-muted">No overnight cities found.</div>
-  ) : (
-    <div className="d-flex flex-wrap gap-2">
-      {overnightCities.map(city => (
-        <Badge
-          key={getId(city?.OVERNIGHT_CITY || city?.CITY_ID)}
-          color="light"
-          className="text-dark"
-        >
-          {city?.OVERNIGHT_CITY_NAME || city?.CITY_NAME || "-"}:{" "}
-          {toNumber(city?.TOTAL_NIGHTS)} night(s)
-        </Badge>
-      ))}
-    </div>
-  )}
-</Col>
-                        </Row>
-                      </>
-                    )}
-                  </CardBody>
-                </Card>
-              </Col>
-            </Row>
-
-
-
-            <Row>
-              <Col xs="12">
-                <Card>
-                  <CardBody>
-                    <div className="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
-                      <div>
-                        <h4 className="card-title mb-1">Accumidation Options</h4>
-                        <p className="card-title-desc mb-0">
-                          Each option is split by overnight city. Choose hotel stars first, then choose
-                          hotels in that city with the same star rating.
-                        </p>
->>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
                       </div>
 
                       {options.length === 0 ? (
@@ -1759,7 +1491,9 @@ const confirmRemoveOption = () => {
                                           <Input
                                             type="select"
                                             value={String(option?.SELECTED_HOTEL_STARS || "")}
-                                            onChange={e => handleOptionStarsChangeAndOpen(option.localId, e.target.value)}
+                                            onChange={e =>
+                                              handleOptionStarsChangeAndOpen(option.localId, e.target.value)
+                                            }
                                             disabled={readOnly}
                                           >
                                             <option value="">Select stars</option>
@@ -1781,12 +1515,11 @@ const confirmRemoveOption = () => {
                                       </Row>
                                     </div>
 
-<<<<<<< HEAD
                                     <div className="d-flex gap-2">
                                       <Button
                                         color="danger"
                                         outline
-                                        onClick={() => removeOption(option.localId)}
+                                        onClick={() => openRemoveOptionConfirm(option.localId)}
                                         disabled={readOnly || options.length === 1}
                                       >
                                         <i className="bx bx-trash me-1" />
@@ -1794,20 +1527,6 @@ const confirmRemoveOption = () => {
                                       </Button>
                                     </div>
                                   </div>
-=======
-                                <div className="d-flex gap-2">
-                                  <Button
-                                    color="danger"
-                                    outline
-                                    onClick={() => openRemoveOptionConfirm(option.localId)}
-                                    disabled={options.length === 1}
-                                  >
-                                    <i className="bx bx-trash me-1" />
-                                    Remove
-                                  </Button>
-                                </div>
-                              </div>
->>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
 
                                   {optionErrors.TOTAL_NIGHTS ? (
                                     <Alert color="danger" className="py-2" fade={false}>
@@ -1821,13 +1540,17 @@ const confirmRemoveOption = () => {
                                     const availableHotels = stars
                                       ? getHotelsForCityAndStars(cityGroup.CITY_ID, stars)
                                       : [];
-                                    const selectedStays = Array.isArray(cityGroup?.stays) ? cityGroup.stays : [];
+                                    const selectedStays = Array.isArray(cityGroup?.stays)
+                                      ? cityGroup.stays
+                                      : [];
 
                                     const selectedHotels = selectedStays
                                       .map(stay => {
                                         const stayHotelId = String(asId(stay?.HOTEL_ID) || "");
                                         return availableHotels.find(
-                                          hotel => String(asId(hotel?._id || hotel?.HOTEL_ID || hotel?.id) || "") === stayHotelId
+                                          hotel =>
+                                            String(asId(hotel?._id || hotel?.HOTEL_ID || hotel?.id) || "") ===
+                                            stayHotelId
                                         );
                                       })
                                       .filter(Boolean);
@@ -2100,116 +1823,29 @@ const confirmRemoveOption = () => {
           )}
         </ModalBody>
 
-<<<<<<< HEAD
         <ModalFooter>
           <Button color="secondary" onClick={closeHotelPicker}>
             Done
           </Button>
         </ModalFooter>
       </Modal>
+
+      <Modal isOpen={!!removeOptionConfirmId} toggle={closeRemoveOptionConfirm} centered>
+        <ModalHeader toggle={closeRemoveOptionConfirm}>Confirm Delete</ModalHeader>
+
+        <ModalBody>Are you sure you want to delete this option?</ModalBody>
+
+        <ModalFooter>
+          <Button color="secondary" onClick={closeRemoveOptionConfirm}>
+            Cancel
+          </Button>
+          <Button color="danger" onClick={confirmRemoveOption}>
+            Delete
+          </Button>
+        </ModalFooter>
+      </Modal>
     </React.Fragment>
   );
-=======
-  <ModalFooter>
-    <Button color="secondary" onClick={closeHotelPicker}>
-      Done
-    </Button>
-  </ModalFooter>
-</Modal>
-    <Modal isOpen={hotelPickerOpen} toggle={closeHotelPicker} centered size="lg">
-    <ModalHeader toggle={closeHotelPicker}>
-      Select Hotels - {activePickerCityGroup?.CITY_NAME || "-"} -{" "}
-      {getStarLabel(activePickerStars)}
-    </ModalHeader>
-
-    <ModalBody>
-      <div className="mb-3">
-        <Label className="form-label">Search hotel name</Label>
-        <Input
-          value={hotelSearchTerm}
-          onChange={e => setHotelSearchTerm(e.target.value)}
-          placeholder="Type hotel name..."
-        />
-      </div>
-
-      {hotelPickerFilteredHotels.length === 0 ? (
-        <Alert color="warning" className="mb-0" fade={false}>
-          No hotels found.
-        </Alert>
-      ) : (
-        <div className="d-flex flex-column gap-2">
-          {hotelPickerFilteredHotels.map(hotel => {
-            const hotelId = String(asId(hotel?._id || hotel?.HOTEL_ID || hotel?.id) || "");
-            const checked = (activePickerCityGroup?.selectedHotelIds || []).some(
-              id => String(asId(id) || "") === hotelId
-            );
-
-            return (
-              <div
-                key={hotelId}
-                className={`border rounded p-3 d-flex justify-content-between align-items-center ${
-                  checked ? "border-primary bg-light" : ""
-                }`}
-              >
-                <div>
-                  <div className="fw-semibold">{getHotelLabel(hotel)}</div>
-                  <div className="text-muted small">
-                    {hotel?.HOTEL_CHAIN_VALUE || hotel?.HOTEL_CHAIN_NAME || "-"} •{" "}
-                    {getStarLabel(hotel?.HOTEL_STARS)}
-                  </div>
-                </div>
-
-                <Button
-                  type="button"
-                  size="sm"
-                  color={checked ? "primary" : "light"}
-                  className={checked ? "" : "border"}
-                  onClick={() =>
-                    handleHotelCheckboxToggle(
-                      hotelPickerContext.optionLocalId,
-                      hotelPickerContext.cityId,
-                      hotelId
-                    )
-                  }
-                >
-                  <i className={`bx ${checked ? "bx-check-circle" : "bx-plus-circle"} me-1`} />
-                  {checked ? "Selected" : "Select"}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </ModalBody>
-
-    <ModalFooter>
-      <Button color="secondary" onClick={closeHotelPicker}>
-        Done
-      </Button>
-    </ModalFooter>
-  </Modal>
-
-  <Modal isOpen={!!removeOptionConfirmId} toggle={closeRemoveOptionConfirm} centered>
-    <ModalHeader toggle={closeRemoveOptionConfirm}>
-      Confirm Delete
-    </ModalHeader>
-
-    <ModalBody>
-      Are you sure you want to delete this option?
-    </ModalBody>
-
-    <ModalFooter>
-      <Button color="secondary" onClick={closeRemoveOptionConfirm}>
-        Cancel
-      </Button>
-      <Button color="danger" onClick={confirmRemoveOption}>
-        Delete
-      </Button>
-    </ModalFooter>
-  </Modal>
-</React.Fragment>
-);
->>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
 };
 
 export default Accommodation;
