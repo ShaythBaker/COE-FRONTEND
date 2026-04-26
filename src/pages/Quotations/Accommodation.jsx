@@ -608,6 +608,7 @@ const Accommodation = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const [removeOptionConfirmId, setRemoveOptionConfirmId] = useState("");
 
   const quotation = useSelector(state => state.Quotations?.selected || null);
   const quotationLoading = useSelector(state => state.Quotations?.loading);
@@ -1018,6 +1019,26 @@ const Accommodation = () => {
       return prev.filter(option => option.localId !== optionId);
     });
   };
+
+  const openRemoveOptionConfirm = optionId => {
+  if (options.length === 1) {
+    notifyError("At least one accumidation option is required.");
+    return;
+  }
+
+  setRemoveOptionConfirmId(optionId);
+};
+
+const closeRemoveOptionConfirm = () => {
+  setRemoveOptionConfirmId("");
+};
+
+const confirmRemoveOption = () => {
+  if (!removeOptionConfirmId) return;
+
+  removeOption(removeOptionConfirmId);
+  setRemoveOptionConfirmId("");
+};
 
   const updateOption = (optionId, updater) => {
     setOptions(prev => prev.map(option => (option.localId === optionId ? updater(option) : option)));
@@ -1528,6 +1549,7 @@ const Accommodation = () => {
                         </Button>
                       </div>
 
+<<<<<<< HEAD
                       {quotationLoading && !quotation ? (
                         <div className="text-center py-4">
                           <Spinner size="sm" className="me-2" />
@@ -1550,6 +1572,11 @@ const Accommodation = () => {
                               <Label className="form-label text-muted mb-1">Departure Date</Label>
                               <div>{departureDate || "-"}</div>
                             </Col>
+=======
+                          
+
+                          
+>>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
 
                             <Col md="3" sm="6">
                               <Label className="form-label text-muted mb-1">Quotation Total Nights</Label>
@@ -1572,6 +1599,7 @@ const Accommodation = () => {
                               </div>
                             </Col>
 
+<<<<<<< HEAD
                             <Col md="3" sm="6" />
                             <Col md="3" sm="6" />
 
@@ -1649,6 +1677,54 @@ const Accommodation = () => {
                             )}
                           </Button>
                         </div>
+=======
+                          <Col md="12">
+  <Label className="form-label text-muted mb-1">Overnight Cities</Label>
+
+  {overnightsLoading ? (
+    <div>
+      <Spinner size="sm" className="me-2" />
+      Loading...
+    </div>
+  ) : overnightCities.length === 0 ? (
+    <div className="text-muted">No overnight cities found.</div>
+  ) : (
+    <div className="d-flex flex-wrap gap-2">
+      {overnightCities.map(city => (
+        <Badge
+          key={getId(city?.OVERNIGHT_CITY || city?.CITY_ID)}
+          color="light"
+          className="text-dark"
+        >
+          {city?.OVERNIGHT_CITY_NAME || city?.CITY_NAME || "-"}:{" "}
+          {toNumber(city?.TOTAL_NIGHTS)} night(s)
+        </Badge>
+      ))}
+    </div>
+  )}
+</Col>
+                        </Row>
+                      </>
+                    )}
+                  </CardBody>
+                </Card>
+              </Col>
+            </Row>
+
+
+
+            <Row>
+              <Col xs="12">
+                <Card>
+                  <CardBody>
+                    <div className="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+                      <div>
+                        <h4 className="card-title mb-1">Accumidation Options</h4>
+                        <p className="card-title-desc mb-0">
+                          Each option is split by overnight city. Choose hotel stars first, then choose
+                          hotels in that city with the same star rating.
+                        </p>
+>>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
                       </div>
 
                       {options.length === 0 ? (
@@ -1705,6 +1781,7 @@ const Accommodation = () => {
                                       </Row>
                                     </div>
 
+<<<<<<< HEAD
                                     <div className="d-flex gap-2">
                                       <Button
                                         color="danger"
@@ -1717,6 +1794,20 @@ const Accommodation = () => {
                                       </Button>
                                     </div>
                                   </div>
+=======
+                                <div className="d-flex gap-2">
+                                  <Button
+                                    color="danger"
+                                    outline
+                                    onClick={() => openRemoveOptionConfirm(option.localId)}
+                                    disabled={options.length === 1}
+                                  >
+                                    <i className="bx bx-trash me-1" />
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
+>>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
 
                                   {optionErrors.TOTAL_NIGHTS ? (
                                     <Alert color="danger" className="py-2" fade={false}>
@@ -2009,6 +2100,7 @@ const Accommodation = () => {
           )}
         </ModalBody>
 
+<<<<<<< HEAD
         <ModalFooter>
           <Button color="secondary" onClick={closeHotelPicker}>
             Done
@@ -2017,6 +2109,107 @@ const Accommodation = () => {
       </Modal>
     </React.Fragment>
   );
+=======
+  <ModalFooter>
+    <Button color="secondary" onClick={closeHotelPicker}>
+      Done
+    </Button>
+  </ModalFooter>
+</Modal>
+    <Modal isOpen={hotelPickerOpen} toggle={closeHotelPicker} centered size="lg">
+    <ModalHeader toggle={closeHotelPicker}>
+      Select Hotels - {activePickerCityGroup?.CITY_NAME || "-"} -{" "}
+      {getStarLabel(activePickerStars)}
+    </ModalHeader>
+
+    <ModalBody>
+      <div className="mb-3">
+        <Label className="form-label">Search hotel name</Label>
+        <Input
+          value={hotelSearchTerm}
+          onChange={e => setHotelSearchTerm(e.target.value)}
+          placeholder="Type hotel name..."
+        />
+      </div>
+
+      {hotelPickerFilteredHotels.length === 0 ? (
+        <Alert color="warning" className="mb-0" fade={false}>
+          No hotels found.
+        </Alert>
+      ) : (
+        <div className="d-flex flex-column gap-2">
+          {hotelPickerFilteredHotels.map(hotel => {
+            const hotelId = String(asId(hotel?._id || hotel?.HOTEL_ID || hotel?.id) || "");
+            const checked = (activePickerCityGroup?.selectedHotelIds || []).some(
+              id => String(asId(id) || "") === hotelId
+            );
+
+            return (
+              <div
+                key={hotelId}
+                className={`border rounded p-3 d-flex justify-content-between align-items-center ${
+                  checked ? "border-primary bg-light" : ""
+                }`}
+              >
+                <div>
+                  <div className="fw-semibold">{getHotelLabel(hotel)}</div>
+                  <div className="text-muted small">
+                    {hotel?.HOTEL_CHAIN_VALUE || hotel?.HOTEL_CHAIN_NAME || "-"} •{" "}
+                    {getStarLabel(hotel?.HOTEL_STARS)}
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  color={checked ? "primary" : "light"}
+                  className={checked ? "" : "border"}
+                  onClick={() =>
+                    handleHotelCheckboxToggle(
+                      hotelPickerContext.optionLocalId,
+                      hotelPickerContext.cityId,
+                      hotelId
+                    )
+                  }
+                >
+                  <i className={`bx ${checked ? "bx-check-circle" : "bx-plus-circle"} me-1`} />
+                  {checked ? "Selected" : "Select"}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </ModalBody>
+
+    <ModalFooter>
+      <Button color="secondary" onClick={closeHotelPicker}>
+        Done
+      </Button>
+    </ModalFooter>
+  </Modal>
+
+  <Modal isOpen={!!removeOptionConfirmId} toggle={closeRemoveOptionConfirm} centered>
+    <ModalHeader toggle={closeRemoveOptionConfirm}>
+      Confirm Delete
+    </ModalHeader>
+
+    <ModalBody>
+      Are you sure you want to delete this option?
+    </ModalBody>
+
+    <ModalFooter>
+      <Button color="secondary" onClick={closeRemoveOptionConfirm}>
+        Cancel
+      </Button>
+      <Button color="danger" onClick={confirmRemoveOption}>
+        Delete
+      </Button>
+    </ModalFooter>
+  </Modal>
+</React.Fragment>
+);
+>>>>>>> 96e38e5c5106b09f4820c9ba896650ecb4479606
 };
 
 export default Accommodation;
