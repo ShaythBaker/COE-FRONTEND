@@ -640,11 +640,9 @@ const QuotationsDetails = () => {
                   <SummaryHeader
                     icon="bx bx-badge-dollar"
                     title="Approved Final Price"
-                    subtitle="Visible only for ACCOUNTING and USER_COMPANY after approval."
+                    subtitle="Visible for all roles after approval."
                   />
-                  {!canViewPrices ? (
-                    <EmptyState text="Final price is hidden for your role." />
-                  ) : finalPricingLoading ? (
+                  {finalPricingLoading ? (
                     <LoadingState text="Loading approved final price..." />
                   ) : approvedFinalTotal !== null && approvedFinalTotal !== undefined ? (
                     <div className="text-center py-4">
