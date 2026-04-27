@@ -1,4 +1,3 @@
-// path: src/pages/Quotations/Accommodation.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
@@ -34,6 +33,7 @@ import {
 import {
   isQuotationReadOnly,
   getQuotationReadOnlyMessage,
+  canViewQuotationPrices,
 } from "../../helpers/quotation_pricing_helper";
 
 const ALLOWED_ROLES = ["COMPANY_ADMIN", "CONTRACTING"];
@@ -150,6 +150,39 @@ const getSeasonLabel = season => {
   if (name) return name;
   if (from && to) return `${from} → ${to}`;
   return "-";
+};
+
+const getSeasonPrice = season => {
+  const candidates = [
+    season?.PRICE,
+    season?.RATE,
+    season?.SEASON_PRICE,
+    season?.ROOM_RATE,
+    season?.COST,
+    season?.SELLING_PRICE,
+    season?.BB_RATE,
+    season?.HB_RATE,
+    season?.FB_RATE,
+    season?.SGL_RATE,
+    season?.DBL_RATE,
+    season?.TPL_RATE,
+    season?.BB_RATE_AMOUNT,
+    season?.HB_RATE_AMOUNT,
+    season?.FB_RATE_AMOUNT,
+  ];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const n = Number(candidates[i]);
+    if (Number.isFinite(n)) return n;
+  }
+
+  return null;
+};
+
+const formatMoney = value => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return n.toFixed(2);
 };
 
 const normalizeOvernightCities = (response, fallbackStartDate = "") => {
@@ -287,9 +320,10 @@ const normalizeSearchResultsFromOvernights = (response, chainNameById = {}) => {
     const seasonMap = new Map();
     [...asArray(existing?.seasons), ...normalizedSeasons].forEach(season => {
       const seasonId = asId(season?._id || season?.SEASON_ID || season?.id);
-      if (seasonId) {
-        seasonMap.set(seasonId, season);
-      }
+      const seasonKey =
+        seasonId ||
+        `${season?.SEASON_NAME || ""}-${season?.FROM_DATE || season?.START_DATE || ""}-${season?.TO_DATE || season?.END_DATE || ""}`;
+      seasonMap.set(seasonKey, season);
     });
 
     map.set(hotelId, {
@@ -342,12 +376,12 @@ const createOption = (index, overnightCities = []) => ({
   })),
 });
 
-const buildStayFromHotel = (hotel, cityGroup, option, findMatchingSeasonFn) => {
+const buildStayFromHotel = (hotel, cityGroup, option, findMatchingSeasonsFn) => {
   if (!hotel) return null;
 
-  const autoSeason = findMatchingSeasonFn
-    ? findMatchingSeasonFn(hotel, cityGroup?.OVERNIGHT_DATE)
-    : null;
+  const matchedSeasons = findMatchingSeasonsFn
+    ? findMatchingSeasonsFn(hotel, cityGroup?.OVERNIGHT_DATE, cityGroup?.TOTAL_NIGHTS)
+    : [];
 
   return {
     HOTEL_ID: String(asId(hotel?._id || hotel?.HOTEL_ID || hotel?.id) || ""),
@@ -357,8 +391,12 @@ const buildStayFromHotel = (hotel, cityGroup, option, findMatchingSeasonFn) => {
     HOTEL_CHAIN_VALUE: hotel?.HOTEL_CHAIN_VALUE || hotel?.HOTEL_CHAIN_NAME || "",
     HOTEL_CITY: asId(hotel?.HOTEL_CITY || hotel?.CITY_ID || cityGroup?.CITY_ID),
     HOTEL_CITY_VALUE: hotel?.HOTEL_CITY_VALUE || cityGroup?.CITY_NAME || "",
-    SEASON_ID: asId(autoSeason?._id || autoSeason?.SEASON_ID),
-    SEASON_NAME: getSeasonLabel(autoSeason),
+    SEASON_ID: asId(matchedSeasons?.[0]?._id || matchedSeasons?.[0]?.SEASON_ID),
+    SEASON_NAME:
+      matchedSeasons.length > 0
+        ? matchedSeasons.map(item => getSeasonLabel(item)).join(" • ")
+        : "",
+    SEASONS: matchedSeasons,
     NIGHTS: "1",
     OVERNIGHT_DATE: cityGroup?.OVERNIGHT_DATE || "",
   };
@@ -368,7 +406,7 @@ const syncCityGroupStaysFromSelected = (
   cityGroup,
   option,
   hotels = [],
-  findMatchingSeasonFn
+  findMatchingSeasonsFn
 ) => {
   const selectedHotelIds = Array.isArray(cityGroup?.selectedHotelIds)
     ? cityGroup.selectedHotelIds.map(id => String(asId(id) || ""))
@@ -382,19 +420,36 @@ const syncCityGroupStaysFromSelected = (
         stay => String(asId(stay?.HOTEL_ID) || "") === hotelId
       );
 
-      if (existingStay) {
-        return {
-          ...existingStay,
-          HOTEL_ID: hotelId,
-        };
-      }
-
       const hotel =
         (hotels || []).find(
           h => String(asId(h?._id || h?.HOTEL_ID || h?.id) || "") === hotelId
         ) || null;
 
-      return buildStayFromHotel(hotel, cityGroup, option, findMatchingSeasonFn);
+      if (existingStay) {
+        const matchedSeasons = hotel
+          ? findMatchingSeasonsFn(hotel, cityGroup?.OVERNIGHT_DATE, cityGroup?.TOTAL_NIGHTS)
+          : asArray(existingStay?.SEASONS);
+
+        return {
+          ...existingStay,
+          HOTEL_ID: hotelId,
+          HOTEL_NAME: existingStay?.HOTEL_NAME || getHotelLabel(hotel),
+          HOTEL_CHAIN_VALUE:
+            existingStay?.HOTEL_CHAIN_VALUE ||
+            hotel?.HOTEL_CHAIN_VALUE ||
+            hotel?.HOTEL_CHAIN_NAME ||
+            "",
+          HOTEL_CITY_VALUE:
+            existingStay?.HOTEL_CITY_VALUE || hotel?.HOTEL_CITY_VALUE || cityGroup?.CITY_NAME || "",
+          SEASONS: matchedSeasons,
+          SEASON_NAME:
+            matchedSeasons.length > 0
+              ? matchedSeasons.map(item => getSeasonLabel(item)).join(" • ")
+              : existingStay?.SEASON_NAME || "",
+        };
+      }
+
+      return buildStayFromHotel(hotel, cityGroup, option, findMatchingSeasonsFn);
     })
     .filter(Boolean);
 
@@ -444,6 +499,7 @@ const mapSavedToOptions = (savedOptions = [], overnightCities = []) => {
           HOTEL_CITY_VALUE: stay?.HOTEL_CITY_VALUE || group?.CITY_NAME || "",
           SEASON_ID: asId(stay?.SEASON_ID),
           SEASON_NAME: stay?.SEASON_NAME || "",
+          SEASONS: asArray(stay?.SEASONS),
           NIGHTS: String(stay?.NIGHTS ?? ""),
           OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || group?.OVERNIGHT_DATE || "",
         })),
@@ -480,6 +536,7 @@ const mapSavedToOptions = (savedOptions = [], overnightCities = []) => {
           HOTEL_CITY_VALUE: stay?.HOTEL_CITY_VALUE || existing.CITY_NAME || "",
           SEASON_ID: asId(stay?.SEASON_ID),
           SEASON_NAME: stay?.SEASON_NAME || "",
+          SEASONS: asArray(stay?.SEASONS),
           NIGHTS: String(stay?.NIGHTS ?? ""),
           OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || existing.OVERNIGHT_DATE || "",
         },
@@ -548,6 +605,7 @@ const Accommodation = () => {
   const quotationLoading = useSelector(state => state.Quotations?.loading);
   const roles = useSelector(state => state.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const canViewPrices = canViewQuotationPrices(roles);
   const readOnly = isQuotationReadOnly(quotation);
   const canEditQuotation = canMutate && !readOnly;
 
@@ -752,14 +810,25 @@ const Accommodation = () => {
     );
   };
 
-  const handleFilterChange = e => {
-    if (!canEditQuotation) {
-      notifyError(
-        readOnly ? getQuotationReadOnlyMessage(quotation) : "Permission/role mismatch"
-      );
-      return;
-    }
+  const findMatchingSeasons = (hotel, overnightDate, nights) => {
+    const startDate = toDateOnly(overnightDate);
+    const totalStayNights = Math.max(1, toNumber(nights));
+    const endExclusive = addDays(startDate, totalStayNights);
+    const seasons = asArray(hotel?.seasons);
 
+    if (!startDate || !endExclusive) return [];
+
+    return seasons.filter(item => {
+      const from = toDateOnly(item?.FROM_DATE || item?.START_DATE || item?.DATE_FROM);
+      const to = toDateOnly(item?.TO_DATE || item?.END_DATE || item?.DATE_TO);
+
+      if (!from || !to) return false;
+
+      return from < endExclusive && to >= startDate;
+    });
+  };
+
+  const handleFilterChange = e => {
     const { name, value } = e.target;
     setFilters(prev => ({
       ...prev,
@@ -1014,7 +1083,7 @@ const Accommodation = () => {
               },
               option,
               searchResults,
-              findMatchingSeason
+              findMatchingSeasons
             );
           }),
         };
@@ -1150,6 +1219,7 @@ const Accommodation = () => {
           HOTEL_CITY_VALUE: stay?.HOTEL_CITY_VALUE || cityGroup?.CITY_NAME || "",
           SEASON_ID: asId(stay?.SEASON_ID),
           SEASON_NAME: stay?.SEASON_NAME || "",
+          SEASONS: asArray(stay?.SEASONS),
           NIGHTS: toNumber(stay?.NIGHTS),
           OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "",
         })),
@@ -1255,7 +1325,6 @@ const Accommodation = () => {
     }
 
     const payload = buildPayload();
-    console.log("Accommodation payload", payload);
 
     if (savedForCurrentQuotation?._id) {
       dispatch(
@@ -1321,7 +1390,7 @@ const Accommodation = () => {
             <>
               <Row>
                 <Col lg="12">
-                  <Card>
+                  <Card className="border-0 shadow-sm">
                     <CardBody>
                       <div className="d-flex justify-content-between align-items-center mb-3">
                         <h4 className="card-title mb-0">Quotation Summary</h4>
@@ -1380,7 +1449,7 @@ const Accommodation = () => {
                                   <Badge
                                     key={getId(city?.OVERNIGHT_CITY || city?.CITY_ID)}
                                     color="light"
-                                    className="text-dark"
+                                    className="text-dark rounded-pill px-3 py-2"
                                   >
                                     {city?.OVERNIGHT_CITY_NAME || city?.CITY_NAME || "-"}:{" "}
                                     {toNumber(city?.TOTAL_NIGHTS)} night(s)
@@ -1398,7 +1467,7 @@ const Accommodation = () => {
 
               <Row>
                 <Col xs="12">
-                  <Card>
+                  <Card className="border-0 shadow-sm">
                     <CardBody>
                       <div className="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
                         <div>
@@ -1418,6 +1487,25 @@ const Accommodation = () => {
                             <i className="bx bx-plus me-1" />
                             Add Option
                           </Button>
+
+                          <Button
+                            color="outline-primary"
+                            onClick={() => handleSearch(false)}
+                            disabled={readOnly || searching}
+                          >
+                            {searching ? (
+                              <>
+                                <Spinner size="sm" className="me-2" />
+                                Refreshing...
+                              </>
+                            ) : (
+                              <>
+                                <i className="bx bx-refresh me-1" />
+                                Refresh Hotels
+                              </>
+                            )}
+                          </Button>
+
                           <Button
                             color="success"
                             onClick={handleSave}
@@ -1449,7 +1537,7 @@ const Accommodation = () => {
                               optionValidation.find(item => item.optionId === option.localId)?.errors || {};
 
                             return (
-                              <Card key={option.localId} className="border mb-3">
+                              <Card key={option.localId} className="border mb-3 shadow-none">
                                 <CardBody>
                                   <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
                                     <div className="flex-grow-1">
@@ -1535,7 +1623,7 @@ const Accommodation = () => {
                                       .filter(Boolean);
 
                                     return (
-                                      <Card key={cityGroup.localId} className="border mb-3">
+                                      <Card key={cityGroup.localId} className="border mb-3 shadow-none">
                                         <CardBody>
                                           <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                                             <div>
@@ -1546,7 +1634,7 @@ const Accommodation = () => {
                                               </div>
                                             </div>
 
-                                            <Badge color="light" className="text-dark">
+                                            <Badge color="light" className="text-dark rounded-pill px-3 py-2">
                                               {stars ? getStarLabel(stars) : "No stars selected"}
                                             </Badge>
                                           </div>
@@ -1572,7 +1660,7 @@ const Accommodation = () => {
                                                   Choose Hotels
                                                 </Button>
 
-                                                <Badge color="light" className="text-dark">
+                                                <Badge color="light" className="text-dark rounded-pill px-3 py-2">
                                                   Selected: {selectedStays.length}
                                                 </Badge>
                                               </div>
@@ -1595,9 +1683,19 @@ const Accommodation = () => {
                                                       s => String(asId(s?.HOTEL_ID) || "") === hotelId
                                                     );
 
-                                                    const autoSeason = hotel
-                                                      ? findMatchingSeason(hotel, cityGroup?.OVERNIGHT_DATE)
-                                                      : null;
+                                                    const visibleSeasons =
+                                                      hotel && cityGroup?.OVERNIGHT_DATE
+                                                        ? findMatchingSeasons(
+                                                            hotel,
+                                                            cityGroup?.OVERNIGHT_DATE,
+                                                            cityGroup?.TOTAL_NIGHTS
+                                                          )
+                                                        : asArray(stay?.SEASONS);
+
+                                                    const fallbackSeason =
+                                                      hotel && cityGroup?.OVERNIGHT_DATE
+                                                        ? findMatchingSeason(hotel, cityGroup?.OVERNIGHT_DATE)
+                                                        : null;
 
                                                     const rowErrors =
                                                       stayIndex >= 0 ? cityErrors?.stays?.[stayIndex] || {} : {};
@@ -1605,12 +1703,8 @@ const Accommodation = () => {
                                                     return (
                                                       <Col xl="4" md="6" sm="12" key={hotelId}>
                                                         <Card
-                                                          className="h-100 border border-primary"
+                                                          className="h-100 border border-primary shadow-sm"
                                                           style={{
-                                                            cursor: "default",
-                                                            transition: "all 0.2s ease",
-                                                            transform: "translateY(-2px)",
-                                                            boxShadow: "0 0.5rem 1rem rgba(0,0,0,.08)",
                                                             backgroundColor: "#f8fbff",
                                                           }}
                                                         >
@@ -1639,10 +1733,32 @@ const Accommodation = () => {
                                                             </div>
 
                                                             <div className="mb-3">
-                                                              <Label className="form-label mb-1">Season</Label>
+                                                              <Label className="form-label mb-1">Seasons</Label>
                                                               <div className="form-control bg-light">
-                                                                {stay?.SEASON_NAME || getSeasonLabel(autoSeason)}
+                                                                {visibleSeasons.length > 0
+                                                                  ? visibleSeasons.map(getSeasonLabel).join(" • ")
+                                                                  : stay?.SEASON_NAME || getSeasonLabel(fallbackSeason)}
                                                               </div>
+                                                              {canViewPrices ? (
+                                                                <div className="d-flex flex-wrap gap-2 mt-2">
+                                                                  {visibleSeasons
+                                                                    .map((season, seasonIndex) => {
+                                                                      const seasonPrice = getSeasonPrice(season);
+                                                                      if (seasonPrice === null) return null;
+
+                                                                      return (
+                                                                        <Badge
+                                                                          key={`${hotelId}-price-${seasonIndex}`}
+                                                                          color="primary"
+                                                                          className="rounded-pill px-3 py-2"
+                                                                        >
+                                                                          {getSeasonLabel(season)}: {formatMoney(seasonPrice)}
+                                                                        </Badge>
+                                                                      );
+                                                                    })
+                                                                    .filter(Boolean)}
+                                                                </div>
+                                                              ) : null}
                                                             </div>
 
                                                             <div className="mb-3">
@@ -1763,38 +1879,85 @@ const Accommodation = () => {
                   id => String(asId(id) || "") === hotelId
                 );
 
+                const visibleSeasons = activePickerCityGroup?.OVERNIGHT_DATE
+                  ? findMatchingSeasons(
+                      hotel,
+                      activePickerCityGroup?.OVERNIGHT_DATE,
+                      activePickerCityGroup?.TOTAL_NIGHTS
+                    )
+                  : [];
+
                 return (
                   <div
                     key={hotelId}
-                    className={`border rounded p-3 d-flex justify-content-between align-items-center ${
+                    className={`border rounded p-3 ${
                       checked ? "border-primary bg-light" : ""
                     }`}
                   >
-                    <div>
-                      <div className="fw-semibold">{getHotelLabel(hotel)}</div>
-                      <div className="text-muted small">
-                        {hotel?.HOTEL_CHAIN_VALUE || hotel?.HOTEL_CHAIN_NAME || "-"} •{" "}
-                        {getStarLabel(hotel?.HOTEL_STARS)}
+                    <div className="d-flex justify-content-between align-items-center gap-2">
+                      <div>
+                        <div className="fw-semibold">{getHotelLabel(hotel)}</div>
+                        <div className="text-muted small">
+                          {hotel?.HOTEL_CHAIN_VALUE || hotel?.HOTEL_CHAIN_NAME || "-"} •{" "}
+                          {getStarLabel(hotel?.HOTEL_STARS)}
+                        </div>
                       </div>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        color={checked ? "primary" : "light"}
+                        className={checked ? "" : "border"}
+                        onClick={() =>
+                          handleHotelCheckboxToggle(
+                            hotelPickerContext.optionLocalId,
+                            hotelPickerContext.cityId,
+                            hotelId
+                          )
+                        }
+                        disabled={readOnly}
+                      >
+                        <i className={`bx ${checked ? "bx-check-circle" : "bx-plus-circle"} me-1`} />
+                        {checked ? "Selected" : "Select"}
+                      </Button>
                     </div>
 
-                    <Button
-                      type="button"
-                      size="sm"
-                      color={checked ? "primary" : "light"}
-                      className={checked ? "" : "border"}
-                      onClick={() =>
-                        handleHotelCheckboxToggle(
-                          hotelPickerContext.optionLocalId,
-                          hotelPickerContext.cityId,
-                          hotelId
-                        )
-                      }
-                      disabled={readOnly}
-                    >
-                      <i className={`bx ${checked ? "bx-check-circle" : "bx-plus-circle"} me-1`} />
-                      {checked ? "Selected" : "Select"}
-                    </Button>
+                    {visibleSeasons.length > 0 ? (
+                      <div className="mt-3">
+                        <div className="d-flex flex-wrap gap-2">
+                          {visibleSeasons.map((season, seasonIndex) => (
+                            <Badge
+                              key={`${hotelId}-picker-season-${seasonIndex}`}
+                              color="light"
+                              className="text-dark rounded-pill px-3 py-2"
+                            >
+                              {getSeasonLabel(season)}
+                            </Badge>
+                          ))}
+                        </div>
+
+                        {canViewPrices ? (
+                          <div className="d-flex flex-wrap gap-2 mt-2">
+                            {visibleSeasons
+                              .map((season, seasonIndex) => {
+                                const seasonPrice = getSeasonPrice(season);
+                                if (seasonPrice === null) return null;
+
+                                return (
+                                  <Badge
+                                    key={`${hotelId}-picker-price-${seasonIndex}`}
+                                    color="primary"
+                                    className="rounded-pill px-3 py-2"
+                                  >
+                                    {getSeasonLabel(season)}: {formatMoney(seasonPrice)}
+                                  </Badge>
+                                );
+                              })
+                              .filter(Boolean)}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}

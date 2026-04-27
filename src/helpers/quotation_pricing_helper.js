@@ -1,4 +1,5 @@
-// path: src/helpers/quotation_pricing_helper.js
+import { hasAnyRole } from "./coe_roles";
+
 export const QUOTATION_PRICING_STATUS = Object.freeze({
   DRAFT: "DRAFT",
   SEND_FOR_PRICING: "SEND_FOR_PRICING",
@@ -6,6 +7,11 @@ export const QUOTATION_PRICING_STATUS = Object.freeze({
   REJECTED: "REJECTED",
   CANCELLED: "CANCELLED",
 });
+
+export const QUOTATION_PRICE_VIEW_ROLES = Object.freeze([
+  "ACCOUNTING",
+  "USER_COMPANY",
+]);
 
 export const normalizeQuotationStatus = value =>
   String(value || "")
@@ -38,6 +44,9 @@ export const canSendQuotationForPricing = quotation => {
     !status
   );
 };
+
+export const canViewQuotationPrices = roles =>
+  hasAnyRole(roles, QUOTATION_PRICE_VIEW_ROLES);
 
 export const getQuotationStatusBadgeColor = status => {
   switch (normalizeQuotationStatus(status)) {

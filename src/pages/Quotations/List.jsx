@@ -1,4 +1,3 @@
-// path: src/pages/Quotations/List.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
@@ -106,6 +105,27 @@ const normalizeStatus = value =>
     .replace(/\s+/g, "_")
     .replace(/-/g, "_");
 
+const calculateDurationDays = (startDate, endDate) => {
+  if (!startDate || !endDate) return "";
+
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
+
+  const startOnly = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate()
+  );
+  const endOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+  const diffMs = endOnly.getTime() - startOnly.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  return diffDays >= 1 ? String(diffDays) : "";
+};
+
 const QuotationsList = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -153,7 +173,7 @@ const QuotationsList = () => {
     if (Object.keys(nextHidden).length !== Object.keys(hiddenQuotationIds).length) {
       setHiddenQuotationIds(nextHidden);
     }
-  }, [items]);
+  }, [items, hiddenQuotationIds]);
 
   const travelAgentMap = useMemo(() => {
     const map = new Map();
@@ -217,9 +237,6 @@ const QuotationsList = () => {
     return {
       ...row,
       STATUS: effectiveStatus,
-      QUOTATION_STATUS: effectiveStatus,
-      status: effectiveStatus,
-      statusLabel: effectiveStatus,
     };
   };
 
@@ -279,9 +296,9 @@ const QuotationsList = () => {
     travelAgentMap,
     nationalityMap,
     quotationTypeMap,
-    statusOverrides,
-    hiddenQuotationIds,
     rejectReasonMap,
+    hiddenQuotationIds,
+    statusOverrides,
   ]);
 
   const errors = useMemo(() => {
@@ -302,11 +319,24 @@ const QuotationsList = () => {
     if (!String(form.QUOTATION_END_DATE || "").trim()) {
       next.QUOTATION_END_DATE = "Required";
     }
+
+    const calculatedDuration = calculateDurationDays(
+      form.QUOTATION_START_DATE,
+      form.QUOTATION_END_DATE
+    );
+
     if (!String(form.QUOTATION_DURATION_DAYS || "").trim()) {
       next.QUOTATION_DURATION_DAYS = "Required";
     } else if (Number(form.QUOTATION_DURATION_DAYS) <= 0) {
       next.QUOTATION_DURATION_DAYS = "Duration must be greater than 0";
+    } else if (
+      calculatedDuration &&
+      Number(form.QUOTATION_DURATION_DAYS) !== Number(calculatedDuration)
+    ) {
+      next.QUOTATION_DURATION_DAYS =
+        "Duration must match start date and end date";
     }
+
     if (!String(form.NUMBER_OF_PAX || "").trim()) {
       next.NUMBER_OF_PAX = "Required";
     } else if (Number(form.NUMBER_OF_PAX) <= 0) {
@@ -399,8 +429,27 @@ const QuotationsList = () => {
 
   const handleChange = e => {
     const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
-    setTouched(prev => ({ ...prev, [name]: true }));
+
+    setForm(prev => {
+      const next = { ...prev, [name]: value };
+
+      if (name === "QUOTATION_START_DATE" || name === "QUOTATION_END_DATE") {
+        next.QUOTATION_DURATION_DAYS = calculateDurationDays(
+          name === "QUOTATION_START_DATE" ? value : next.QUOTATION_START_DATE,
+          name === "QUOTATION_END_DATE" ? value : next.QUOTATION_END_DATE
+        );
+      }
+
+      return next;
+    });
+
+    setTouched(prev => ({
+      ...prev,
+      [name]: true,
+      ...(name === "QUOTATION_START_DATE" || name === "QUOTATION_END_DATE"
+        ? { QUOTATION_DURATION_DAYS: true }
+        : {}),
+    }));
   };
 
   const touchAll = () => {
@@ -469,57 +518,12 @@ const QuotationsList = () => {
     }
 
     dispatch(
-      updateQuotation(editing._id, buildPayload(), updated => {
+      updateQuotation(editing._id, buildPayload(), () => {
         setEditOpen(false);
         setEditing(null);
         resetFormState();
-
-        if (!updated?._id) {
-          dispatch(fetchQuotations());
-        }
+        dispatch(fetchQuotations());
       })
-    );
-  };
-
-  const handleCancelQuotation = () => {
-    if (!cancelling?._id) {
-      notifyError("Quotation id is missing.");
-      return;
-    }
-
-    if (isQuotationReadOnly(withEffectiveStatus(cancelling))) {
-      notifyError(getQuotationReadOnlyMessage(withEffectiveStatus(cancelling)));
-      return;
-    }
-
-    if (!canShowCancelButton(cancelling)) {
-      notifyError("Cancel is allowed only for Draft or Rejected quotations.");
-      return;
-    }
-
-    const quotationId = cancelling._id;
-
-    dispatch(
-      cancelQuotationPricing(
-        quotationId,
-        { CANCEL_REASON: "" },
-        () => {
-          setStatusOverrides(prev => ({
-            ...prev,
-            [quotationId]: "CANCELLED",
-          }));
-
-          setHiddenQuotationIds(prev => ({
-            ...prev,
-            [quotationId]: true,
-          }));
-
-          setCancelOpen(false);
-          setCancelling(null);
-
-          notifyInfo("Quotation status changed to CANCELLED.");
-        }
-      )
     );
   };
 
@@ -534,66 +538,77 @@ const QuotationsList = () => {
       return;
     }
 
+    if (isQuotationReadOnly(withEffectiveStatus(row))) {
+      notifyError(getQuotationReadOnlyMessage(withEffectiveStatus(row)));
+      return;
+    }
+
     if (!canShowSendForPricingButton(row)) {
       notifyError("This quotation cannot be sent for pricing.");
       return;
     }
 
-    const quotationId = row._id;
-
     dispatch(
-      sendQuotationForPricing(
-        quotationId,
-        { BOARD_BASIS: "BB" },
-        () => {
-          setStatusOverrides(prev => ({
-            ...prev,
-            [quotationId]: "SEND_FOR_PRICING",
-          }));
-
-          setHiddenQuotationIds(prev => ({
-            ...prev,
-            [quotationId]: true,
-          }));
-
-          notifyInfo("Quotation status changed to SEND_FOR_PRICING.");
-        }
-      )
+      sendQuotationForPricing(row._id, {}, () => {
+        setStatusOverrides(prev => ({
+          ...prev,
+          [row._id]: "SEND_FOR_PRICING",
+        }));
+        setHiddenQuotationIds(prev => ({
+          ...prev,
+          [row._id]: true,
+        }));
+        notifyInfo("Quotation sent for pricing.");
+      })
     );
   };
 
-  document.title = "Quotations | Skote";
+  const handleConfirmCancel = () => {
+    if (!cancelling?._id) {
+      notifyError("Quotation id is missing.");
+      return;
+    }
+
+    dispatch(
+      cancelQuotationPricing(cancelling._id, {}, () => {
+        setStatusOverrides(prev => ({
+          ...prev,
+          [cancelling._id]: "CANCELLED",
+        }));
+        setHiddenQuotationIds(prev => ({
+          ...prev,
+          [cancelling._id]: true,
+        }));
+        setCancelOpen(false);
+        setCancelling(null);
+        notifyInfo("Quotation cancelled.");
+      })
+    );
+  };
 
   return (
     <React.Fragment>
       <div className="page-content">
         <Container fluid>
-          <Breadcrumbs title="Quotations" breadcrumbItem="Quotations" />
+          <Breadcrumbs title="Quotations" breadcrumbItem="List" />
 
           <Row>
             <Col xs="12">
               <Card>
                 <CardBody>
-                  <div className="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+                  <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
                     <div>
-                      <h4 className="card-title mb-1">Quotations</h4>
-                      <p className="card-title-desc mb-0">
-                        List quotations, create, edit, cancel, and plan days.
-                      </p>
+                      <h4 className="card-title mb-0">Quotations</h4>
                     </div>
 
-                    <div className="d-flex gap-2">
+                    <div className="d-flex flex-wrap gap-2">
                       <Input
                         value={search}
                         onChange={e => setSearch(e.target.value)}
-                        placeholder="Search quotation..."
-                        style={{ minWidth: 260 }}
+                        placeholder="Search..."
+                        style={{ minWidth: 220 }}
                       />
-                      <Button
-                        color="primary"
-                        onClick={openCreate}
-                        disabled={!canMutate || lookupsLoading}
-                      >
+                      <Button color="primary" onClick={openCreate} disabled={!canMutate}>
                         <i className="bx bx-plus me-1" />
                         Create
                       </Button>
@@ -604,88 +619,54 @@ const QuotationsList = () => {
                     <Table className="table align-middle table-nowrap mb-0">
                       <thead className="table-light">
                         <tr>
-                          <th style={{ width: 70 }}>#</th>
+                          <th>#</th>
                           <th>Reference Number</th>
                           <th>Travel Agent</th>
                           <th>Nationality</th>
                           <th>Quotation Type</th>
-                          <th>Start Date</th>
-                          <th>End Date</th>
-                          <th>Duration</th>
-                          <th>Number of Pax</th>
-                          <th>Status / Reject Reason</th>
-                          <th style={{ width: 420 }}>Action</th>
+                          <th>Status</th>
+                          <th>Reject Reason</th>
+                          <th style={{ width: 320 }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {loading ? (
                           <tr>
-                            <td colSpan="11" className="text-center py-4">
+                            <td colSpan="8" className="text-center py-4">
                               <Spinner size="sm" className="me-2" />
                               Loading...
                             </td>
                           </tr>
                         ) : filteredItems.length === 0 ? (
                           <tr>
-                            <td colSpan="11" className="text-center text-muted py-4">
+                            <td colSpan="8" className="text-center text-muted py-4">
                               No quotations found.
                             </td>
                           </tr>
                         ) : (
                           filteredItems.map((row, index) => {
+                            const readOnly = isQuotationReadOnly(withEffectiveStatus(row));
                             const effectiveStatus = getEffectiveStatus(row);
-                            const rowWithEffectiveStatus = withEffectiveStatus(row);
-                            const readOnly = isQuotationReadOnly(rowWithEffectiveStatus);
                             const showSendForPricing = canShowSendForPricingButton(row);
                             const showCancel = canShowCancelButton(row);
                             const rejectReason =
-                              normalizeStatus(effectiveStatus) === "REJECTED"
-                                ? rejectReasonMap.get(row?._id) || ""
-                                : "";
+                              rejectReasonMap.get(row?._id) || row?.REJECT_REASON || "-";
 
                             return (
                               <tr key={row?._id || index}>
                                 <td>{index + 1}</td>
-                                <td className="fw-semibold">
-                                  {row?.REFERANCE_NUMBER || "-"}
-                                </td>
+                                <td>{row?.REFERANCE_NUMBER || "-"}</td>
                                 <td>{travelAgentMap.get(row?.TRAVEL_AGENT_ID) || "-"}</td>
                                 <td>{nationalityMap.get(row?.NATIONALITY) || "-"}</td>
+                                <td>{quotationTypeMap.get(row?.QUOTATION_TYPE) || "-"}</td>
                                 <td>
-                                  {quotationTypeMap.get(row?.QUOTATION_TYPE) || "-"}
+                                  <Badge color={getQuotationStatusBadgeColor(effectiveStatus)}>
+                                    {effectiveStatus || "-"}
+                                  </Badge>
                                 </td>
-                                <td>{formatDateInput(row?.QUOTATION_START_DATE) || "-"}</td>
-                                <td>{formatDateInput(row?.QUOTATION_END_DATE) || "-"}</td>
+                                <td>{rejectReason}</td>
                                 <td>
-                                  {row?.DURATION_IN_DAYS ??
-                                    row?.QUOTATION_DURATION_DAYS ??
-                                    "-"}
-                                </td>
-                                <td>{row?.NUMBER_OF_PAX ?? "-"}</td>
-                                <td>
-                                  {effectiveStatus ? (
-                                    <>
-                                      <Badge
-                                        color={getQuotationStatusBadgeColor(effectiveStatus)}
-                                        pill
-                                      >
-                                        {effectiveStatus}
-                                      </Badge>
-                                      {rejectReason ? (
-                                        <div
-                                          className="text-danger mt-2"
-                                          style={{ whiteSpace: "normal", maxWidth: 240 }}
-                                        >
-                                          <strong>Reason:</strong> {rejectReason}
-                                        </div>
-                                      ) : null}
-                                    </>
-                                  ) : (
-                                    "-"
-                                  )}
-                                </td>
-                                <td>
-                                  <div className="d-flex gap-2 flex-wrap">
+                                  <div className="d-flex flex-wrap gap-2">
                                     <Link
                                       to={`/quotations/${row?._id}`}
                                       className="btn btn-sm btn-primary"
@@ -836,9 +817,7 @@ const QuotationsList = () => {
                     name="QUOTATION_START_DATE"
                     value={form.QUOTATION_START_DATE}
                     onChange={handleChange}
-                    invalid={
-                      !!(touched.QUOTATION_START_DATE && errors.QUOTATION_START_DATE)
-                    }
+                    invalid={!!(touched.QUOTATION_START_DATE && errors.QUOTATION_START_DATE)}
                   />
                   <FormFeedback>{errors.QUOTATION_START_DATE}</FormFeedback>
                 </div>
@@ -870,13 +849,7 @@ const QuotationsList = () => {
                     name="QUOTATION_DURATION_DAYS"
                     value={form.QUOTATION_DURATION_DAYS}
                     onChange={handleChange}
-                    placeholder="Enter duration in days"
-                    invalid={
-                      !!(
-                        touched.QUOTATION_DURATION_DAYS &&
-                        errors.QUOTATION_DURATION_DAYS
-                      )
-                    }
+                    invalid={!!(touched.QUOTATION_DURATION_DAYS && errors.QUOTATION_DURATION_DAYS)}
                   />
                   <FormFeedback>{errors.QUOTATION_DURATION_DAYS}</FormFeedback>
                 </div>
@@ -894,7 +867,6 @@ const QuotationsList = () => {
                     name="NUMBER_OF_PAX"
                     value={form.NUMBER_OF_PAX}
                     onChange={handleChange}
-                    placeholder="Enter number of pax"
                     invalid={!!(touched.NUMBER_OF_PAX && errors.NUMBER_OF_PAX)}
                   />
                   <FormFeedback>{errors.NUMBER_OF_PAX}</FormFeedback>
@@ -904,14 +876,7 @@ const QuotationsList = () => {
           </ModalBody>
 
           <ModalFooter>
-            <Button
-              color="light"
-              type="button"
-              onClick={() => {
-                setCreateOpen(false);
-                resetFormState();
-              }}
-            >
+            <Button color="light" type="button" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
             <Button color="primary" type="submit" disabled={loading}>
@@ -1008,9 +973,7 @@ const QuotationsList = () => {
                     name="QUOTATION_START_DATE"
                     value={form.QUOTATION_START_DATE}
                     onChange={handleChange}
-                    invalid={
-                      !!(touched.QUOTATION_START_DATE && errors.QUOTATION_START_DATE)
-                    }
+                    invalid={!!(touched.QUOTATION_START_DATE && errors.QUOTATION_START_DATE)}
                   />
                   <FormFeedback>{errors.QUOTATION_START_DATE}</FormFeedback>
                 </div>
@@ -1042,13 +1005,7 @@ const QuotationsList = () => {
                     name="QUOTATION_DURATION_DAYS"
                     value={form.QUOTATION_DURATION_DAYS}
                     onChange={handleChange}
-                    placeholder="Enter duration in days"
-                    invalid={
-                      !!(
-                        touched.QUOTATION_DURATION_DAYS &&
-                        errors.QUOTATION_DURATION_DAYS
-                      )
-                    }
+                    invalid={!!(touched.QUOTATION_DURATION_DAYS && errors.QUOTATION_DURATION_DAYS)}
                   />
                   <FormFeedback>{errors.QUOTATION_DURATION_DAYS}</FormFeedback>
                 </div>
@@ -1066,7 +1023,6 @@ const QuotationsList = () => {
                     name="NUMBER_OF_PAX"
                     value={form.NUMBER_OF_PAX}
                     onChange={handleChange}
-                    placeholder="Enter number of pax"
                     invalid={!!(touched.NUMBER_OF_PAX && errors.NUMBER_OF_PAX)}
                   />
                   <FormFeedback>{errors.NUMBER_OF_PAX}</FormFeedback>
@@ -1076,19 +1032,11 @@ const QuotationsList = () => {
           </ModalBody>
 
           <ModalFooter>
-            <Button
-              color="light"
-              type="button"
-              onClick={() => {
-                setEditOpen(false);
-                setEditing(null);
-                resetFormState();
-              }}
-            >
+            <Button color="light" type="button" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
             <Button color="primary" type="submit" disabled={loading}>
-              Save Changes
+              Save
             </Button>
           </ModalFooter>
         </Form>
@@ -1096,74 +1044,17 @@ const QuotationsList = () => {
 
       <Modal isOpen={cancelOpen} toggle={() => setCancelOpen(false)} centered>
         <ModalHeader toggle={() => setCancelOpen(false)}>
-          Confirm Cancel
+          Cancel Quotation
         </ModalHeader>
         <ModalBody>
           Are you sure you want to cancel quotation{" "}
-          <b>{cancelling?.REFERANCE_NUMBER || "-"}</b>?
-          <div className="text-muted mt-2">
-            This action will change the quotation status to cancelled.
-          </div>
-
-          <div className="mt-3 border rounded p-3 bg-light">
-            <div className="mb-2">
-              <span className="fw-semibold">Travel Agent:</span>{" "}
-              {travelAgentMap.get(cancelling?.TRAVEL_AGENT_ID) || "-"}
-            </div>
-            <div className="mb-2">
-              <span className="fw-semibold">Nationality:</span>{" "}
-              {nationalityMap.get(cancelling?.NATIONALITY) || "-"}
-            </div>
-            <div className="mb-2">
-              <span className="fw-semibold">Quotation Type:</span>{" "}
-              {quotationTypeMap.get(cancelling?.QUOTATION_TYPE) || "-"}
-            </div>
-            <div className="mb-2">
-              <span className="fw-semibold">Start Date:</span>{" "}
-              {formatDateInput(cancelling?.QUOTATION_START_DATE) || "-"}
-            </div>
-            <div className="mb-2">
-              <span className="fw-semibold">End Date:</span>{" "}
-              {formatDateInput(cancelling?.QUOTATION_END_DATE) || "-"}
-            </div>
-            <div className="mb-2">
-              <span className="fw-semibold">Status:</span>{" "}
-              {getEffectiveStatus(cancelling) ? (
-                <Badge
-                  color={getQuotationStatusBadgeColor(getEffectiveStatus(cancelling))}
-                  pill
-                >
-                  {getEffectiveStatus(cancelling)}
-                </Badge>
-              ) : (
-                "-"
-              )}
-            </div>
-            <div className="mb-0">
-              <span className="fw-semibold">Duration:</span>{" "}
-              {cancelling?.DURATION_IN_DAYS ??
-                cancelling?.QUOTATION_DURATION_DAYS ??
-                "-"}
-            </div>
-          </div>
+          <strong>{cancelling?.REFERANCE_NUMBER || "-"}</strong>?
         </ModalBody>
         <ModalFooter>
-          <Button
-            color="light"
-            type="button"
-            onClick={() => {
-              setCancelOpen(false);
-              setCancelling(null);
-            }}
-          >
+          <Button color="light" onClick={() => setCancelOpen(false)}>
             Close
           </Button>
-          <Button
-            color="danger"
-            type="button"
-            onClick={handleCancelQuotation}
-            disabled={loading || pricingSaving}
-          >
+          <Button color="danger" onClick={handleConfirmCancel} disabled={pricingSaving}>
             Confirm Cancel
           </Button>
         </ModalFooter>
