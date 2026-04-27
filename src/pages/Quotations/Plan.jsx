@@ -1,4 +1,3 @@
-// path: src/pages/Quotations/Plan.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -33,6 +32,7 @@ import {
 import {
   isQuotationReadOnly,
   getQuotationReadOnlyMessage,
+  canViewQuotationPrices,
 } from "../../helpers/quotation_pricing_helper";
 
 const ALLOWED_ROLES = ["COMPANY_ADMIN", "CONTRACTING"];
@@ -118,6 +118,12 @@ const getCityLabel = item =>
   item?.VALUE ||
   "-";
 
+const formatMoney = value => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  return amount.toFixed(2);
+};
+
 const getCompanyLabel = item =>
   item?.COMPANY_NAME ||
   item?.NAME ||
@@ -159,76 +165,113 @@ const buildDayState = ({
   const existingCityNames = Array.from(
     new Set(
       existingSelectedPlaces
-        .map(place => {
-          const cityId = getId(place?.PLACE_CITY);
-          const city = cityById.get(cityId);
-          return city ? getCityLabel(city) : "";
-        })
+        .map(item => cityById.get(getId(item?.PLACE_CITY)))
+        .filter(Boolean)
+        .map(getCityLabel)
         .filter(Boolean)
     )
   );
 
-  const existingMeals = Array.isArray(existing?.MEALS) ? existing.MEALS : [];
+  const routeText = existing?.ROUTE_TEXT
+    ? existing.ROUTE_TEXT
+    : existingCityNames.join(" - ");
 
   return {
     _id: existing?._id || "",
-    ORIGINAL_QUOTATION_ID: quotationId,
+    ORIGINAL_QUOTATION_ID:
+      existing?.ORIGINAL_QUOTATION_ID || quotationId || "",
     DAY_ORDER: order,
     DAY_DATE: date,
-    ROUTE_TEXT:
-      existing?.ROUTE_TEXT ||
-      existing?.DAY_SNAPSHOT?.route?.text ||
-      existing?.ROUTE?.text ||
-      existingCityNames.join(" - "),
-    TRANSPORTATION_TYPE: getId(existing?.TRANSPORTATION_TYPE),
-    TRANSPORTATION_COMPANY_ID: getId(
-      existing?.TRANSPORTATION_COMPANY_ID || existing?.TRANSPORTATION_COMPANY
-    ),
-    TRANSPORTATION_BY: getId(existing?.TRANSPORTATION_BY),
-    TRANSPORTATION_COMPANY_NAME:
-      existing?.TRANSPORTATION_COMPANY_NAME ||
-      existing?.TRANSPORTATION_COMPANY?.COMPANY_NAME ||
+
+    ROUTE_TEXT: routeText,
+
+    TRANSPORTATION_TYPE: existing?.TRANSPORTATION?.ids?.TRANSPORTATION_TYPE ||
+      existing?.TRANSPORTATION_TYPE ||
       "",
-    TRANSPORTATION_RATE_ID: getId(existing?.TRANSPORTATION_RATE_ID || existing?.TRANSPORTATION_RATE),
+    TRANSPORTATION_COMPANY_ID:
+      existing?.TRANSPORTATION?.ids?.TRANSPORTATION_COMPANY_ID ||
+      existing?.TRANSPORTATION_COMPANY_ID ||
+      "",
+    TRANSPORTATION_COMPANY_NAME:
+      existing?.TRANSPORTATION?.texts?.TRANSPORTATION_COMPANY_NAME ||
+      existing?.TRANSPORTATION_COMPANY_NAME ||
+      "",
+    TRANSPORTATION_BY:
+      existing?.TRANSPORTATION?.ids?.TRANSPORTATION_BY ||
+      existing?.TRANSPORTATION_BY ||
+      "",
+    TRANSPORTATION_RATE_ID:
+      existing?.TRANSPORTATION?.ids?.TRANSPORTATION_RATE_ID ||
+      existing?.TRANSPORTATION_RATE_ID ||
+      getId(existing?.TRANSPORTATION_RATE_ID || existing?.TRANSPORTATION_RATE),
     TRANSPORTATION_RATE:
-      existing?.TRANSPORTATION_RATE?.RATE ??
+      existing?.TRANSPORTATION?.RATE ??
       existing?.TRANSPORTATION_RATE_AMOUNT ??
       existing?.TRANSPORTATION_RATE ??
+      existing?.RATE ??
       null,
     TRANSPORTATION_SIZE_LABEL:
-      existing?.TRANSPORTATION_SIZE_LABEL ||
+      existing?.TRANSPORTATION?.texts?.TRANSPORTATION_SIZE_LABEL ||
       existing?.TRANSPORTATION_BY_VALUE ||
+      existing?.TRANSPORTATION_SIZE_LABEL ||
       "",
     TRANSPORTATION_MIN_CAPACITY:
-      existing?.TRANSPORTATION_MIN_CAPACITY ??
-      existing?.TRANSPORTATION_BY?.MINIMUM_CAPACITY ??
+      existing?.TRANSPORTATION?.capacities?.MINIMUM_CAPACITY ??
+      existing?.MINIMUM_CAPACITY ??
       null,
     TRANSPORTATION_MAX_CAPACITY:
-      existing?.TRANSPORTATION_MAX_CAPACITY ??
-      existing?.TRANSPORTATION_BY?.MAXIMUM_CAPACITY ??
+      existing?.TRANSPORTATION?.capacities?.MAXIMUM_CAPACITY ??
+      existing?.MAXIMUM_CAPACITY ??
       null,
-    hasGuide: !!getId(existing?.GUIDE_TYPE),
-    GUIDE_TYPE: getId(existing?.GUIDE_TYPE),
-    hasMeals: existingMeals.length > 0,
+
+    hasGuide: !!(
+      existing?.GUIDE_TYPE ||
+      existing?.guide?.GUIDE_TYPE ||
+      existing?.guide?.enabled
+    ),
+    GUIDE_TYPE:
+      existing?.guide?.GUIDE_TYPE ||
+      existing?.GUIDE_TYPE ||
+      "",
+
+    hasMeals:
+      existing?.meals?.enabled ||
+      (Array.isArray(existing?.MEALS) && existing.MEALS.length > 0) ||
+      (Array.isArray(existing?.meals?.rows) && existing.meals.rows.length > 0),
     MEALS:
-      existingMeals.length > 0
-        ? existingMeals.map(m => ({
-            CITY_ID: getId(m?.CITY_ID || m?.REATAURANT_CITY || m?.RESTAURANT_CITY),
-            RESTAURANT_ID: getId(m?.RESTAURANT_ID),
-            MEAL_TYPE: getId(m?.MEAL_TYPE) || getMealValue(m),
+      (existing?.meals?.rows || existing?.MEALS || []).map(item => ({
+        CITY_ID: item?.CITY_ID || "",
+        RESTAURANT_ID: item?.RESTAURANT_ID || "",
+        MEAL_TYPE: item?.MEAL_TYPE || item?.MEAL_NAME || "",
+        MEAL_PRICE_PER_PERSON: item?.MEAL_PRICE_PER_PERSON ?? null,
+      })).length > 0
+        ? (existing?.meals?.rows || existing?.MEALS || []).map(item => ({
+            CITY_ID: item?.CITY_ID || "",
+            RESTAURANT_ID: item?.RESTAURANT_ID || "",
+            MEAL_TYPE: item?.MEAL_TYPE || item?.MEAL_NAME || "",
+            MEAL_PRICE_PER_PERSON: item?.MEAL_PRICE_PER_PERSON ?? null,
           }))
         : [{ CITY_ID: "", RESTAURANT_ID: "", MEAL_TYPE: "" }],
-    selectedEntranceFeePlaceIds: existingSelectedPlaces.map(p => getId(p)).filter(Boolean),
-    OVERNIGHT_CITY: getId(existing?.OVERNIGHT_CITY),
+
+    OVERNIGHT_CITY:
+      existing?.overnight?.OVERNIGHT_CITY ||
+      existing?.OVERNIGHT_CITY ||
+      "",
+
+    selectedEntranceFeePlaceIds:
+      existing?.entranceFees?.selectedPlaceIds ||
+      existingSelectedPlaces.map(item => getId(item?.PLACE_ID || item)) ||
+      [],
+
     touched: {},
   };
 };
 
-const SectionCard = ({ icon, title, subtitle, children, className = "" }) => (
-  <div className={`border rounded p-3 h-100 ${className}`}>
-    <div className="d-flex align-items-start mb-3">
-      <div className="avatar-xs me-3">
-        <span className="avatar-title rounded-circle bg-primary-subtle text-primary font-size-16">
+const SectionCard = ({ icon, title, subtitle, children }) => (
+  <div className="border rounded p-3 h-100 bg-white">
+    <div className="d-flex align-items-start gap-3 mb-3">
+      <div className="avatar-sm flex-shrink-0">
+        <span className="avatar-title rounded-circle bg-primary-subtle text-primary font-size-18">
           <i className={`bx ${icon}`} />
         </span>
       </div>
@@ -278,6 +321,7 @@ const PlanQuotation = () => {
 
   const roles = useSelector(state => state.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const canViewPrices = canViewQuotationPrices(roles);
   const readOnly = isQuotationReadOnly(quotation);
   const canEditQuotation = canMutate && !readOnly;
   const readOnlyMessage = getQuotationReadOnlyMessage(quotation);
@@ -428,22 +472,43 @@ const PlanQuotation = () => {
         return day;
       })
     );
-  }, [transportationBestRateByKey, transportationBestRateErrorByKey, quotationPax]);
+  }, [quotationPax, transportationBestRateByKey, transportationBestRateErrorByKey]);
+
+  const parseRouteCities = routeText => {
+    const names = String(routeText || "")
+      .split("-")
+      .map(item => item.trim())
+      .filter(Boolean);
+
+    const uniqueMap = new Map();
+    const unknownNames = [];
+
+    names.forEach(name => {
+      const city = cityNameMap.get(name.toLowerCase());
+      if (city) {
+        uniqueMap.set(getId(city), city);
+      } else {
+        unknownNames.push(name);
+      }
+    });
+
+    return {
+      uniqueCities: Array.from(uniqueMap.values()),
+      unknownNames,
+    };
+  };
 
   useEffect(() => {
     if (!quotationNationalityId) return;
 
     dayForms.forEach(day => {
-      const { uniqueCities, unknownNames } = parseRouteCities(day.ROUTE_TEXT);
-
-      if (unknownNames.length > 0) return;
+      const { uniqueCities } = parseRouteCities(day.ROUTE_TEXT);
 
       uniqueCities.forEach(city => {
         const cityId = getId(city);
         const key = routeKey(cityId, quotationNationalityId);
 
         if (
-          cityId &&
           !routeEntranceFeePlacesByKey?.[key] &&
           !routeEntranceFeePlacesLoadingByKey?.[key]
         ) {
@@ -460,125 +525,40 @@ const PlanQuotation = () => {
   ]);
 
   useEffect(() => {
-    dayForms.forEach(day => {
-      if (!day?.hasMeals) return;
+    const requestedCityIds = new Set();
 
+    dayForms.forEach(day => {
       (day.MEALS || []).forEach(meal => {
-        if (
-          meal?.CITY_ID &&
-          !restaurantsByCityId?.[meal.CITY_ID] &&
-          !restaurantsLoadingByCityId?.[meal.CITY_ID]
-        ) {
-          dispatch(fetchRestaurantsByCity(meal.CITY_ID));
+        if (meal.CITY_ID) {
+          requestedCityIds.add(meal.CITY_ID);
         }
       });
     });
+
+    requestedCityIds.forEach(cityId => {
+      if (
+        !restaurantsByCityId?.[cityId] &&
+        !restaurantsLoadingByCityId?.[cityId]
+      ) {
+        dispatch(fetchRestaurantsByCity(cityId));
+      }
+    });
   }, [dayForms, restaurantsByCityId, restaurantsLoadingByCityId, dispatch]);
-
-  useEffect(() => {
-    dayForms.forEach(day => {
-      const dayLog = buildBackendDayPayload(day);
-
-      console.groupCollapsed(`[PlanQuotation] Day ${day.DAY_ORDER}`);
-      console.log("Basic", dayLog.basic);
-      console.log("Route", dayLog.route);
-      console.log("TRANSPORTATION_RESOLVED", dayLog.TRANSPORTATION_RESOLVED);
-      console.log("Guide", dayLog.guide);
-      console.log("Meals", dayLog.meals);
-      console.log("NTRANCE_FEES", dayLog.NTRANCE_FEES);
-      console.log("TOTAL_ENTRANCE_FEES", dayLog.TOTAL_ENTRANCE_FEES);
-      console.log("Overnight", dayLog.overnight);
-      console.log("Backend Payload", dayLog);
-      console.log("Full Day JSON", JSON.stringify(dayLog, null, 2));
-      console.groupEnd();
-    });
-  }, [
-    dayForms,
-    cities,
-    transportationTypes,
-    transportationCompanies,
-    guideTypes,
-    quotationNationalityId,
-    restaurantsByCityId,
-  ]);
-
-  const parseRouteCities = routeText => {
-    const rawSegments = String(routeText || "")
-      .split("-")
-      .map(item => item.trim())
-      .filter(Boolean);
-
-    const matchedCities = [];
-    const unknownNames = [];
-
-    rawSegments.forEach(name => {
-      const city = cityNameMap.get(name.toLowerCase());
-      if (city) {
-        matchedCities.push(city);
-      } else {
-        unknownNames.push(name);
-      }
-    });
-
-    const uniqueCities = [];
-    const seen = new Set();
-
-    matchedCities.forEach(city => {
-      const cityId = getId(city);
-      if (!seen.has(cityId)) {
-        seen.add(cityId);
-        uniqueCities.push(city);
-      }
-    });
-
-    return { uniqueCities, unknownNames };
-  };
-
-  const requestTransportationBestRate = (
-    transportationType,
-    transportationCompanyId
-  ) => {
-    if (!quotationPax || !transportationType || !transportationCompanyId) return;
-
-    dispatch(
-      fetchTransportationBestRate(
-        transportationType,
-        quotationPax,
-        transportationCompanyId
-      )
-    );
-  };
-
-  const requestRouteEntranceFees = routeText => {
-    if (!quotationNationalityId) return;
-
-    const { uniqueCities, unknownNames } = parseRouteCities(routeText);
-    if (unknownNames.length > 0) return;
-
-    uniqueCities.forEach(city => {
-      const cityId = getId(city);
-      if (!cityId) return;
-      dispatch(fetchRouteEntranceFeePlaces(cityId, quotationNationalityId));
-    });
-  };
 
   const setDayValue = (dayOrder, updater) => {
     setDayForms(prev =>
-      prev.map(item =>
-        item.DAY_ORDER === dayOrder
+      prev.map(day =>
+        day.DAY_ORDER === dayOrder
           ? typeof updater === "function"
-            ? updater(item)
-            : { ...item, ...updater }
-          : item
+            ? updater(day)
+            : { ...day, ...updater }
+          : day
       )
     );
   };
 
   const handleFieldChange = (dayOrder, field, value) => {
     if (!canEditQuotation) return;
-
-    const currentDay =
-      dayForms.find(item => item.DAY_ORDER === dayOrder) || null;
 
     setDayValue(dayOrder, current => {
       const next = {
@@ -590,7 +570,14 @@ const PlanQuotation = () => {
         },
       };
 
+      if (field === "ROUTE_TEXT") {
+        next.selectedEntranceFeePlaceIds = [];
+        next.OVERNIGHT_CITY = "";
+      }
+
       if (field === "TRANSPORTATION_TYPE") {
+        next.TRANSPORTATION_COMPANY_ID = "";
+        next.TRANSPORTATION_COMPANY_NAME = "";
         next.TRANSPORTATION_BY = "";
         next.TRANSPORTATION_RATE_ID = "";
         next.TRANSPORTATION_RATE = null;
@@ -600,51 +587,62 @@ const PlanQuotation = () => {
       }
 
       if (field === "TRANSPORTATION_COMPANY_ID") {
+        next.TRANSPORTATION_COMPANY_NAME = "";
         next.TRANSPORTATION_BY = "";
         next.TRANSPORTATION_RATE_ID = "";
         next.TRANSPORTATION_RATE = null;
         next.TRANSPORTATION_SIZE_LABEL = "";
         next.TRANSPORTATION_MIN_CAPACITY = null;
         next.TRANSPORTATION_MAX_CAPACITY = null;
-
-        const selectedCompany =
-          transportationCompanies.find(x => getId(x) === value) || null;
-        next.TRANSPORTATION_COMPANY_NAME = selectedCompany
-          ? getCompanyLabel(selectedCompany)
-          : "";
       }
 
       return next;
     });
-
-    if (field === "ROUTE_TEXT") {
-      requestRouteEntranceFees(value);
-    }
-
-    if (field === "TRANSPORTATION_TYPE" || field === "TRANSPORTATION_COMPANY_ID") {
-      const nextTransportationType =
-        field === "TRANSPORTATION_TYPE"
-          ? value
-          : currentDay?.TRANSPORTATION_TYPE || "";
-      const nextTransportationCompanyId =
-        field === "TRANSPORTATION_COMPANY_ID"
-          ? value
-          : currentDay?.TRANSPORTATION_COMPANY_ID || "";
-
-      requestTransportationBestRate(
-        nextTransportationType,
-        nextTransportationCompanyId
-      );
-    }
   };
 
-  const handleToggleGuide = (dayOrder, nextValue) => {
+  const handleMealFieldChange = (dayOrder, mealIndex, field, value) => {
     if (!canEditQuotation) return;
 
     setDayValue(dayOrder, current => ({
       ...current,
-      hasGuide: nextValue,
-      GUIDE_TYPE: nextValue ? current.GUIDE_TYPE : "",
+      MEALS: (current.MEALS || []).map((meal, index) => {
+        if (index !== mealIndex) return meal;
+
+        if (field === "CITY_ID") {
+          return {
+            CITY_ID: value,
+            RESTAURANT_ID: "",
+            MEAL_TYPE: "",
+          };
+        }
+
+        if (field === "RESTAURANT_ID") {
+          return {
+            ...meal,
+            RESTAURANT_ID: value,
+            MEAL_TYPE: "",
+          };
+        }
+
+        return {
+          ...meal,
+          [field]: value,
+        };
+      }),
+      touched: {
+        ...current.touched,
+        MEALS: true,
+      },
+    }));
+  };
+
+  const handleToggleGuide = (dayOrder, enabled) => {
+    if (!canEditQuotation) return;
+
+    setDayValue(dayOrder, current => ({
+      ...current,
+      hasGuide: enabled,
+      GUIDE_TYPE: enabled ? current.GUIDE_TYPE : "",
       touched: {
         ...current.touched,
         GUIDE_TYPE: true,
@@ -652,13 +650,13 @@ const PlanQuotation = () => {
     }));
   };
 
-  const handleToggleMeals = (dayOrder, nextValue) => {
+  const handleToggleMeals = (dayOrder, enabled) => {
     if (!canEditQuotation) return;
 
     setDayValue(dayOrder, current => ({
       ...current,
-      hasMeals: nextValue,
-      MEALS: nextValue
+      hasMeals: enabled,
+      MEALS: enabled
         ? current.MEALS?.length
           ? current.MEALS
           : [{ CITY_ID: "", RESTAURANT_ID: "", MEAL_TYPE: "" }]
@@ -668,35 +666,6 @@ const PlanQuotation = () => {
         MEALS: true,
       },
     }));
-  };
-
-  const handleMealFieldChange = (dayOrder, index, field, value) => {
-    if (!canEditQuotation) return;
-
-    setDayValue(dayOrder, current => {
-      const nextMeals = [...(current.MEALS || [])];
-      const currentRow = nextMeals[index] || { CITY_ID: "", RESTAURANT_ID: "", MEAL_TYPE: "" };
-
-      nextMeals[index] = {
-        ...currentRow,
-        [field]: value,
-        ...(field === "CITY_ID" ? { RESTAURANT_ID: "", MEAL_TYPE: "" } : {}),
-        ...(field === "RESTAURANT_ID" ? { MEAL_TYPE: "" } : {}),
-      };
-
-      return {
-        ...current,
-        MEALS: nextMeals,
-        touched: {
-          ...current.touched,
-          MEALS: true,
-        },
-      };
-    });
-
-    if (field === "CITY_ID" && value) {
-      dispatch(fetchRestaurantsByCity(value));
-    }
   };
 
   const addMealRow = dayOrder => {
@@ -939,24 +908,20 @@ const PlanQuotation = () => {
     return {
       basic: snapshot.basic,
       route: snapshot.route,
-      TRANSPORTATION_RESOLVED:
-        snapshot.transportation?.TRANSPORTATION_RESOLVED || [],
+      transportation: snapshot.transportation,
       guide: snapshot.guide,
       meals: snapshot.meals,
-      NTRANCE_FEES: snapshot.entranceFees?.selectedPlaces || [],
-      TOTAL_ENTRANCE_FEES: snapshot.entranceFees?.total ?? 0,
+      entranceFees: snapshot.entranceFees,
       overnight: snapshot.overnight,
+      fullDayState: snapshot.fullDayState,
     };
   };
 
   const validateDay = day => {
     const errors = {};
-    const { unknownNames } = parseRouteCities(day.ROUTE_TEXT);
 
-    if (!day.ROUTE_TEXT || !String(day.ROUTE_TEXT).trim()) {
+    if (!String(day.ROUTE_TEXT || "").trim()) {
       errors.ROUTE_TEXT = "Route is required.";
-    } else if (unknownNames.length > 0) {
-      errors.ROUTE_TEXT = `Unknown cities: ${unknownNames.join(", ")}`;
     }
 
     if (!day.TRANSPORTATION_TYPE) {
@@ -968,7 +933,7 @@ const PlanQuotation = () => {
     }
 
     if (!day.TRANSPORTATION_BY) {
-      errors.TRANSPORTATION_BY = "Transportation by is required.";
+      errors.TRANSPORTATION_BY = "Transportation size is required.";
     }
 
     if (day.hasGuide && !day.GUIDE_TYPE) {
@@ -1118,6 +1083,12 @@ const PlanQuotation = () => {
                 <CardBody>
                   <h4 className="card-title mb-3">Quick Access</h4>
                   <div className="d-grid gap-2">
+                    {!canViewPrices ? (
+                      <Alert color="warning" className="mb-0 py-2">
+                        Prices hidden for your role.
+                      </Alert>
+                    ) : null}
+
                     <Button
                       color="primary"
                       type="button"
@@ -1267,6 +1238,7 @@ const PlanQuotation = () => {
                                             <thead className="table-light">
                                               <tr>
                                                 <th>Place Name</th>
+                                                {canViewPrices ? <th style={{ width: 180 }}>Price</th> : null}
                                                 <th style={{ width: 180 }}>Insert</th>
                                               </tr>
                                             </thead>
@@ -1278,29 +1250,37 @@ const PlanQuotation = () => {
                                                 return (
                                                   <tr key={placeId}>
                                                     <td className="fw-medium">{place?.PLACE_NAME || "-"}</td>
+                                                    {canViewPrices ? (
+                                                      <td>
+                                                        <Badge color="primary" pill>
+                                                          {formatMoney(getEntranceFeeAmount(place, quotationNationalityId))}
+                                                        </Badge>
+                                                      </td>
+                                                    ) : null}
                                                     <td>
                                                       <div className="d-flex gap-2">
                                                         <Button
                                                           type="button"
                                                           size="sm"
                                                           color={selected ? "primary" : "light"}
+                                                          className={selected ? "" : "border"}
                                                           onClick={() =>
-                                                            toggleEntranceFeePlace(day.DAY_ORDER, placeId, true)
+                                                            toggleEntranceFeePlace(
+                                                              day.DAY_ORDER,
+                                                              placeId,
+                                                              !selected
+                                                            )
                                                           }
                                                           disabled={readOnly}
                                                         >
-                                                          Yes
-                                                        </Button>
-                                                        <Button
-                                                          type="button"
-                                                          size="sm"
-                                                          color={!selected ? "danger" : "light"}
-                                                          onClick={() =>
-                                                            toggleEntranceFeePlace(day.DAY_ORDER, placeId, false)
-                                                          }
-                                                          disabled={readOnly}
-                                                        >
-                                                          No
+                                                          <i
+                                                            className={`bx ${
+                                                              selected
+                                                                ? "bx-check-circle"
+                                                                : "bx-plus-circle"
+                                                            } me-1`}
+                                                          />
+                                                          {selected ? "Inserted" : "Insert"}
                                                         </Button>
                                                       </div>
                                                     </td>
@@ -1311,6 +1291,35 @@ const PlanQuotation = () => {
                                           </table>
                                         </div>
                                       )}
+
+                                      {canViewPrices &&
+                                      (day.selectedEntranceFeePlaceIds || []).length > 0 ? (
+                                        <div className="mt-3 d-flex justify-content-end">
+                                          <Badge color="primary" className="rounded-pill px-3 py-2">
+                                            Entrance Fees Total: {formatMoney(
+                                              entranceFeePlaces
+                                                .filter(place =>
+                                                  (day.selectedEntranceFeePlaceIds || []).includes(getId(place))
+                                                )
+                                                .reduce(
+                                                  (sum, place) =>
+                                                    sum +
+                                                    (Number(
+                                                      getEntranceFeeAmount(place, quotationNationalityId)
+                                                    ) || 0),
+                                                  0
+                                                )
+                                            )}
+                                          </Badge>
+                                        </div>
+                                      ) : null}
+
+                                      {day.touched.selectedEntranceFeePlaceIds &&
+                                      dayErrors.selectedEntranceFeePlaceIds ? (
+                                        <div className="text-danger small mt-2">
+                                          {dayErrors.selectedEntranceFeePlaceIds}
+                                        </div>
+                                      ) : null}
                                     </div>
                                   </Col>
                                 </Row>
@@ -1319,9 +1328,9 @@ const PlanQuotation = () => {
 
                             <Col xl="6">
                               <SectionCard
-                                icon="bx-bus"
+                                icon="bx-car"
                                 title="Transportation"
-                                subtitle="Choose the transport category, company, and matching size."
+                                subtitle="Select transportation type and company. The best matching size will be loaded automatically."
                               >
                                 <Row className="g-3">
                                   <Col lg="12">
@@ -1439,6 +1448,17 @@ const PlanQuotation = () => {
                                                 {day.TRANSPORTATION_MAX_CAPACITY ?? "-"}
                                               </div>
                                             </Col>
+                                            {canViewPrices ? (
+                                              <Col md="12">
+                                                <div className="text-muted small">Best Rate</div>
+                                                <div className="fw-semibold">
+                                                  {day.TRANSPORTATION_RATE !== null &&
+                                                  day.TRANSPORTATION_RATE !== undefined
+                                                    ? formatMoney(day.TRANSPORTATION_RATE)
+                                                    : "-"}
+                                                </div>
+                                              </Col>
+                                            ) : null}
                                           </Row>
                                         </div>
                                       ) : (
@@ -1665,6 +1685,21 @@ const PlanQuotation = () => {
                                                     </option>
                                                   ))}
                                                 </Input>
+
+                                                {canViewPrices && meal.MEAL_TYPE ? (
+                                                  <div className="mt-2">
+                                                    <Badge color="primary" pill>
+                                                      Price / Person: {formatMoney(
+                                                        availableMeals.find(
+                                                          item =>
+                                                            getId(item) === meal.MEAL_TYPE ||
+                                                            item?.MEAL_TYPE === meal.MEAL_TYPE ||
+                                                            item?.MEAL_NAME === meal.MEAL_TYPE
+                                                        )?.MEAL_PRICE_PER_PERSON
+                                                      )}
+                                                    </Badge>
+                                                  </div>
+                                                ) : null}
                                               </div>
                                             </Col>
                                           </Row>

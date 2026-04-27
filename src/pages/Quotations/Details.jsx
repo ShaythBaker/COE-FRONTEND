@@ -1,11 +1,9 @@
-// path: src/pages/Quotations/Details.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
-  Button,
   Card,
   CardBody,
   Col,
@@ -21,6 +19,7 @@ import {
 } from "../../store/Quotations/actions";
 import { get } from "../../helpers/api_helper";
 import { notifyError } from "../../helpers/notify";
+import { hasAnyRole } from "../../helpers/coe_roles";
 import {
   getQuotationReadOnlyMessage,
   getQuotationStatus,
@@ -28,12 +27,15 @@ import {
   isQuotationReadOnly,
 } from "../../helpers/quotation_pricing_helper";
 
+const PRICE_VIEW_ROLES = ["ACCOUNTING", "USER_COMPANY"];
+
 const unwrapId = value => {
   if (!value) return "";
   if (typeof value === "string") return value;
   if (typeof value === "object") {
     if (value.$oid) return value.$oid;
     if (value._id) return unwrapId(value._id);
+    if (value.id) return unwrapId(value.id);
   }
   return "";
 };
@@ -86,13 +88,82 @@ const renderStars = count => {
   return "★".repeat(stars);
 };
 
+const formatMoney = value => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  return amount.toFixed(2);
+};
+
+const getAmount = value => {
+  const candidates = [
+    value?.PRICE,
+    value?.RATE,
+    value?.AMOUNT,
+    value?.TOTAL,
+    value?.FINAL_TOTAL,
+    value?.ENTRANCE_FEE_AMOUNT,
+    value?.MEAL_PRICE_PER_PERSON,
+    value?.SERVICE_PRICE,
+    value?.SELLING_PRICE,
+    value?.COST,
+    value?.ROOM_RATE,
+    value?.SEASON_PRICE,
+    value?.BB_RATE,
+    value?.HB_RATE,
+    value?.FB_RATE,
+    value?.SGL_RATE,
+    value?.DBL_RATE,
+    value?.TPL_RATE,
+  ];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const n = Number(candidates[i]);
+    if (Number.isFinite(n)) return n;
+  }
+
+  return null;
+};
+
+const getSeasonLabel = season => {
+  if (!season) return "-";
+
+  const name =
+    season?.SEASON_NAME ||
+    season?.HOTEL_SEASON_VALUE ||
+    season?.HOTELSEASON_VALUE ||
+    season?.ITEM_VALUE ||
+    "";
+
+  const from =
+    season?.FROM_DATE ||
+    season?.START_DATE ||
+    season?.DATE_FROM ||
+    "";
+  const to =
+    season?.TO_DATE ||
+    season?.END_DATE ||
+    season?.DATE_TO ||
+    "";
+
+  if (name && from && to) return `${name} (${from} → ${to})`;
+  if (name) return name;
+  if (from && to) return `${from} → ${to}`;
+  return "-";
+};
+
 const normalizeDay = day => {
   const basic = day?.basic || day || {};
   const route = day?.route || {};
+  const transportation = day?.transportation || {};
   const mealsNode = day?.meals || {};
+  const entranceFeesNode = day?.entranceFees || {};
   const mealsRows = asArray(mealsNode?.rows || day?.MEALS);
-  const entranceRows = asArray(day?.NTRANCE_FEES || day?.PLACES);
-  const transportationRows = asArray(day?.TRANSPORTATION_RESOLVED);
+  const entranceRows = asArray(
+    entranceFeesNode?.selectedPlaces || day?.ENTRANCE_FEES || day?.NTRANCE_FEES || day?.PLACES
+  );
+  const transportationRows = asArray(
+    transportation?.TRANSPORTATION_RESOLVED || day?.TRANSPORTATION_RESOLVED
+  );
   const routeCities = asArray(route?.cities)
     .map(city => city?.CITY_NAME)
     .filter(Boolean);
@@ -126,7 +197,12 @@ const normalizeAccommodationOptions = response => {
         ),
       }));
 
-      const flattenedStays = cityGroups.flatMap(group => group.stays);
+      const flattenedStays = cityGroups.flatMap(group =>
+        group.stays.map(stay => ({
+          ...stay,
+          SEASONS: asArray(stay?.SEASONS),
+        }))
+      );
 
       return {
         key: `${entry?._id || "entry"}-${option?.OPTION_NAME || index}`,
@@ -215,6 +291,8 @@ const QuotationsDetails = () => {
   const dispatch = useDispatch();
 
   const { selected, loading, lookups } = useSelector(s => s.Quotations || {});
+  const roles = useSelector(s => s.Login?.roles || []);
+  const canViewPrices = hasAnyRole(roles, PRICE_VIEW_ROLES);
 
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [daysRoutes, setDaysRoutes] = useState([]);
@@ -345,7 +423,9 @@ const QuotationsDetails = () => {
 
     daysRoutes.forEach(day => {
       day.mealsRows.forEach(meal => {
-        if (meal?.MEAL_NAME) set.add(meal.MEAL_NAME);
+        if (meal?.MEAL_NAME || meal?.MEAL_TYPE) {
+          set.add(meal?.MEAL_NAME || meal?.MEAL_TYPE);
+        }
       });
     });
 
@@ -387,6 +467,12 @@ const QuotationsDetails = () => {
             </Alert>
           ) : null}
 
+          {!canViewPrices ? (
+            <Alert color="info" className="mb-4">
+              Prices are hidden. Only roles ACCOUNTING and USER_COMPANY can view quotation prices.
+            </Alert>
+          ) : null}
+
           <Row className="g-3 mb-4">
             <Col xl="8">
               <Card className="border-0 shadow-sm overflow-hidden">
@@ -398,7 +484,7 @@ const QuotationsDetails = () => {
                       <SummaryHeader
                         icon="bx bx-file"
                         title="Quotation Summary"
-                        subtitle="Clean, modern overview of the quotation, routes, hotels, and included services."
+                        subtitle="Clean overview of the quotation, routes, hotels, services, and pricing."
                       >
                         {quotationStatus ? (
                           <Badge color={getQuotationStatusBadgeColor(quotationStatus)} pill>
@@ -554,9 +640,11 @@ const QuotationsDetails = () => {
                   <SummaryHeader
                     icon="bx bx-badge-dollar"
                     title="Approved Final Price"
-                    subtitle="Shown only after quotation pricing is approved."
+                    subtitle="Visible only for ACCOUNTING and USER_COMPANY after approval."
                   />
-                  {finalPricingLoading ? (
+                  {!canViewPrices ? (
+                    <EmptyState text="Final price is hidden for your role." />
+                  ) : finalPricingLoading ? (
                     <LoadingState text="Loading approved final price..." />
                   ) : approvedFinalTotal !== null && approvedFinalTotal !== undefined ? (
                     <div className="text-center py-4">
@@ -581,7 +669,7 @@ const QuotationsDetails = () => {
                   <SummaryHeader
                     icon="bx bx-list-ul"
                     title="At a Glance"
-                    subtitle="Important itinerary highlights without any pricing."
+                    subtitle="Important itinerary highlights."
                   />
 
                   {summaryLoading ? (
@@ -593,8 +681,12 @@ const QuotationsDetails = () => {
                           <div className="text-muted mb-2">Meals Included</div>
                           <div className="d-flex flex-wrap gap-2">
                             {allMeals.length ? (
-                              allMeals.map(meal => (
-                                <Pill key={meal} icon="bx bx-restaurant" text={meal} />
+                              allMeals.map(mealName => (
+                                <Pill
+                                  key={mealName}
+                                  icon="bx bx-dish"
+                                  text={mealName}
+                                />
                               ))
                             ) : (
                               <span className="text-muted">No meals added</span>
@@ -605,11 +697,15 @@ const QuotationsDetails = () => {
 
                       <Col md="4">
                         <div className="border rounded p-3 h-100">
-                          <div className="text-muted mb-2">Places Included</div>
+                          <div className="text-muted mb-2">Entrance Fee Places</div>
                           <div className="d-flex flex-wrap gap-2">
                             {allPlaces.length ? (
-                              allPlaces.map(place => (
-                                <Pill key={place} icon="bx bx-map-pin" text={place} />
+                              allPlaces.map(placeName => (
+                                <Pill
+                                  key={placeName}
+                                  icon="bx bx-map-pin"
+                                  text={placeName}
+                                />
                               ))
                             ) : (
                               <span className="text-muted">No places added</span>
@@ -623,8 +719,12 @@ const QuotationsDetails = () => {
                           <div className="text-muted mb-2">Overnight Cities</div>
                           <div className="d-flex flex-wrap gap-2">
                             {overnightCities.length ? (
-                              overnightCities.map(city => (
-                                <Pill key={city} icon="bx bx-bed" text={city} />
+                              overnightCities.map(cityName => (
+                                <Pill
+                                  key={cityName}
+                                  icon="bx bx-moon"
+                                  text={cityName}
+                                />
                               ))
                             ) : (
                               <span className="text-muted">No overnight cities</span>
@@ -644,169 +744,216 @@ const QuotationsDetails = () => {
               <Card className="border-0 shadow-sm">
                 <CardBody className="p-4">
                   <SummaryHeader
-                    icon="bx bx-map-alt"
-                    title="Days and Routes"
-                    subtitle="A simple, elegant day-by-day view of route, transportation, guide, meals, places, and overnight city."
+                    icon="bx bx-map"
+                    title="Daily Itinerary"
+                    subtitle="Each saved day with route, transportation, guide, meals, entrance fees, and overnight city."
                   />
 
                   {summaryLoading ? (
-                    <LoadingState text="Loading days and routes..." />
+                    <LoadingState text="Loading itinerary..." />
                   ) : daysRoutes.length === 0 ? (
-                    <EmptyState text="No days and routes were found for this quotation." />
+                    <EmptyState text="No days were found for this quotation." />
                   ) : (
                     <Row className="g-3">
-                      {daysRoutes.map(day => {
-                        const transportNames = day.transportationRows
-                          .map(row => {
-                            const parts = [
-                              row?.TRANSPORTATION_TYPE_NAME,
-                              row?.TRANSPORTATION_COMPANY_NAME,
-                              row?.TRANSPORTATION_BY,
-                            ].filter(Boolean);
-                            return parts.join(" • ");
-                          })
-                          .filter(Boolean);
-
-                        const placeNames = day.entranceRows
-                          .map(place => place?.PLACE_NAME)
-                          .filter(Boolean);
-
-                        const mealNames = day.mealsRows
-                          .map(meal => meal?.MEAL_NAME)
-                          .filter(Boolean);
-
-                        const restaurants = day.mealsRows
-                          .map(meal => meal?.RESTAURANT_NAME)
-                          .filter(Boolean);
-
-                        return (
-                          <Col xl="6" key={day?._id || `day-${day?.DAY_ORDER}`}>
-                            <Card className="border shadow-none h-100 mb-0">
-                              <CardBody>
-                                <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-                                  <div>
-                                    <h5 className="mb-1">
-                                      <i className="bx bx-calendar me-1 text-primary" />
-                                      Day {day?.DAY_ORDER || "-"}
-                                    </h5>
-                                    <div className="text-muted">
-                                      {formatDateLabel(day?.DAY_DATE)}
-                                    </div>
-                                  </div>
-
-                                  <Badge color="light" className="px-3 py-2">
-                                    {day?.overnight?.OVERNIGHT_CITY_NAME || "No overnight"}
-                                  </Badge>
+                      {daysRoutes.map(day => (
+                        <Col xl="12" key={day?._id || `day-${day?.DAY_ORDER}`}>
+                          <Card className="border shadow-none mb-0">
+                            <CardBody>
+                              <div className="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+                                <div>
+                                  <h5 className="mb-1">
+                                    <i className="bx bx-calendar-event me-1 text-primary" />
+                                    Day {day?.DAY_ORDER || "-"}
+                                  </h5>
+                                  <p className="text-muted mb-0">
+                                    {formatDateLabel(day?.DAY_DATE)}
+                                  </p>
                                 </div>
 
-                                <div className="mb-3">
-                                  <div className="text-muted small mb-1">Route</div>
-                                  <div className="fw-semibold">
-                                    {day?.ROUTE_TEXT || "-"}
-                                  </div>
-                                  {day.routeCities.length ? (
-                                    <div className="d-flex flex-wrap gap-2 mt-2">
-                                      {day.routeCities.map(city => (
-                                        <Pill key={`${day._id}-${city}`} text={city} />
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                </div>
+                                {day?.overnight?.OVERNIGHT_CITY_NAME ? (
+                                  <Pill
+                                    icon="bx bx-moon"
+                                    text={`Overnight: ${day.overnight.OVERNIGHT_CITY_NAME}`}
+                                  />
+                                ) : null}
+                              </div>
 
-                                <Row className="g-3">
-                                  <Col md="12">
-                                    <div className="border rounded p-3 h-100">
-                                      <div className="text-muted small mb-2">
-                                        Transportation
+                              <Row className="g-3">
+                                <Col lg="6">
+                                  <div className="border rounded p-3 h-100">
+                                    <h6 className="mb-3">
+                                      <i className="bx bx-map me-1 text-primary" />
+                                      Route
+                                    </h6>
+                                    <div className="fw-medium mb-2">
+                                      {day?.ROUTE_TEXT || "-"}
+                                    </div>
+
+                                    {day?.routeCities?.length ? (
+                                      <div className="d-flex flex-wrap gap-2">
+                                        {day.routeCities.map(city => (
+                                          <Pill
+                                            key={`${day._id}-${city}`}
+                                            icon="bx bx-map-alt"
+                                            text={city}
+                                          />
+                                        ))}
                                       </div>
-                                      {transportNames.length ? (
-                                        <div className="d-flex flex-column gap-2">
-                                          {transportNames.map((label, index) => (
-                                            <div key={`${day._id}-transport-${index}`}>
-                                              <i className="bx bx-bus me-2 text-primary" />
-                                              {label}
+                                    ) : null}
+                                  </div>
+                                </Col>
+
+                                <Col lg="6">
+                                  <div className="border rounded p-3 h-100">
+                                    <h6 className="mb-3">
+                                      <i className="bx bx-car me-1 text-primary" />
+                                      Transportation
+                                    </h6>
+
+                                    {day.transportationRows.length === 0 ? (
+                                      <div className="text-muted">
+                                        No transportation details
+                                      </div>
+                                    ) : (
+                                      day.transportationRows.map((row, index) => (
+                                        <div
+                                          key={`${day._id}-transport-${index}`}
+                                          className={
+                                            index === day.transportationRows.length - 1
+                                              ? ""
+                                              : "border-bottom pb-3 mb-3"
+                                          }
+                                        >
+                                          <div className="fw-semibold mb-1">
+                                            {row?.TRANSPORTATION_COMPANY_NAME || "-"}
+                                          </div>
+                                          <div className="text-muted small">
+                                            {row?.TRANSPORTATION_TYPE_NAME || "-"} •{" "}
+                                            {row?.TRANSPORTATION_BY || "-"} • Capacity{" "}
+                                            {row?.MINIMUM_CAPACITY ?? "-"} -{" "}
+                                            {row?.MAXIMUM_CAPACITY ?? "-"}
+                                          </div>
+
+                                          {canViewPrices && getAmount(row) !== null ? (
+                                            <div className="mt-2">
+                                              <Badge color="primary" pill>
+                                                Rate: {formatMoney(getAmount(row))}
+                                              </Badge>
                                             </div>
-                                          ))}
+                                          ) : null}
                                         </div>
-                                      ) : (
-                                        <div className="text-muted">No transportation added</div>
-                                      )}
-                                    </div>
-                                  </Col>
+                                      ))
+                                    )}
+                                  </div>
+                                </Col>
 
-                                  <Col md="6">
-                                    <div className="border rounded p-3 h-100">
-                                      <div className="text-muted small mb-2">Guide</div>
-                                      {day?.guide?.enabled ? (
-                                        <div>
-                                          <i className="bx bx-user-voice me-2 text-primary" />
-                                          {day?.guide?.GUIDE_TYPE_NAME || "Guide enabled"}
-                                        </div>
-                                      ) : (
-                                        <div className="text-muted">No guide</div>
-                                      )}
+                                <Col lg="4">
+                                  <div className="border rounded p-3 h-100">
+                                    <h6 className="mb-3">
+                                      <i className="bx bx-user me-1 text-primary" />
+                                      Guide
+                                    </h6>
+                                    <div className="fw-medium">
+                                      {day?.guide?.enabled || day?.guide?.GUIDE_TYPE_NAME
+                                        ? day?.guide?.GUIDE_TYPE_NAME || "Guide included"
+                                        : "No guide"}
                                     </div>
-                                  </Col>
+                                  </div>
+                                </Col>
 
-                                  <Col md="6">
-                                    <div className="border rounded p-3 h-100">
-                                      <div className="text-muted small mb-2">Overnight</div>
-                                      <div>
-                                        <i className="bx bx-moon me-2 text-primary" />
-                                        {day?.overnight?.OVERNIGHT_CITY_NAME || "No overnight city"}
-                                      </div>
-                                    </div>
-                                  </Col>
+                                <Col lg="4">
+                                  <div className="border rounded p-3 h-100">
+                                    <h6 className="mb-3">
+                                      <i className="bx bx-dish me-1 text-primary" />
+                                      Meals
+                                    </h6>
 
-                                  <Col md="6">
-                                    <div className="border rounded p-3 h-100">
-                                      <div className="text-muted small mb-2">Meals</div>
-                                      {mealNames.length ? (
+                                    {day.mealsRows.length ? (
+                                      <>
                                         <div className="d-flex flex-wrap gap-2">
-                                          {mealNames.map((meal, index) => (
+                                          {day.mealsRows.map((meal, index) => (
                                             <Pill
-                                              key={`${day._id}-meal-${meal}-${index}`}
-                                              icon="bx bx-restaurant"
-                                              text={meal}
+                                              key={`${day._id}-meal-${index}`}
+                                              icon="bx bx-bowl-hot"
+                                              text={meal?.MEAL_NAME || meal?.MEAL_TYPE || "-"}
                                             />
                                           ))}
                                         </div>
-                                      ) : (
-                                        <div className="text-muted">No meals added</div>
-                                      )}
 
-                                      {restaurants.length ? (
-                                        <div className="mt-2 text-muted small">
-                                          Restaurants: {restaurants.join(" • ")}
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                  </Col>
+                                        {canViewPrices ? (
+                                          <div className="mt-3 d-flex flex-column gap-2">
+                                            {day.mealsRows.map((meal, index) => {
+                                              const amount = getAmount(meal);
+                                              if (amount === null) return null;
 
-                                  <Col md="6">
-                                    <div className="border rounded p-3 h-100">
-                                      <div className="text-muted small mb-2">Places</div>
-                                      {placeNames.length ? (
+                                              return (
+                                                <Badge
+                                                  key={`${day._id}-meal-price-${index}`}
+                                                  color="primary"
+                                                  className="rounded-pill px-3 py-2 align-self-start"
+                                                >
+                                                  {(meal?.MEAL_NAME || meal?.MEAL_TYPE || "Meal")}:{" "}
+                                                  {formatMoney(amount)}
+                                                </Badge>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    ) : (
+                                      <div className="text-muted">No meals added</div>
+                                    )}
+                                  </div>
+                                </Col>
+
+                                <Col lg="4">
+                                  <div className="border rounded p-3 h-100">
+                                    <h6 className="mb-3">
+                                      <i className="bx bx-receipt me-1 text-primary" />
+                                      Entrance Fees
+                                    </h6>
+
+                                    {day.entranceRows.length ? (
+                                      <>
                                         <div className="d-flex flex-wrap gap-2">
-                                          {placeNames.map((place, index) => (
+                                          {day.entranceRows.map((place, index) => (
                                             <Pill
-                                              key={`${day._id}-place-${place}-${index}`}
+                                              key={`${day._id}-place-${index}`}
                                               icon="bx bx-map-pin"
-                                              text={place}
+                                              text={place?.PLACE_NAME || "-"}
                                             />
                                           ))}
                                         </div>
-                                      ) : (
-                                        <div className="text-muted">No places added</div>
-                                      )}
-                                    </div>
-                                  </Col>
-                                </Row>
-                              </CardBody>
-                            </Card>
-                          </Col>
-                        );
-                      })}
+
+                                        {canViewPrices ? (
+                                          <div className="mt-3 d-flex flex-column gap-2">
+                                            {day.entranceRows.map((place, index) => {
+                                              const amount = getAmount(place);
+                                              if (amount === null) return null;
+
+                                              return (
+                                                <Badge
+                                                  key={`${day._id}-place-price-${index}`}
+                                                  color="primary"
+                                                  className="rounded-pill px-3 py-2 align-self-start"
+                                                >
+                                                  {(place?.PLACE_NAME || "Place")}: {formatMoney(amount)}
+                                                </Badge>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    ) : (
+                                      <div className="text-muted">No places added</div>
+                                    )}
+                                  </div>
+                                </Col>
+                              </Row>
+                            </CardBody>
+                          </Card>
+                        </Col>
+                      ))}
                     </Row>
                   )}
                 </CardBody>
@@ -821,7 +968,11 @@ const QuotationsDetails = () => {
                   <SummaryHeader
                     icon="bx bx-hotel"
                     title="Accommodation Options"
-                    subtitle="Hotels, chains, stars, cities, seasons, and stays — without showing any prices."
+                    subtitle={
+                      canViewPrices
+                        ? "Hotels, chains, stars, seasons, and season prices."
+                        : "Hotels, chains, stars, and seasons."
+                    }
                   />
 
                   {summaryLoading ? (
@@ -882,53 +1033,75 @@ const QuotationsDetails = () => {
                                       {cityGroup.stays.length === 0 ? (
                                         <div className="text-muted">No stays added</div>
                                       ) : (
-                                        cityGroup.stays.map((stay, stayIndex) => (
-                                          <div
-                                            key={`${cityGroup.key}-stay-${stayIndex}`}
-                                            className={
-                                              stayIndex === cityGroup.stays.length - 1
-                                                ? ""
-                                                : "border-bottom pb-3 mb-3"
-                                            }
-                                          >
-                                            <div className="fw-semibold mb-1">
-                                              {stay?.HOTEL_NAME || "-"}
-                                            </div>
+                                        cityGroup.stays.map((stay, stayIndex) => {
+                                          const staySeasons = asArray(stay?.SEASONS);
+                                          const stayAmount = getAmount(stay);
 
-                                            <div className="text-muted small mb-2">
-                                              {stay?.HOTEL_CHAIN_VALUE || "-"} •{" "}
-                                              {stay?.HOTEL_CITY_VALUE || cityGroup.cityName || "-"} •{" "}
-                                              {renderStars(stay?.HOTEL_STARS)}
-                                            </div>
+                                          return (
+                                            <div
+                                              key={`${cityGroup.key}-stay-${stayIndex}`}
+                                              className={
+                                                stayIndex === cityGroup.stays.length - 1
+                                                  ? ""
+                                                  : "border-bottom pb-3 mb-3"
+                                              }
+                                            >
+                                              <div className="fw-semibold mb-1">
+                                                {stay?.HOTEL_NAME || "-"}
+                                              </div>
 
-                                            <div className="d-flex flex-wrap gap-2 mb-2">
-                                              {stay?.SEASON_NAME || stay?.SEASON_LABEL ? (
-                                                <Pill
-                                                  icon="bx bx-calendar-event"
-                                                  text={stay?.SEASON_LABEL || stay?.SEASON_NAME}
-                                                />
-                                              ) : null}
+                                              <div className="text-muted small mb-2">
+                                                {stay?.HOTEL_CHAIN_VALUE || "-"} •{" "}
+                                                {stay?.HOTEL_CITY_VALUE || cityGroup.cityName || "-"} •{" "}
+                                                {renderStars(stay?.HOTEL_STARS)}
+                                              </div>
 
-                                              {stay?.NIGHTS ? (
+                                              <div className="d-flex flex-wrap gap-2 mb-2">
+                                                {staySeasons.length > 0 ? (
+                                                  staySeasons.map((season, seasonIndex) => {
+                                                    const seasonAmount = getAmount(season);
+
+                                                    return (
+                                                      <Badge
+                                                        key={`${cityGroup.key}-stay-${stayIndex}-season-${seasonIndex}`}
+                                                        color={canViewPrices && seasonAmount !== null ? "primary" : "light"}
+                                                        className="rounded-pill px-3 py-2 fw-normal"
+                                                      >
+                                                        <i className="bx bx-calendar me-1" />
+                                                        {getSeasonLabel(season)}
+                                                        {canViewPrices && seasonAmount !== null
+                                                          ? `: ${formatMoney(seasonAmount)}`
+                                                          : ""}
+                                                      </Badge>
+                                                    );
+                                                  })
+                                                ) : stay?.SEASON_NAME ? (
+                                                  <Pill
+                                                    icon="bx bx-calendar"
+                                                    text={stay.SEASON_NAME}
+                                                    color="light"
+                                                  />
+                                                ) : null}
+
                                                 <Pill
                                                   icon="bx bx-moon"
-                                                  text={`${stay.NIGHTS} night(s)`}
+                                                  text={`${stay?.NIGHTS || 0} night(s)`}
                                                 />
+                                              </div>
+
+                                              {canViewPrices &&
+                                              staySeasons.length === 0 &&
+                                              stayAmount !== null ? (
+                                                <Badge
+                                                  color="primary"
+                                                  className="rounded-pill px-3 py-2 fw-normal"
+                                                >
+                                                  Price: {formatMoney(stayAmount)}
+                                                </Badge>
                                               ) : null}
                                             </div>
-
-                                            {stay?.HOTEL_WEBSITE ? (
-                                              <a
-                                                href={stay.HOTEL_WEBSITE}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="small"
-                                              >
-                                                Visit hotel website
-                                              </a>
-                                            ) : null}
-                                          </div>
-                                        ))
+                                          );
+                                        })
                                       )}
                                     </div>
                                   </Col>
@@ -952,7 +1125,11 @@ const QuotationsDetails = () => {
                   <SummaryHeader
                     icon="bx bx-gift"
                     title="Extra Services"
-                    subtitle="Additional services included in the quotation, shown without prices."
+                    subtitle={
+                      canViewPrices
+                        ? "Additional services with prices."
+                        : "Additional services without prices."
+                    }
                   />
 
                   {summaryLoading ? (
@@ -961,36 +1138,46 @@ const QuotationsDetails = () => {
                     <EmptyState text="No extra services were found for this quotation." />
                   ) : (
                     <Row className="g-3">
-                      {extraServices.map((service, index) => (
-                        <Col
-                          md="6"
-                          xl="4"
-                          key={service?._id || `service-${index}`}
-                        >
-                          <Card className="border shadow-none h-100 mb-0">
-                            <CardBody>
-                              <div className="d-flex align-items-start gap-3">
-                                <div
-                                  className="rounded-circle bg-light d-flex align-items-center justify-content-center"
-                                  style={{ width: 46, height: 46, minWidth: 46 }}
-                                >
-                                  <i className="bx bx-plus-medical font-size-20 text-primary" />
-                                </div>
+                      {extraServices.map((service, index) => {
+                        const amount = getAmount(service);
 
-                                <div>
-                                  <h5 className="mb-2">
-                                    {service?.SERVICE_NAME || "-"}
-                                  </h5>
-                                  <p className="text-muted mb-0">
-                                    {service?.SERVICE_DESCRIPTION ||
-                                      "No description provided."}
-                                  </p>
+                        return (
+                          <Col
+                            md="6"
+                            xl="4"
+                            key={service?._id || `service-${index}`}
+                          >
+                            <Card className="border shadow-none h-100 mb-0">
+                              <CardBody>
+                                <div className="d-flex align-items-start gap-3">
+                                  <div
+                                    className="rounded-circle bg-light d-flex align-items-center justify-content-center"
+                                    style={{ width: 46, height: 46, minWidth: 46 }}
+                                  >
+                                    <i className="bx bx-plus-medical font-size-20 text-primary" />
+                                  </div>
+
+                                  <div className="w-100">
+                                    <h5 className="mb-2">
+                                      {service?.SERVICE_NAME || "-"}
+                                    </h5>
+                                    <p className="text-muted mb-2">
+                                      {service?.SERVICE_DESCRIPTION ||
+                                        "No description provided."}
+                                    </p>
+
+                                    {canViewPrices && amount !== null ? (
+                                      <Badge color="primary" className="rounded-pill px-3 py-2 fw-normal">
+                                        Price: {formatMoney(amount)}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
                                 </div>
-                              </div>
-                            </CardBody>
-                          </Card>
-                        </Col>
-                      ))}
+                              </CardBody>
+                            </Card>
+                          </Col>
+                        );
+                      })}
                     </Row>
                   )}
                 </CardBody>
