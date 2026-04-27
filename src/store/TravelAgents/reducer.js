@@ -11,7 +11,13 @@ const initialState = {
   lookupsError: "",
   lookups: {
     COUNTRIES: [],
+    QUOTATION_TYPE: [],
   },
+
+  relatedQuotationsLoading: false,
+  relatedQuotationsError: "",
+  quotationsByAgent: {},
+  quotationsAnalyticsByAgent: {},
 };
 
 const TravelAgents = (state = initialState, action) => {
@@ -91,6 +97,37 @@ const TravelAgents = (state = initialState, action) => {
         ...state,
         lookupsLoading: false,
         lookupsError: action.payload || "Error",
+      };
+
+    case T.FETCH_TRAVEL_AGENT_QUOTATIONS:
+      return {
+        ...state,
+        relatedQuotationsLoading: true,
+        relatedQuotationsError: "",
+      };
+
+    case T.FETCH_TRAVEL_AGENT_QUOTATIONS_SUCCESS: {
+      const { id, data } = action.payload || {};
+      return {
+        ...state,
+        relatedQuotationsLoading: false,
+        selected: data?.agent?._id === state.selected?._id ? data.agent : state.selected,
+        quotationsByAgent: {
+          ...state.quotationsByAgent,
+          [id]: Array.isArray(data?.quotations) ? data.quotations : [],
+        },
+        quotationsAnalyticsByAgent: {
+          ...state.quotationsAnalyticsByAgent,
+          [id]: data?.analytics || null,
+        },
+      };
+    }
+
+    case T.FETCH_TRAVEL_AGENT_QUOTATIONS_FAIL:
+      return {
+        ...state,
+        relatedQuotationsLoading: false,
+        relatedQuotationsError: action.payload || "Error",
       };
 
     default:

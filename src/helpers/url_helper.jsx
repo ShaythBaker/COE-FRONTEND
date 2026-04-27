@@ -86,6 +86,7 @@ export const RESTAURANT_MEAL_BY_ID = (restaurantId, mealId) =>
 // TRAVEL AGENTS
 export const TRAVEL_AGENTS = "/agent";
 export const TRAVEL_AGENT_BY_ID = (id) => `/agent/${id}`;
+export const TRAVEL_AGENT_QUOTATIONS = (id) => `/agent/${id}/quotations`;
 
 // ✅ PLACES
 export const PLACES = "/place";
