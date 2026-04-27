@@ -14,11 +14,17 @@ import {
   deleteTravelAgentFail,
   fetchTravelAgentsLookupsSuccess,
   fetchTravelAgentsLookupsFail,
+  fetchTravelAgentQuotationsSuccess,
+  fetchTravelAgentQuotationsFail,
 } from "./actions";
 
 import { get, post, patch, del } from "../../helpers/api_helper";
 import { getListItems } from "../../helpers/coe_backend_helper";
-import { TRAVEL_AGENTS, TRAVEL_AGENT_BY_ID } from "../../helpers/url_helper";
+import {
+  TRAVEL_AGENTS,
+  TRAVEL_AGENT_BY_ID,
+  TRAVEL_AGENT_QUOTATIONS,
+} from "../../helpers/url_helper";
 import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
 
 const extractErrorMessage = (error, fallback) =>
@@ -28,6 +34,28 @@ const extractErrorMessage = (error, fallback) =>
   (typeof error?.response?.data === "string" ? error.response.data : null) ||
   error?.message ||
   fallback;
+
+const unwrapId = value => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") {
+    if (value.$oid) return value.$oid;
+    if (value._id) return unwrapId(value._id);
+  }
+  return "";
+};
+
+const normalizeQuotation = item => {
+  if (!item || typeof item !== "object") return item;
+
+  return {
+    ...item,
+    _id: unwrapId(item?._id),
+    TRAVEL_AGENT_ID: unwrapId(item?.TRAVEL_AGENT_ID),
+    NATIONALITY: unwrapId(item?.NATIONALITY),
+    QUOTATION_TYPE: unwrapId(item?.QUOTATION_TYPE),
+  };
+};
 
 function* onFetchTravelAgents({ payload }) {
   try {
@@ -102,10 +130,14 @@ function* onDeleteTravelAgent({ payload }) {
 
 function* onFetchLookups() {
   try {
-    const [countries] = yield all([call(getListItems, "COUNTRIES")]);
+    const [countries, quotationTypes] = yield all([
+      call(getListItems, "COUNTRIES"),
+      call(getListItems, "QUOTATION_TYPE"),
+    ]);
     yield put(
       fetchTravelAgentsLookupsSuccess({
         COUNTRIES: Array.isArray(countries) ? countries : [],
+        QUOTATION_TYPE: Array.isArray(quotationTypes) ? quotationTypes : [],
       })
     );
   } catch (e) {
@@ -116,6 +148,29 @@ function* onFetchLookups() {
   }
 }
 
+function* onFetchTravelAgentQuotations({ payload }) {
+  try {
+    const res = yield call(get, TRAVEL_AGENT_QUOTATIONS(payload.id));
+    yield put(
+      fetchTravelAgentQuotationsSuccess(payload.id, {
+        agent: res?.agent || null,
+        quotations: Array.isArray(res?.quotations)
+          ? res.quotations.map(normalizeQuotation)
+          : [],
+        analytics: res?.analytics || null,
+      })
+    );
+    notifyInfo("Travel agent quotations loaded successfully.");
+  } catch (e) {
+    const msg = extractErrorMessage(
+      e,
+      "Failed to load travel agent quotations."
+    );
+    yield put(fetchTravelAgentQuotationsFail(msg));
+    notifyError(msg);
+  }
+}
+
 export default function* TravelAgentsSaga() {
   yield takeLatest(T.FETCH_TRAVEL_AGENTS, onFetchTravelAgents);
   yield takeLatest(T.FETCH_TRAVEL_AGENT, onFetchTravelAgent);
@@ -123,4 +178,5 @@ export default function* TravelAgentsSaga() {
   yield takeLatest(T.UPDATE_TRAVEL_AGENT, onUpdateTravelAgent);
   yield takeLatest(T.DELETE_TRAVEL_AGENT, onDeleteTravelAgent);
   yield takeLatest(T.FETCH_TRAVEL_AGENTS_LOOKUPS, onFetchLookups);
+  yield takeLatest(T.FETCH_TRAVEL_AGENT_QUOTATIONS, onFetchTravelAgentQuotations);
 }

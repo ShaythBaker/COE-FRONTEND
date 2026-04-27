@@ -1,0 +1,62 @@
+.travel-agent-details-page {
+  .travel-agent-stat-card,
+  .travel-agent-chart-card {
+    border: 0;
+    border-radius: 1.1rem;
+    box-shadow: 0 14px 38px rgba($dark, 0.07);
+  }
+
+  .travel-agent-stat-card__label {
+    display: inline-block;
+    margin-bottom: 0.45rem;
+    color: $gray-600;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .travel-agent-stat-card__value {
+    margin-bottom: 0.35rem;
+    color: $gray-900;
+    font-size: 1.9rem;
+    line-height: 1;
+  }
+
+  .travel-agent-chart-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .travel-agent-chart-card__switch {
+    gap: 0.5rem;
+    background: rgba($primary, 0.06);
+    padding: 0.3rem;
+    border-radius: 999px;
+
+    .btn {
+      border-radius: 999px !important;
+      border: 0;
+      padding-inline: 0.95rem;
+      font-weight: 600;
+    }
+  }
+
+  .travel-agent-chart-card__badge {
+    border-radius: 999px;
+    padding: 0.5rem 0.8rem;
+    font-weight: 700;
+    color: $gray-700;
+  }
+
+  @media (max-width: 575.98px) {
+    .travel-agent-chart-card__header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+}
