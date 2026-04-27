@@ -30,6 +30,10 @@ import {
   fetchTransportationBestRate,
   updateQuotationDay,
 } from "../../store/QuotationDays/actions";
+import {
+  isQuotationReadOnly,
+  getQuotationReadOnlyMessage,
+} from "../../helpers/quotation_pricing_helper";
 
 const ALLOWED_ROLES = ["COMPANY_ADMIN", "CONTRACTING"];
 
@@ -237,13 +241,13 @@ const SectionCard = ({ icon, title, subtitle, children, className = "" }) => (
   </div>
 );
 
-const DayToggle = ({ active, onYes, onNo }) => (
+const DayToggle = ({ active, onYes, onNo, disabled = false }) => (
   <div className="d-flex flex-wrap gap-2">
-    <Button type="button" color={active ? "primary" : "light"} onClick={onYes}>
+    <Button type="button" color={active ? "primary" : "light"} onClick={onYes} disabled={disabled}>
       <i className="bx bx-check me-1" />
       Yes
     </Button>
-    <Button type="button" color={!active ? "danger" : "light"} onClick={onNo}>
+    <Button type="button" color={!active ? "danger" : "light"} onClick={onNo} disabled={disabled}>
       <i className="bx bx-x me-1" />
       No
     </Button>
@@ -274,6 +278,9 @@ const PlanQuotation = () => {
 
   const roles = useSelector(state => state.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const readOnly = isQuotationReadOnly(quotation);
+  const canEditQuotation = canMutate && !readOnly;
+  const readOnlyMessage = getQuotationReadOnlyMessage(quotation);
 
   const [dayForms, setDayForms] = useState([]);
   const [openDays, setOpenDays] = useState({});
@@ -568,6 +575,8 @@ const PlanQuotation = () => {
   };
 
   const handleFieldChange = (dayOrder, field, value) => {
+    if (!canEditQuotation) return;
+
     const currentDay =
       dayForms.find(item => item.DAY_ORDER === dayOrder) || null;
 
@@ -630,6 +639,8 @@ const PlanQuotation = () => {
   };
 
   const handleToggleGuide = (dayOrder, nextValue) => {
+    if (!canEditQuotation) return;
+
     setDayValue(dayOrder, current => ({
       ...current,
       hasGuide: nextValue,
@@ -642,6 +653,8 @@ const PlanQuotation = () => {
   };
 
   const handleToggleMeals = (dayOrder, nextValue) => {
+    if (!canEditQuotation) return;
+
     setDayValue(dayOrder, current => ({
       ...current,
       hasMeals: nextValue,
@@ -658,6 +671,8 @@ const PlanQuotation = () => {
   };
 
   const handleMealFieldChange = (dayOrder, index, field, value) => {
+    if (!canEditQuotation) return;
+
     setDayValue(dayOrder, current => {
       const nextMeals = [...(current.MEALS || [])];
       const currentRow = nextMeals[index] || { CITY_ID: "", RESTAURANT_ID: "", MEAL_TYPE: "" };
@@ -685,6 +700,8 @@ const PlanQuotation = () => {
   };
 
   const addMealRow = dayOrder => {
+    if (!canEditQuotation) return;
+
     setDayValue(dayOrder, current => ({
       ...current,
       MEALS: [...(current.MEALS || []), { CITY_ID: "", RESTAURANT_ID: "", MEAL_TYPE: "" }],
@@ -696,6 +713,8 @@ const PlanQuotation = () => {
   };
 
   const removeMealRow = (dayOrder, index) => {
+    if (!canEditQuotation) return;
+
     setDayValue(dayOrder, current => {
       const nextMeals = (current.MEALS || []).filter((_, i) => i !== index);
       return {
@@ -739,6 +758,8 @@ const PlanQuotation = () => {
   };
 
   const toggleEntranceFeePlace = (dayOrder, placeId, checked) => {
+    if (!canEditQuotation) return;
+
     setDayValue(dayOrder, current => {
       const currentIds = Array.isArray(current.selectedEntranceFeePlaceIds)
         ? current.selectedEntranceFeePlaceIds
@@ -977,6 +998,11 @@ const PlanQuotation = () => {
       return;
     }
 
+    if (readOnly) {
+      notifyError(readOnlyMessage);
+      return;
+    }
+
     const errors = validateDay(day);
     if (Object.keys(errors).length > 0) {
       notifyError(Object.values(errors)[0]);
@@ -1029,6 +1055,12 @@ const PlanQuotation = () => {
       <div className="page-content">
         <Container fluid>
           <Breadcrumbs title="Quotations" breadcrumbItem="Plan Quotation" />
+
+          {readOnly ? (
+            <Alert color="warning" className="mb-3" fade={false}>
+              {readOnlyMessage}
+            </Alert>
+          ) : null}
 
           <Row className="mb-3">
             <Col xl="8">
@@ -1180,566 +1212,581 @@ const PlanQuotation = () => {
                     </div>
 
                     <Collapse isOpen={!!openDays[day.DAY_ORDER]}>
-                      <div className="p-4">
-                        <Row className="g-4">
-                          <Col lg="12">
-                            <SectionCard
-                              icon="bx-map-alt"
-                              title="Route"
-                              subtitle="Enter cities separated by dash (-), then choose the entrance fee places to include."
-                            >
-                              <Row className="g-3">
-                                <Col lg="12">
-                                  <div>
-                                    <Label className="form-label">Route</Label>
-                                    <Input
-                                      value={day.ROUTE_TEXT}
-                                      onChange={e =>
-                                        handleFieldChange(day.DAY_ORDER, "ROUTE_TEXT", e.target.value)
-                                      }
-                                      placeholder="Amman - Petra - Amman"
-                                      invalid={!!(day.touched.ROUTE_TEXT && dayErrors.ROUTE_TEXT)}
-                                      disabled={lookupsLoading}
-                                    />
-                                    <FormFeedback>{dayErrors.ROUTE_TEXT}</FormFeedback>
-                                    <div className="text-muted small mt-2">
-                                      Example: Amman - Petra - Amman
-                                    </div>
-                                  </div>
-                                </Col>
-
-                                <Col lg="12">
-                                  <div className="bg-light rounded p-3">
-                                    <div className="d-flex align-items-center mb-3">
-                                      <i className="bx bx-receipt text-primary font-size-18 me-2" />
-                                      <div>
-                                        <div className="fw-semibold">Entrance Fees</div>
-                                        <div className="text-muted small">
-                                          On the selected route we found a places with entrance fees would you like to insert them?
-                                        </div>
+                      <fieldset disabled={readOnly} className="border-0 m-0 p-0">
+                        <div className="p-4">
+                          <Row className="g-4">
+                            <Col lg="12">
+                              <SectionCard
+                                icon="bx-map-alt"
+                                title="Route"
+                                subtitle="Enter cities separated by dash (-), then choose the entrance fee places to include."
+                              >
+                                <Row className="g-3">
+                                  <Col lg="12">
+                                    <div>
+                                      <Label className="form-label">Route</Label>
+                                      <Input
+                                        value={day.ROUTE_TEXT}
+                                        onChange={e =>
+                                          handleFieldChange(day.DAY_ORDER, "ROUTE_TEXT", e.target.value)
+                                        }
+                                        placeholder="Amman - Petra - Amman"
+                                        invalid={!!(day.touched.ROUTE_TEXT && dayErrors.ROUTE_TEXT)}
+                                        disabled={lookupsLoading || readOnly}
+                                      />
+                                      <FormFeedback>{dayErrors.ROUTE_TEXT}</FormFeedback>
+                                      <div className="text-muted small mt-2">
+                                        Example: Amman - Petra - Amman
                                       </div>
                                     </div>
+                                  </Col>
 
-                                    {!String(day.ROUTE_TEXT || "").trim() ? (
-                                      <div className="text-muted small">
-                                        Enter a route first to load entrance fee places.
-                                      </div>
-                                    ) : entranceFeePlaces.length === 0 ? (
-                                      <div className="text-muted small">
-                                        No entrance fee places found for the selected route.
-                                      </div>
-                                    ) : (
-                                      <div className="table-responsive">
-                                        <table className="table table-bordered table-nowrap align-middle mb-0 bg-white">
-                                          <thead className="table-light">
-                                            <tr>
-                                              <th>Place Name</th>
-                                              <th style={{ width: 180 }}>Insert</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {entranceFeePlaces.map(place => {
-                                              const placeId = getId(place);
-                                              const selected = (day.selectedEntranceFeePlaceIds || []).includes(placeId);
-
-                                              return (
-                                                <tr key={placeId}>
-                                                  <td className="fw-medium">{place?.PLACE_NAME || "-"}</td>
-                                                  <td>
-                                                    <div className="d-flex gap-2">
-                                                      <Button
-                                                        type="button"
-                                                        size="sm"
-                                                        color={selected ? "primary" : "light"}
-                                                        onClick={() =>
-                                                          toggleEntranceFeePlace(day.DAY_ORDER, placeId, true)
-                                                        }
-                                                      >
-                                                        Yes
-                                                      </Button>
-                                                      <Button
-                                                        type="button"
-                                                        size="sm"
-                                                        color={!selected ? "danger" : "light"}
-                                                        onClick={() =>
-                                                          toggleEntranceFeePlace(day.DAY_ORDER, placeId, false)
-                                                        }
-                                                      >
-                                                        No
-                                                      </Button>
-                                                    </div>
-                                                  </td>
-                                                </tr>
-                                              );
-                                            })}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    )}
-                                  </div>
-                                </Col>
-                              </Row>
-                            </SectionCard>
-                          </Col>
-
-                          <Col xl="6">
-                            <SectionCard
-                              icon="bx-bus"
-                              title="Transportation"
-                              subtitle="Choose the transport category, company, and matching size."
-                            >
-                              <Row className="g-3">
-                                <Col lg="12">
-                                  <div>
-                                    <Label className="form-label">Transportation Type</Label>
-                                    <Input
-                                      type="select"
-                                      value={day.TRANSPORTATION_TYPE}
-                                      onChange={e =>
-                                        handleFieldChange(
-                                          day.DAY_ORDER,
-                                          "TRANSPORTATION_TYPE",
-                                          e.target.value
-                                        )
-                                      }
-                                      invalid={
-                                        !!(
-                                          day.touched.TRANSPORTATION_TYPE &&
-                                          dayErrors.TRANSPORTATION_TYPE
-                                        )
-                                      }
-                                      disabled={lookupsLoading}
-                                    >
-                                      <option value="">Select Transportation Type</option>
-                                      {transportationTypes.map(item => (
-                                        <option key={getId(item)} value={getId(item)}>
-                                          {getTransportationTypeLabel(item)}
-                                        </option>
-                                      ))}
-                                    </Input>
-                                    <FormFeedback>{dayErrors.TRANSPORTATION_TYPE}</FormFeedback>
-                                  </div>
-                                </Col>
-
-                                <Col lg="12">
-                                  <div>
-                                    <Label className="form-label">Transportation Company</Label>
-                                    <Input
-                                      type="select"
-                                      value={day.TRANSPORTATION_COMPANY_ID}
-                                      onChange={e =>
-                                        handleFieldChange(
-                                          day.DAY_ORDER,
-                                          "TRANSPORTATION_COMPANY_ID",
-                                          e.target.value
-                                        )
-                                      }
-                                      invalid={
-                                        !!(
-                                          day.touched.TRANSPORTATION_COMPANY_ID &&
-                                          dayErrors.TRANSPORTATION_COMPANY_ID
-                                        )
-                                      }
-                                      disabled={lookupsLoading}
-                                    >
-                                      <option value="">Select Transportation Company</option>
-                                      {transportationCompanies.map(item => (
-                                        <option key={getId(item)} value={getId(item)}>
-                                          {getCompanyLabel(item)}
-                                        </option>
-                                      ))}
-                                    </Input>
-                                    <FormFeedback>{dayErrors.TRANSPORTATION_COMPANY_ID}</FormFeedback>
-                                  </div>
-                                </Col>
-
-                                <Col lg="12">
-                                  <div>
-                                    <Label className="form-label">Transportation By</Label>
-
-                                    {!day.TRANSPORTATION_TYPE ? (
-                                      <div className="bg-light rounded p-3 text-muted small">
-                                        Select transportation type first.
-                                      </div>
-                                    ) : !day.TRANSPORTATION_COMPANY_ID ? (
-                                      <div className="bg-light rounded p-3 text-muted small">
-                                        Select transportation company first.
-                                      </div>
-                                    ) : currentBestRateLoading ? (
-                                      <div className="bg-light rounded p-3 d-flex align-items-center">
-                                        <Spinner size="sm" className="me-2" />
-                                        <span className="text-muted small">
-                                          Loading best transportation rate...
-                                        </span>
-                                      </div>
-                                    ) : currentBestRateError ? (
-                                      <Alert color="danger" className="mb-0">
-                                        <div className="fw-semibold mb-1">Transportation rate not found</div>
-                                        <div>{currentBestRateError}</div>
-                                      </Alert>
-                                    ) : day.TRANSPORTATION_BY ? (
-                                      <div className="border rounded p-3">
-                                        <Row className="g-3">
-                                          <Col md="6">
-                                            <div className="text-muted small">Transportation Company</div>
-                                            <div className="fw-semibold">
-                                              {day.TRANSPORTATION_COMPANY_NAME || "-"}
-                                            </div>
-                                          </Col>
-                                          <Col md="6">
-                                            <div className="text-muted small">Transportation Type</div>
-                                            <div className="fw-semibold">
-                                              {day.TRANSPORTATION_SIZE_LABEL || "-"}
-                                            </div>
-                                          </Col>
-                                          <Col md="6">
-                                            <div className="text-muted small">Minimum Capacity</div>
-                                            <div className="fw-semibold">
-                                              {day.TRANSPORTATION_MIN_CAPACITY ?? "-"}
-                                            </div>
-                                          </Col>
-                                          <Col md="6">
-                                            <div className="text-muted small">Maximum Capacity</div>
-                                            <div className="fw-semibold">
-                                              {day.TRANSPORTATION_MAX_CAPACITY ?? "-"}
-                                            </div>
-                                          </Col>
-                                        </Row>
-                                      </div>
-                                    ) : (
-                                      <div className="bg-light rounded p-3 text-muted small">
-                                        No transportation size found for the selected company, type and pax.
-                                      </div>
-                                    )}
-
-                                    {day.touched.TRANSPORTATION_BY && dayErrors.TRANSPORTATION_BY ? (
-                                      <div className="text-danger small mt-2">
-                                        {dayErrors.TRANSPORTATION_BY}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                </Col>
-                              </Row>
-                            </SectionCard>
-                          </Col>
-
-                          <Col xl="6">
-                            <SectionCard
-                              icon="bx-user-check"
-                              title="Guide"
-                              subtitle="Enable a guide for the day, then select the guide type if needed."
-                            >
-                              <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                                <div>
-                                  <div className="fw-semibold">Guide Required</div>
-                                  <div className="text-muted small">
-                                    Choose whether this day includes a guide.
-                                  </div>
-                                </div>
-
-                                <DayToggle
-                                  active={day.hasGuide}
-                                  onYes={() => handleToggleGuide(day.DAY_ORDER, true)}
-                                  onNo={() => handleToggleGuide(day.DAY_ORDER, false)}
-                                />
-                              </div>
-
-                              {day.hasGuide ? (
-                                <div>
-                                  <Label className="form-label">Guide Type</Label>
-                                  <Input
-                                    type="select"
-                                    value={day.GUIDE_TYPE}
-                                    onChange={e =>
-                                      handleFieldChange(
-                                        day.DAY_ORDER,
-                                        "GUIDE_TYPE",
-                                        e.target.value
-                                      )
-                                    }
-                                    invalid={
-                                      !!(day.touched.GUIDE_TYPE && dayErrors.GUIDE_TYPE)
-                                    }
-                                    disabled={lookupsLoading}
-                                  >
-                                    <option value="">Select Guide Type</option>
-                                    {guideTypes.map(item => (
-                                      <option key={getId(item)} value={getId(item)}>
-                                        {getGuideTypeLabel(item)}
-                                      </option>
-                                    ))}
-                                  </Input>
-                                  <FormFeedback>{dayErrors.GUIDE_TYPE}</FormFeedback>
-                                </div>
-                              ) : (
-                                <div className="text-muted small bg-light rounded p-3">
-                                  Guide is disabled for this day.
-                                </div>
-                              )}
-                            </SectionCard>
-                          </Col>
-
-                          <Col lg="12">
-                            <SectionCard
-                              icon="bx-restaurant"
-                              title="Meals"
-                              subtitle="Select city, restaurant, and then one of the available meals."
-                            >
-                              <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                                <div>
-                                  <div className="fw-semibold">Meals Required</div>
-                                  <div className="text-muted small">
-                                    Turn meals on if this day includes food arrangements.
-                                  </div>
-                                </div>
-
-                                <DayToggle
-                                  active={day.hasMeals}
-                                  onYes={() => handleToggleMeals(day.DAY_ORDER, true)}
-                                  onNo={() => handleToggleMeals(day.DAY_ORDER, false)}
-                                />
-                              </div>
-
-                              {day.hasMeals ? (
-                                <>
-                                  {(day.MEALS || []).map((meal, index) => {
-                                    const restaurantsForCity = getRestaurantsForCity(meal.CITY_ID);
-                                    const availableMeals = getRestaurantMealsForSelectedRestaurant(
-                                      meal.CITY_ID,
-                                      meal.RESTAURANT_ID
-                                    );
-                                    const restaurantsLoading = !!restaurantsLoadingByCityId?.[meal.CITY_ID];
-
-                                    return (
-                                      <div
-                                        key={`${day.DAY_ORDER}-${index}`}
-                                        className={`rounded border p-3 ${
-                                          index > 0 ? "mt-3" : ""
-                                        }`}
-                                      >
-                                        <div className="d-flex justify-content-between align-items-center mb-3">
-                                          <div className="fw-semibold">Meal Row {index + 1}</div>
-                                          <div className="d-flex gap-2">
-                                            <Button
-                                              color="light"
-                                              size="sm"
-                                              type="button"
-                                              onClick={() => addMealRow(day.DAY_ORDER)}
-                                            >
-                                              <i className="bx bx-plus me-1" />
-                                              Add
-                                            </Button>
-                                            <Button
-                                              color="light"
-                                              size="sm"
-                                              type="button"
-                                              onClick={() =>
-                                                removeMealRow(day.DAY_ORDER, index)
-                                              }
-                                            >
-                                              <i className="bx bx-trash me-1" />
-                                              Remove
-                                            </Button>
+                                  <Col lg="12">
+                                    <div className="bg-light rounded p-3">
+                                      <div className="d-flex align-items-center mb-3">
+                                        <i className="bx bx-receipt text-primary font-size-18 me-2" />
+                                        <div>
+                                          <div className="fw-semibold">Entrance Fees</div>
+                                          <div className="text-muted small">
+                                            On the selected route we found a places with entrance fees would you like to insert them?
                                           </div>
                                         </div>
-
-                                        <Row className="g-3">
-                                          <Col lg="4">
-                                            <div>
-                                              <Label className="form-label">City</Label>
-                                              <Input
-                                                type="select"
-                                                value={meal.CITY_ID}
-                                                onChange={e =>
-                                                  handleMealFieldChange(
-                                                    day.DAY_ORDER,
-                                                    index,
-                                                    "CITY_ID",
-                                                    e.target.value
-                                                  )
-                                                }
-                                              >
-                                                <option value="">Select City</option>
-                                                {cities.map(item => (
-                                                  <option key={getId(item)} value={getId(item)}>
-                                                    {getCityLabel(item)}
-                                                  </option>
-                                                ))}
-                                              </Input>
-                                            </div>
-                                          </Col>
-
-                                          <Col lg="4">
-                                            <div>
-                                              <Label className="form-label">Restaurant</Label>
-                                              <Input
-                                                type="select"
-                                                value={meal.RESTAURANT_ID}
-                                                onChange={e =>
-                                                  handleMealFieldChange(
-                                                    day.DAY_ORDER,
-                                                    index,
-                                                    "RESTAURANT_ID",
-                                                    e.target.value
-                                                  )
-                                                }
-                                                disabled={!meal.CITY_ID}
-                                              >
-                                                <option value="">
-                                                  {restaurantsLoading
-                                                    ? "Loading restaurants..."
-                                                    : "Select Restaurant"}
-                                                </option>
-                                                {restaurantsForCity.map(item => (
-                                                  <option key={getId(item)} value={getId(item)}>
-                                                    {getRestaurantLabel(item)}
-                                                  </option>
-                                                ))}
-                                              </Input>
-                                            </div>
-                                          </Col>
-
-                                          <Col lg="4">
-                                            <div>
-                                              <Label className="form-label">Meal Type</Label>
-                                              <Input
-                                                type="select"
-                                                value={meal.MEAL_TYPE}
-                                                onChange={e =>
-                                                  handleMealFieldChange(
-                                                    day.DAY_ORDER,
-                                                    index,
-                                                    "MEAL_TYPE",
-                                                    e.target.value
-                                                  )
-                                                }
-                                                disabled={!meal.RESTAURANT_ID}
-                                              >
-                                                <option value="">Select Meal Type</option>
-                                                {availableMeals.map((item, mealIndex) => (
-                                                  <option
-                                                    key={getId(item) || `${getMealValue(item)}-${mealIndex}`}
-                                                    value={getMealValue(item)}
-                                                  >
-                                                    {getMealLabel(item)}
-                                                  </option>
-                                                ))}
-                                              </Input>
-                                            </div>
-                                          </Col>
-                                        </Row>
                                       </div>
-                                    );
-                                  })}
 
-                                  {day.touched.MEALS && dayErrors.MEALS ? (
-                                    <div className="text-danger small mt-3">{dayErrors.MEALS}</div>
-                                  ) : null}
-                                </>
-                              ) : (
-                                <div className="text-muted small bg-light rounded p-3">
-                                  Meals are disabled for this day.
-                                </div>
-                              )}
-                            </SectionCard>
-                          </Col>
+                                      {!String(day.ROUTE_TEXT || "").trim() ? (
+                                        <div className="text-muted small">
+                                          Enter a route first to load entrance fee places.
+                                        </div>
+                                      ) : entranceFeePlaces.length === 0 ? (
+                                        <div className="text-muted small">
+                                          No entrance fee places found for the selected route.
+                                        </div>
+                                      ) : (
+                                        <div className="table-responsive">
+                                          <table className="table table-bordered table-nowrap align-middle mb-0 bg-white">
+                                            <thead className="table-light">
+                                              <tr>
+                                                <th>Place Name</th>
+                                                <th style={{ width: 180 }}>Insert</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {entranceFeePlaces.map(place => {
+                                                const placeId = getId(place);
+                                                const selected = (day.selectedEntranceFeePlaceIds || []).includes(placeId);
 
-                          <Col lg="12">
-                            <SectionCard
-                              icon="bx-moon"
-                              title="Overnight"
-                              subtitle="Select the city of stay from the cities available on the selected route."
-                            >
-                              <Row className="g-3 align-items-end">
-                                <Col lg="6">
+                                                return (
+                                                  <tr key={placeId}>
+                                                    <td className="fw-medium">{place?.PLACE_NAME || "-"}</td>
+                                                    <td>
+                                                      <div className="d-flex gap-2">
+                                                        <Button
+                                                          type="button"
+                                                          size="sm"
+                                                          color={selected ? "primary" : "light"}
+                                                          onClick={() =>
+                                                            toggleEntranceFeePlace(day.DAY_ORDER, placeId, true)
+                                                          }
+                                                          disabled={readOnly}
+                                                        >
+                                                          Yes
+                                                        </Button>
+                                                        <Button
+                                                          type="button"
+                                                          size="sm"
+                                                          color={!selected ? "danger" : "light"}
+                                                          onClick={() =>
+                                                            toggleEntranceFeePlace(day.DAY_ORDER, placeId, false)
+                                                          }
+                                                          disabled={readOnly}
+                                                        >
+                                                          No
+                                                        </Button>
+                                                      </div>
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </Col>
+                                </Row>
+                              </SectionCard>
+                            </Col>
+
+                            <Col xl="6">
+                              <SectionCard
+                                icon="bx-bus"
+                                title="Transportation"
+                                subtitle="Choose the transport category, company, and matching size."
+                              >
+                                <Row className="g-3">
+                                  <Col lg="12">
+                                    <div>
+                                      <Label className="form-label">Transportation Type</Label>
+                                      <Input
+                                        type="select"
+                                        value={day.TRANSPORTATION_TYPE}
+                                        onChange={e =>
+                                          handleFieldChange(
+                                            day.DAY_ORDER,
+                                            "TRANSPORTATION_TYPE",
+                                            e.target.value
+                                          )
+                                        }
+                                        invalid={
+                                          !!(
+                                            day.touched.TRANSPORTATION_TYPE &&
+                                            dayErrors.TRANSPORTATION_TYPE
+                                          )
+                                        }
+                                        disabled={lookupsLoading || readOnly}
+                                      >
+                                        <option value="">Select Transportation Type</option>
+                                        {transportationTypes.map(item => (
+                                          <option key={getId(item)} value={getId(item)}>
+                                            {getTransportationTypeLabel(item)}
+                                          </option>
+                                        ))}
+                                      </Input>
+                                      <FormFeedback>{dayErrors.TRANSPORTATION_TYPE}</FormFeedback>
+                                    </div>
+                                  </Col>
+
+                                  <Col lg="12">
+                                    <div>
+                                      <Label className="form-label">Transportation Company</Label>
+                                      <Input
+                                        type="select"
+                                        value={day.TRANSPORTATION_COMPANY_ID}
+                                        onChange={e =>
+                                          handleFieldChange(
+                                            day.DAY_ORDER,
+                                            "TRANSPORTATION_COMPANY_ID",
+                                            e.target.value
+                                          )
+                                        }
+                                        invalid={
+                                          !!(
+                                            day.touched.TRANSPORTATION_COMPANY_ID &&
+                                            dayErrors.TRANSPORTATION_COMPANY_ID
+                                          )
+                                        }
+                                        disabled={lookupsLoading || readOnly}
+                                      >
+                                        <option value="">Select Transportation Company</option>
+                                        {transportationCompanies.map(item => (
+                                          <option key={getId(item)} value={getId(item)}>
+                                            {getCompanyLabel(item)}
+                                          </option>
+                                        ))}
+                                      </Input>
+                                      <FormFeedback>{dayErrors.TRANSPORTATION_COMPANY_ID}</FormFeedback>
+                                    </div>
+                                  </Col>
+
+                                  <Col lg="12">
+                                    <div>
+                                      <Label className="form-label">Transportation By</Label>
+
+                                      {!day.TRANSPORTATION_TYPE ? (
+                                        <div className="bg-light rounded p-3 text-muted small">
+                                          Select transportation type first.
+                                        </div>
+                                      ) : !day.TRANSPORTATION_COMPANY_ID ? (
+                                        <div className="bg-light rounded p-3 text-muted small">
+                                          Select transportation company first.
+                                        </div>
+                                      ) : currentBestRateLoading ? (
+                                        <div className="bg-light rounded p-3 d-flex align-items-center">
+                                          <Spinner size="sm" className="me-2" />
+                                          <span className="text-muted small">
+                                            Loading best transportation rate...
+                                          </span>
+                                        </div>
+                                      ) : currentBestRateError ? (
+                                        <Alert color="danger" className="mb-0">
+                                          <div className="fw-semibold mb-1">Transportation rate not found</div>
+                                          <div>{currentBestRateError}</div>
+                                        </Alert>
+                                      ) : day.TRANSPORTATION_BY ? (
+                                        <div className="border rounded p-3">
+                                          <Row className="g-3">
+                                            <Col md="6">
+                                              <div className="text-muted small">Transportation Company</div>
+                                              <div className="fw-semibold">
+                                                {day.TRANSPORTATION_COMPANY_NAME || "-"}
+                                              </div>
+                                            </Col>
+                                            <Col md="6">
+                                              <div className="text-muted small">Transportation Type</div>
+                                              <div className="fw-semibold">
+                                                {day.TRANSPORTATION_SIZE_LABEL || "-"}
+                                              </div>
+                                            </Col>
+                                            <Col md="6">
+                                              <div className="text-muted small">Minimum Capacity</div>
+                                              <div className="fw-semibold">
+                                                {day.TRANSPORTATION_MIN_CAPACITY ?? "-"}
+                                              </div>
+                                            </Col>
+                                            <Col md="6">
+                                              <div className="text-muted small">Maximum Capacity</div>
+                                              <div className="fw-semibold">
+                                                {day.TRANSPORTATION_MAX_CAPACITY ?? "-"}
+                                              </div>
+                                            </Col>
+                                          </Row>
+                                        </div>
+                                      ) : (
+                                        <div className="bg-light rounded p-3 text-muted small">
+                                          No transportation size found for the selected company, type and pax.
+                                        </div>
+                                      )}
+
+                                      {day.touched.TRANSPORTATION_BY && dayErrors.TRANSPORTATION_BY ? (
+                                        <div className="text-danger small mt-2">
+                                          {dayErrors.TRANSPORTATION_BY}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </Col>
+                                </Row>
+                              </SectionCard>
+                            </Col>
+
+                            <Col xl="6">
+                              <SectionCard
+                                icon="bx-user-check"
+                                title="Guide"
+                                subtitle="Enable a guide for the day, then select the guide type if needed."
+                              >
+                                <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
                                   <div>
-                                    <Label className="form-label">City of Stay</Label>
+                                    <div className="fw-semibold">Guide Required</div>
+                                    <div className="text-muted small">
+                                      Choose whether this day includes a guide.
+                                    </div>
+                                  </div>
+
+                                  <DayToggle
+                                    active={day.hasGuide}
+                                    onYes={() => handleToggleGuide(day.DAY_ORDER, true)}
+                                    onNo={() => handleToggleGuide(day.DAY_ORDER, false)}
+                                    disabled={readOnly}
+                                  />
+                                </div>
+
+                                {day.hasGuide ? (
+                                  <div>
+                                    <Label className="form-label">Guide Type</Label>
                                     <Input
                                       type="select"
-                                      value={day.OVERNIGHT_CITY}
+                                      value={day.GUIDE_TYPE}
                                       onChange={e =>
-                                        handleFieldChange(day.DAY_ORDER, "OVERNIGHT_CITY", e.target.value)
+                                        handleFieldChange(
+                                          day.DAY_ORDER,
+                                          "GUIDE_TYPE",
+                                          e.target.value
+                                        )
                                       }
-                                      invalid={!!(day.touched.OVERNIGHT_CITY && dayErrors.OVERNIGHT_CITY)}
-                                      disabled={!routeCities.length}
+                                      invalid={
+                                        !!(day.touched.GUIDE_TYPE && dayErrors.GUIDE_TYPE)
+                                      }
+                                      disabled={lookupsLoading || readOnly}
                                     >
-                                      <option value="">
-                                        {routeCities.length ? "Select City of Stay" : "Select route first"}
-                                      </option>
-                                      {routeCities.map(city => (
-                                        <option key={getId(city)} value={getId(city)}>
-                                          {getCityLabel(city)}
+                                      <option value="">Select Guide Type</option>
+                                      {guideTypes.map(item => (
+                                        <option key={getId(item)} value={getId(item)}>
+                                          {getGuideTypeLabel(item)}
                                         </option>
                                       ))}
                                     </Input>
-                                    <FormFeedback>{dayErrors.OVERNIGHT_CITY}</FormFeedback>
+                                    <FormFeedback>{dayErrors.GUIDE_TYPE}</FormFeedback>
                                   </div>
-                                </Col>
+                                ) : (
+                                  <div className="text-muted small bg-light rounded p-3">
+                                    Guide is disabled for this day.
+                                  </div>
+                                )}
+                              </SectionCard>
+                            </Col>
 
-                                <Col lg="6">
-                                  <div className="bg-light rounded p-3">
-                                    <div className="fw-semibold mb-1">Available Route Cities</div>
+                            <Col lg="12">
+                              <SectionCard
+                                icon="bx-restaurant"
+                                title="Meals"
+                                subtitle="Select city, restaurant, and then one of the available meals."
+                              >
+                                <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                                  <div>
+                                    <div className="fw-semibold">Meals Required</div>
                                     <div className="text-muted small">
-                                      {routeCities.length
-                                        ? routeCities.map(city => getCityLabel(city)).join(" • ")
-                                        : "No route cities available yet."}
+                                      Turn meals on if this day includes food arrangements.
                                     </div>
                                   </div>
-                                </Col>
-                              </Row>
-                            </SectionCard>
-                          </Col>
 
-                          <Col lg="12">
-                            <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 border-top pt-4 mt-2">
-                              <div className="text-muted small">
-                                Review the day details before saving.
-                              </div>
+                                  <DayToggle
+                                    active={day.hasMeals}
+                                    onYes={() => handleToggleMeals(day.DAY_ORDER, true)}
+                                    onNo={() => handleToggleMeals(day.DAY_ORDER, false)}
+                                    disabled={readOnly}
+                                  />
+                                </div>
 
-                              <div className="d-flex gap-2">
-                                <Button
-                                  color="light"
-                                  type="button"
-                                  onClick={() => {
-                                    if (day._id) {
-                                      dispatch(fetchQuotationDays(id));
-                                      notifyInfo(`Day ${day.DAY_ORDER} restored from backend.`);
-                                    } else {
-                                      setDayForms(prev =>
-                                        prev.map(item =>
-                                          item.DAY_ORDER === day.DAY_ORDER
-                                            ? buildDayState({
-                                                quotationId: quotation._id,
-                                                order: day.DAY_ORDER,
-                                                date: day.DAY_DATE,
-                                                existing: null,
-                                                cities,
-                                              })
-                                            : item
-                                        )
+                                {day.hasMeals ? (
+                                  <>
+                                    {(day.MEALS || []).map((meal, index) => {
+                                      const restaurantsForCity = getRestaurantsForCity(meal.CITY_ID);
+                                      const availableMeals = getRestaurantMealsForSelectedRestaurant(
+                                        meal.CITY_ID,
+                                        meal.RESTAURANT_ID
                                       );
-                                    }
-                                  }}
-                                >
-                                  Reset Day
-                                </Button>
+                                      const restaurantsLoading = !!restaurantsLoadingByCityId?.[meal.CITY_ID];
 
-                                <Button
-                                  color="primary"
-                                  type="button"
-                                  onClick={() => handleSaveDay(day)}
-                                  disabled={isSavingThisDay}
-                                >
-                                  {isSavingThisDay ? (
-                                    <Spinner size="sm" className="me-2" />
-                                  ) : null}
-                                  {day._id ? "Update Day" : "Save Day"}
-                                </Button>
+                                      return (
+                                        <div
+                                          key={`${day.DAY_ORDER}-${index}`}
+                                          className={`rounded border p-3 ${
+                                            index > 0 ? "mt-3" : ""
+                                          }`}
+                                        >
+                                          <div className="d-flex justify-content-between align-items-center mb-3">
+                                            <div className="fw-semibold">Meal Row {index + 1}</div>
+                                            <div className="d-flex gap-2">
+                                              <Button
+                                                color="light"
+                                                size="sm"
+                                                type="button"
+                                                onClick={() => addMealRow(day.DAY_ORDER)}
+                                                disabled={readOnly}
+                                              >
+                                                <i className="bx bx-plus me-1" />
+                                                Add
+                                              </Button>
+                                              <Button
+                                                color="light"
+                                                size="sm"
+                                                type="button"
+                                                onClick={() =>
+                                                  removeMealRow(day.DAY_ORDER, index)
+                                                }
+                                                disabled={readOnly}
+                                              >
+                                                <i className="bx bx-trash me-1" />
+                                                Remove
+                                              </Button>
+                                            </div>
+                                          </div>
+
+                                          <Row className="g-3">
+                                            <Col lg="4">
+                                              <div>
+                                                <Label className="form-label">City</Label>
+                                                <Input
+                                                  type="select"
+                                                  value={meal.CITY_ID}
+                                                  onChange={e =>
+                                                    handleMealFieldChange(
+                                                      day.DAY_ORDER,
+                                                      index,
+                                                      "CITY_ID",
+                                                      e.target.value
+                                                    )
+                                                  }
+                                                  disabled={readOnly}
+                                                >
+                                                  <option value="">Select City</option>
+                                                  {cities.map(item => (
+                                                    <option key={getId(item)} value={getId(item)}>
+                                                      {getCityLabel(item)}
+                                                    </option>
+                                                  ))}
+                                                </Input>
+                                              </div>
+                                            </Col>
+
+                                            <Col lg="4">
+                                              <div>
+                                                <Label className="form-label">Restaurant</Label>
+                                                <Input
+                                                  type="select"
+                                                  value={meal.RESTAURANT_ID}
+                                                  onChange={e =>
+                                                    handleMealFieldChange(
+                                                      day.DAY_ORDER,
+                                                      index,
+                                                      "RESTAURANT_ID",
+                                                      e.target.value
+                                                    )
+                                                  }
+                                                  disabled={!meal.CITY_ID || readOnly}
+                                                >
+                                                  <option value="">
+                                                    {restaurantsLoading
+                                                      ? "Loading restaurants..."
+                                                      : "Select Restaurant"}
+                                                  </option>
+                                                  {restaurantsForCity.map(item => (
+                                                    <option key={getId(item)} value={getId(item)}>
+                                                      {getRestaurantLabel(item)}
+                                                    </option>
+                                                  ))}
+                                                </Input>
+                                              </div>
+                                            </Col>
+
+                                            <Col lg="4">
+                                              <div>
+                                                <Label className="form-label">Meal Type</Label>
+                                                <Input
+                                                  type="select"
+                                                  value={meal.MEAL_TYPE}
+                                                  onChange={e =>
+                                                    handleMealFieldChange(
+                                                      day.DAY_ORDER,
+                                                      index,
+                                                      "MEAL_TYPE",
+                                                      e.target.value
+                                                    )
+                                                  }
+                                                  disabled={!meal.RESTAURANT_ID || readOnly}
+                                                >
+                                                  <option value="">Select Meal Type</option>
+                                                  {availableMeals.map((item, mealIndex) => (
+                                                    <option
+                                                      key={getId(item) || `${getMealValue(item)}-${mealIndex}`}
+                                                      value={getMealValue(item)}
+                                                    >
+                                                      {getMealLabel(item)}
+                                                    </option>
+                                                  ))}
+                                                </Input>
+                                              </div>
+                                            </Col>
+                                          </Row>
+                                        </div>
+                                      );
+                                    })}
+
+                                    {day.touched.MEALS && dayErrors.MEALS ? (
+                                      <div className="text-danger small mt-3">{dayErrors.MEALS}</div>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <div className="text-muted small bg-light rounded p-3">
+                                    Meals are disabled for this day.
+                                  </div>
+                                )}
+                              </SectionCard>
+                            </Col>
+
+                            <Col lg="12">
+                              <SectionCard
+                                icon="bx-moon"
+                                title="Overnight"
+                                subtitle="Select the city of stay from the cities available on the selected route."
+                              >
+                                <Row className="g-3 align-items-end">
+                                  <Col lg="6">
+                                    <div>
+                                      <Label className="form-label">City of Stay</Label>
+                                      <Input
+                                        type="select"
+                                        value={day.OVERNIGHT_CITY}
+                                        onChange={e =>
+                                          handleFieldChange(day.DAY_ORDER, "OVERNIGHT_CITY", e.target.value)
+                                        }
+                                        invalid={!!(day.touched.OVERNIGHT_CITY && dayErrors.OVERNIGHT_CITY)}
+                                        disabled={!routeCities.length || readOnly}
+                                      >
+                                        <option value="">
+                                          {routeCities.length ? "Select City of Stay" : "Select route first"}
+                                        </option>
+                                        {routeCities.map(city => (
+                                          <option key={getId(city)} value={getId(city)}>
+                                            {getCityLabel(city)}
+                                          </option>
+                                        ))}
+                                      </Input>
+                                      <FormFeedback>{dayErrors.OVERNIGHT_CITY}</FormFeedback>
+                                    </div>
+                                  </Col>
+
+                                  <Col lg="6">
+                                    <div className="bg-light rounded p-3">
+                                      <div className="fw-semibold mb-1">Available Route Cities</div>
+                                      <div className="text-muted small">
+                                        {routeCities.length
+                                          ? routeCities.map(city => getCityLabel(city)).join(" • ")
+                                          : "No route cities available yet."}
+                                      </div>
+                                    </div>
+                                  </Col>
+                                </Row>
+                              </SectionCard>
+                            </Col>
+
+                            <Col lg="12">
+                              <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 border-top pt-4 mt-2">
+                                <div className="text-muted small">
+                                  Review the day details before saving.
+                                </div>
+
+                                <div className="d-flex gap-2">
+                                  <Button
+                                    color="light"
+                                    type="button"
+                                    disabled={readOnly}
+                                    onClick={() => {
+                                      if (readOnly) {
+                                        notifyError(readOnlyMessage);
+                                        return;
+                                      }
+
+                                      if (day._id) {
+                                        dispatch(fetchQuotationDays(id));
+                                        notifyInfo(`Day ${day.DAY_ORDER} restored from backend.`);
+                                      } else {
+                                        setDayForms(prev =>
+                                          prev.map(item =>
+                                            item.DAY_ORDER === day.DAY_ORDER
+                                              ? buildDayState({
+                                                  quotationId: quotation._id,
+                                                  order: day.DAY_ORDER,
+                                                  date: day.DAY_DATE,
+                                                  existing: null,
+                                                  cities,
+                                                })
+                                              : item
+                                          )
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Reset Day
+                                  </Button>
+
+                                  <Button
+                                    color="primary"
+                                    type="button"
+                                    onClick={() => handleSaveDay(day)}
+                                    disabled={isSavingThisDay || readOnly}
+                                  >
+                                    {isSavingThisDay ? (
+                                      <Spinner size="sm" className="me-2" />
+                                    ) : null}
+                                    {day._id ? "Update Day" : "Save Day"}
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                          </Col>
-                        </Row>
-                      </div>
+                            </Col>
+                          </Row>
+                        </div>
+                      </fieldset>
                     </Collapse>
                   </CardBody>
                 </Card>

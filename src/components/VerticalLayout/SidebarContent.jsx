@@ -31,6 +31,11 @@ const SidebarContent = (props) => {
     "CONTRACTING",
   ]);
 
+  const canSeeQuotationsPricing = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "ACCOUNTING",
+  ]);
+
   const canManageHotels = hasAnyRole(roles, ["COMPANY_ADMIN", "CONTRACTING"]);
 
   const canManageRestaurants = hasAnyRole(roles, [
@@ -234,6 +239,7 @@ const SidebarContent = (props) => {
                 </Link>
               </li>
             ) : null}
+
             {canManageTransportationSizes ? (
               <li>
                 <Link
@@ -276,6 +282,15 @@ const SidebarContent = (props) => {
                 <Link to="/hotels" className="waves-effect">
                   <i className="bx bx-hotel" />
                   <span>Hotels</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeQuotationsPricing ? (
+              <li className={isActive("/quotation-pricing") ? "mm-active" : ""}>
+                <Link to="/quotation-pricing" className="waves-effect">
+                  <i className="bx bx-dollar-circle" />
+                  <span>Quotation Prices</span>
                 </Link>
               </li>
             ) : null}

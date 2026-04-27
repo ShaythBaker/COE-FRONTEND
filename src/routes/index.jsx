@@ -49,6 +49,10 @@ import PlanQuotation from "../pages/Quotations/Plan";
 import Accommodation from "../pages/Quotations/Accommodation";
 import ExtraServicesQuotation from "../pages/Quotations/ExtraServices";
 
+// Quotation Pricing
+import QuotationPricingList from "../pages/QuotationPricing/List";
+import QuotationPricingDetails from "../pages/QuotationPricing/Details";
+
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
 
@@ -77,7 +81,7 @@ const authProtectedRoutes = [
     component: <TransportationTypes />,
   },
 
-   { path: "/extra-services", component: <ExtraServicesPage /> },
+  { path: "/extra-services", component: <ExtraServicesPage /> },
 
   { path: "/hotels", component: <Hotels /> },
   { path: "/hotels/:id", component: <HotelDetails /> },
@@ -104,8 +108,24 @@ const authProtectedRoutes = [
   { path: "/quotations/:id", component: <QuotationsDetails /> },
   { path: "/quotations/:id/plan", component: <PlanQuotation /> },
   { path: "/quotations/:id/accommodation", component: <Accommodation /> },
-   { path: "/quotations/:id/extra-services", component: <ExtraServicesQuotation /> },
-  
+  { path: "/quotations/:id/extra-services", component: <ExtraServicesQuotation /> },
+
+  {
+    path: "/quotation-pricing",
+    component: (
+      <RoleProtected allowedRoles={["ACCOUNTING", "COMPANY_ADMIN"]}>
+        <QuotationPricingList />
+      </RoleProtected>
+    ),
+  },
+  {
+    path: "/quotation-pricing/:quotationId",
+    component: (
+      <RoleProtected allowedRoles={["ACCOUNTING", "COMPANY_ADMIN"]}>
+        <QuotationPricingDetails />
+      </RoleProtected>
+    ),
+  },
 
   { path: "/", exact: true, component: <Navigate to="/dashboard" /> },
 ];

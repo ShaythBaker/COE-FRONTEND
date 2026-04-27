@@ -1,7 +1,13 @@
 // path: src/helpers/coe_backend_helper.js
 import { get, post, del, patch } from "./api_helper";
 import * as url from "./url_helper";
-import { LIST_ITEMS, ATTACHMENTS, ATTACHMENT_BY_ID } from "./url_helper";
+import {
+  LIST_ITEMS,
+  ATTACHMENTS,
+  ATTACHMENT_BY_ID,
+  QUOTATION_SEND_FOR_PRICING,
+  QUOTATION_FINAL_PRICING,
+} from "./url_helper";
 
 // ===========================
 // COE Auth Endpoints
@@ -10,6 +16,16 @@ import { LIST_ITEMS, ATTACHMENTS, ATTACHMENT_BY_ID } from "./url_helper";
 export const login = (data) => post(url.LOGIN, data); // {email,password}
 export const refreshToken = (data) => post(url.REFRESH, data); // {refreshToken}
 export const logout = (data) => post(url.LOGOUT, data); // {refreshToken}
+
+// =====================
+// Quotation Pricing
+// =====================
+
+export const postSendQuotationForPricing = (quotationId, payload = {}) =>
+  post(QUOTATION_SEND_FOR_PRICING(quotationId), payload);
+
+export const getQuotationFinalPricing = (quotationId) =>
+  get(QUOTATION_FINAL_PRICING(quotationId));
 
 // =====================
 // COE Modules List Items
