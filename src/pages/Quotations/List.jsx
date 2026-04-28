@@ -150,6 +150,7 @@ const QuotationsList = () => {
   const [touched, setTouched] = useState({});
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+  const [rejectReasonView, setRejectReasonView] = useState(null);
 
   const [statusOverrides, setStatusOverrides] = useState({});
   const [hiddenQuotationIds, setHiddenQuotationIds] = useState({});
@@ -427,6 +428,13 @@ const QuotationsList = () => {
     setCancelOpen(true);
   };
 
+  const openRejectReason = (row, reason) => {
+    setRejectReasonView({
+      referenceNumber: row?.REFERANCE_NUMBER || "-",
+      reason,
+    });
+  };
+
   const handleChange = e => {
     const { name, value } = e.target;
 
@@ -649,8 +657,9 @@ const QuotationsList = () => {
                             const effectiveStatus = getEffectiveStatus(row);
                             const showSendForPricing = canShowSendForPricingButton(row);
                             const showCancel = canShowCancelButton(row);
-                            const rejectReason =
-                              rejectReasonMap.get(row?._id) || row?.REJECT_REASON || "-";
+                            const rejectReason = String(
+                              rejectReasonMap.get(row?._id) || row?.REJECT_REASON || ""
+                            ).trim();
 
                             return (
                               <tr key={row?._id || index}>
@@ -664,7 +673,22 @@ const QuotationsList = () => {
                                     {effectiveStatus || "-"}
                                   </Badge>
                                 </td>
-                                <td>{rejectReason}</td>
+                                <td>
+                                  {rejectReason ? (
+                                    <Button
+                                      size="sm"
+                                      color="danger"
+                                      outline
+                                      type="button"
+                                      onClick={() => openRejectReason(row, rejectReason)}
+                                    >
+                                      <i className="bx bx-message-square-detail me-1" />
+                                      View
+                                    </Button>
+                                  ) : (
+                                    "-"
+                                  )}
+                                </td>
                                 <td>
                                   <div className="d-flex flex-wrap gap-2">
                                     <Link
@@ -1056,6 +1080,31 @@ const QuotationsList = () => {
           </Button>
           <Button color="danger" onClick={handleConfirmCancel} disabled={pricingSaving}>
             Confirm Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        isOpen={!!rejectReasonView}
+        toggle={() => setRejectReasonView(null)}
+        centered
+      >
+        <ModalHeader toggle={() => setRejectReasonView(null)}>
+          Reject Reason
+        </ModalHeader>
+        <ModalBody>
+          <div className="mb-2 text-muted small">Reference Number</div>
+          <div className="fw-semibold mb-3">
+            {rejectReasonView?.referenceNumber || "-"}
+          </div>
+          <div className="mb-2 text-muted small">Reason</div>
+          <div className="border rounded p-3 bg-light text-break">
+            {rejectReasonView?.reason || "-"}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button color="light" onClick={() => setRejectReasonView(null)}>
+            Close
           </Button>
         </ModalFooter>
       </Modal>

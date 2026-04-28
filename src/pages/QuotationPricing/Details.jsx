@@ -951,7 +951,7 @@ const QuotationPricingDetails = () => {
                                         <Col sm="6">
                                           <div className="bg-primary-subtle rounded p-2">
                                             <div className="text-muted small">
-                                              Person Price
+                                              Person Price (BB*Nights)
                                             </div>
                                             <div className="fw-bold text-primary">
                                               {formatCurrency(row.stayPerPerson)}
