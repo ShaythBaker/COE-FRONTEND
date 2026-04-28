@@ -61,6 +61,7 @@ const SidebarContent = (props) => {
   const canManageQuotations = hasAnyRole(roles, [
     "COMPANY_ADMIN",
     "CONTRACTING",
+    "TOUR_OPERATION",
   ]);
 
   const canManageExtraServices = hasAnyRole(roles, [

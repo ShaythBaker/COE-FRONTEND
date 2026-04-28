@@ -43,6 +43,7 @@ import {
 } from "../../helpers/quotation_pricing_helper";
 
 const ALLOWED_ROLES = ["COMPANY_ADMIN", "CONTRACTING"];
+const CREATE_QUOTATION_ROLES = ["COMPANY_ADMIN", "TOUR_OPERATION"];
 
 const HIDDEN_AFTER_ACTION_STATUSES = new Set([
   "SEND_FOR_PRICING",
@@ -130,7 +131,7 @@ const QuotationsList = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  const { items, loading, lookups, lookupsLoading } = useSelector(
+  const { items, loading, lookups } = useSelector(
     s => s.Quotations || {}
   );
   const pricingSaving = useSelector(
@@ -141,6 +142,7 @@ const QuotationsList = () => {
   );
   const roles = useSelector(s => s.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const canCreateQuotation = hasAnyRole(roles, CREATE_QUOTATION_ROLES);
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -361,7 +363,7 @@ const QuotationsList = () => {
   };
 
   const openCreate = () => {
-    if (!canMutate) {
+    if (!canCreateQuotation) {
       notifyError("Permission/role mismatch");
       return;
     }
@@ -485,6 +487,11 @@ const QuotationsList = () => {
   const handleCreate = e => {
     e.preventDefault();
     touchAll();
+
+    if (!canCreateQuotation) {
+      notifyError("Permission/role mismatch");
+      return;
+    }
 
     if (Object.keys(errors).length > 0) {
       notifyError("Please fix validation errors before saving.");
@@ -616,7 +623,11 @@ const QuotationsList = () => {
                         placeholder="Search..."
                         style={{ minWidth: 220 }}
                       />
-                      <Button color="primary" onClick={openCreate} disabled={!canMutate}>
+                      <Button
+                        color="primary"
+                        onClick={openCreate}
+                        disabled={!canCreateQuotation}
+                      >
                         <i className="bx bx-plus me-1" />
                         Create
                       </Button>

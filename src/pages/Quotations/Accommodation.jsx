@@ -21,7 +21,7 @@ import {
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { hasAnyRole } from "../../helpers/coe_roles";
-import { notifyError, notifyInfo, notifySuccess } from "../../helpers/notify";
+import { notifyError, notifyInfo } from "../../helpers/notify";
 import { get } from "../../helpers/api_helper";
 import { fetchListItems } from "../../helpers/list_items_helper";
 import { fetchQuotation } from "../../store/Quotations/actions";
@@ -78,6 +78,16 @@ const isDateInRange = (targetDate, startDate, endDate) => {
 
   if (!target || !start || !end) return false;
   return target >= start && target <= end;
+};
+
+const doDateRangesOverlap = (startA, endA, startB, endB) => {
+  const aStart = toDateOnly(startA);
+  const aEnd = toDateOnly(endA);
+  const bStart = toDateOnly(startB);
+  const bEnd = toDateOnly(endB);
+
+  if (!aStart || !aEnd || !bStart || !bEnd) return false;
+  return aStart <= bEnd && aEnd >= bStart;
 };
 
 const diffNights = (start, end) => {
@@ -632,6 +642,20 @@ const Accommodation = () => {
     quotation?.DEPARTURE_DATE || rawOvernightResponse?.QUOTATION_END_DATE
   );
 
+  const quotationValidityStartDate = toDateOnly(
+    quotation?.QUOTATION_START_DATE ||
+      rawOvernightResponse?.QUOTATION_START_DATE ||
+      quotation?.ARRAIVING_DATE ||
+      ""
+  );
+
+  const quotationValidityEndDate = toDateOnly(
+    quotation?.QUOTATION_END_DATE ||
+      rawOvernightResponse?.QUOTATION_END_DATE ||
+      quotation?.DEPARTURE_DATE ||
+      ""
+  );
+
   const totalNightsFromDates = diffNights(arrivingDate, departureDate);
 
   const totalNightsFromOvernights = Array.isArray(rawOvernightResponse?.OVERNIGHTS)
@@ -795,9 +819,24 @@ const Accommodation = () => {
     });
   }, [filters, searchResults]);
 
-  const findMatchingSeason = (hotel, overnightDate) => {
-    const date = toDateOnly(overnightDate);
+  const findMatchingSeason = (hotel, fallbackDate) => {
+    const date = toDateOnly(fallbackDate);
     const seasons = asArray(hotel?.seasons);
+    const validityStart = quotationValidityStartDate;
+    const validityEnd = quotationValidityEndDate;
+
+    if (validityStart && validityEnd) {
+      return (
+        seasons.find(item =>
+          doDateRangesOverlap(
+            validityStart,
+            validityEnd,
+            item?.FROM_DATE || item?.START_DATE || item?.DATE_FROM,
+            item?.TO_DATE || item?.END_DATE || item?.DATE_TO
+          )
+        ) || null
+      );
+    }
 
     return (
       seasons.find(item =>
@@ -810,13 +849,15 @@ const Accommodation = () => {
     );
   };
 
-  const findMatchingSeasons = (hotel, overnightDate, nights) => {
-    const startDate = toDateOnly(overnightDate);
-    const totalStayNights = Math.max(1, toNumber(nights));
-    const endExclusive = addDays(startDate, totalStayNights);
+  const findMatchingSeasons = (hotel, fallbackDate, fallbackNights) => {
+    const validityStart = quotationValidityStartDate;
+    const validityEnd = quotationValidityEndDate;
+    const startDate = validityStart || toDateOnly(fallbackDate);
+    const totalStayNights = Math.max(1, toNumber(fallbackNights));
+    const endDate = validityEnd || addDays(startDate, totalStayNights);
     const seasons = asArray(hotel?.seasons);
 
-    if (!startDate || !endExclusive) return [];
+    if (!startDate || !endDate) return [];
 
     return seasons.filter(item => {
       const from = toDateOnly(item?.FROM_DATE || item?.START_DATE || item?.DATE_FROM);
@@ -824,7 +865,7 @@ const Accommodation = () => {
 
       if (!from || !to) return false;
 
-      return from < endExclusive && to >= startDate;
+      return doDateRangesOverlap(startDate, endDate, from, to);
     });
   };
 
@@ -869,9 +910,6 @@ const Accommodation = () => {
       setSearchResults(hotels);
       setSearched(true);
 
-      if (!silent) {
-        notifySuccess(`Hotels loaded successfully. Found ${hotels.length} hotel(s).`);
-      }
     } catch (error) {
       setOvernightResponse(null);
       setSearchResults([]);
@@ -1208,21 +1246,35 @@ const Accommodation = () => {
         CITY_NAME: cityGroup?.CITY_NAME || "",
         OVERNIGHT_DATE: cityGroup?.OVERNIGHT_DATE || "",
         TOTAL_NIGHTS: toNumber(cityGroup?.TOTAL_NIGHTS),
-        STAYS: (cityGroup.stays || []).map((stay, stayIndex) => ({
-          ORDER: stayIndex + 1,
-          HOTEL_ID: asId(stay?.HOTEL_ID),
-          HOTEL_NAME: stay?.HOTEL_NAME || "",
-          HOTEL_STARS: String(stay?.HOTEL_STARS || option?.SELECTED_HOTEL_STARS || ""),
-          HOTEL_CHAIN: asId(stay?.HOTEL_CHAIN),
-          HOTEL_CHAIN_VALUE: stay?.HOTEL_CHAIN_VALUE || "",
-          HOTEL_CITY: asId(stay?.HOTEL_CITY || cityGroup?.CITY_ID),
-          HOTEL_CITY_VALUE: stay?.HOTEL_CITY_VALUE || cityGroup?.CITY_NAME || "",
-          SEASON_ID: asId(stay?.SEASON_ID),
-          SEASON_NAME: stay?.SEASON_NAME || "",
-          SEASONS: asArray(stay?.SEASONS),
-          NIGHTS: toNumber(stay?.NIGHTS),
-          OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "",
-        })),
+        STAYS: (cityGroup.stays || []).map((stay, stayIndex) => {
+          const stayHotelId = asId(stay?.HOTEL_ID);
+          const hotel =
+            (searchResults || []).find(
+              item => String(asId(item?._id || item?.HOTEL_ID || item?.id) || "") === stayHotelId
+            ) || null;
+          const matchedSeasons = hotel
+            ? findMatchingSeasons(hotel, cityGroup?.OVERNIGHT_DATE, cityGroup?.TOTAL_NIGHTS)
+            : asArray(stay?.SEASONS);
+
+          return {
+            ORDER: stayIndex + 1,
+            HOTEL_ID: stayHotelId,
+            HOTEL_NAME: stay?.HOTEL_NAME || "",
+            HOTEL_STARS: String(stay?.HOTEL_STARS || option?.SELECTED_HOTEL_STARS || ""),
+            HOTEL_CHAIN: asId(stay?.HOTEL_CHAIN),
+            HOTEL_CHAIN_VALUE: stay?.HOTEL_CHAIN_VALUE || "",
+            HOTEL_CITY: asId(stay?.HOTEL_CITY || cityGroup?.CITY_ID),
+            HOTEL_CITY_VALUE: stay?.HOTEL_CITY_VALUE || cityGroup?.CITY_NAME || "",
+            SEASON_ID: asId(matchedSeasons?.[0]?._id || matchedSeasons?.[0]?.SEASON_ID),
+            SEASON_NAME:
+              matchedSeasons.length > 0
+                ? matchedSeasons.map(item => getSeasonLabel(item)).join(" â€¢ ")
+                : stay?.SEASON_NAME || "",
+            SEASONS: matchedSeasons,
+            NIGHTS: toNumber(stay?.NIGHTS),
+            OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "",
+          };
+        }),
       }));
 
       const optionTotalNights = cityGroups.reduce(

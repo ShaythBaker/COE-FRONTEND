@@ -1,7 +1,7 @@
 // path: src/store/QuotationExtraServices/saga.js
 import { all, call, put, takeEvery, takeLatest } from "redux-saga/effects";
 import { del, get, patch, post } from "../../helpers/api_helper";
-import { notifyError, notifyInfo, notifySuccess } from "../../helpers/notify";
+import { notifyError, notifySuccess } from "../../helpers/notify";
 import * as T from "./actionTypes";
 import {
   createQuotationExtraServiceFail,
@@ -53,7 +53,6 @@ function* onFetchExtraServices() {
     yield put(
       fetchExtraServicesSuccess(Array.isArray(response) ? response : []),
     );
-    notifyInfo("Extra services loaded successfully.");
   } catch (error) {
     const message = extractErrorMessage(
       error,

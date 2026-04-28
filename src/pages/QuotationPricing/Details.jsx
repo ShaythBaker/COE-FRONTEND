@@ -1,5 +1,5 @@
 // path: src/pages/QuotationPricing/Details.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -26,7 +26,7 @@ import {
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
-import { get } from "../../helpers/api_helper";
+import { get, post } from "../../helpers/api_helper";
 import {
   approveQuotationPricing,
   fetchQuotationPricing,
@@ -36,6 +36,14 @@ import {
 import { fetchQuotation } from "../../store/Quotations/actions";
 
 const ALLOWED_ROLES = ["ACCOUNTING", "COMPANY_ADMIN"];
+
+const getId = value => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (value?._id) return getId(value._id);
+  if (value?.$oid) return value.$oid;
+  return "";
+};
 
 const formatCurrency = value => {
   const n = Number(value || 0);
@@ -149,6 +157,9 @@ const QuotationPricingDetails = () => {
 
   const [financeLoading, setFinanceLoading] = useState(false);
   const [financeData, setFinanceData] = useState(null);
+  const [guideSaving, setGuideSaving] = useState(false);
+  const [guidePrices, setGuidePrices] = useState({});
+  const [guideTouched, setGuideTouched] = useState({});
 
   const [profitForm, setProfitForm] = useState({
     PROFIT_TYPE: "PERCENT",
@@ -172,38 +183,31 @@ const QuotationPricingDetails = () => {
     dispatch(fetchQuotation(quotationId));
   }, [dispatch, canAccess, quotationId]);
 
-  useEffect(() => {
-    let ignore = false;
+  const loadFinance = useCallback(async ({ silent = false } = {}) => {
+    if (!canAccess || !quotationId) return;
 
-    const loadFinance = async () => {
-      if (!canAccess || !quotationId) return;
+    if (!silent) {
       setFinanceLoading(true);
+    }
 
-      try {
-        const response = await get(`/quotation-finances/quotation/${quotationId}`);
-        if (!ignore) {
-          setFinanceData(response || null);
-        }
-      } catch (error) {
-        if (!ignore) {
-          setFinanceData(null);
-          notifyError(
-            getErrorMessage(error, "Failed to load quotation finance details.")
-          );
-        }
-      } finally {
-        if (!ignore) {
-          setFinanceLoading(false);
-        }
+    try {
+      const response = await get(`/quotation-finances/quotation/${quotationId}`);
+      setFinanceData(response || null);
+    } catch (error) {
+      setFinanceData(null);
+      notifyError(
+        getErrorMessage(error, "Failed to load quotation finance details.")
+      );
+    } finally {
+      if (!silent) {
+        setFinanceLoading(false);
       }
-    };
-
-    loadFinance();
-
-    return () => {
-      ignore = true;
-    };
+    }
   }, [canAccess, quotationId]);
+
+  useEffect(() => {
+    loadFinance();
+  }, [loadFinance]);
 
   useEffect(() => {
     if (!selected) return;
@@ -230,6 +234,22 @@ const QuotationPricingDetails = () => {
       quotation?.NUMBER_OF_PAX ||
       0
   ) || 0;
+
+  useEffect(() => {
+    const days = Array.isArray(financeData?.DAYS) ? financeData.DAYS : [];
+    const next = {};
+
+    days.forEach(day => {
+      const key = getId(day) || String(day?.DAY_ORDER || "");
+      if (!key) return;
+
+      const totalGuideCost = Number(day?.guide?.GUIDE_COST || 0) || 0;
+      next[key] = totalGuideCost ? String(totalGuideCost) : "";
+    });
+
+    setGuidePrices(next);
+    setGuideTouched({});
+  }, [financeData]);
 
   const profitErrors = useMemo(() => {
     const next = {};
@@ -391,16 +411,23 @@ const QuotationPricingDetails = () => {
         };
       });
 
-      const currentGuideCost = Number(day?.guide?.GUIDE_COST || 0) || 0;
+      const guideKey = getId(day) || String(day?.DAY_ORDER || "");
+      const guideInputValue = guidePrices[guideKey];
+      const currentGuideCost = String(guideInputValue || "").trim()
+        ? Number(guideInputValue) || 0
+        : Number(day?.guide?.GUIDE_COST || 0) || 0;
       guideTotal += currentGuideCost;
 
       daysRows.push({
+        dayId: getId(day),
+        guideKey,
         dayOrder: Number(day?.DAY_ORDER || 0) || 0,
         dayDate: day?.DAY_DATE || "",
         routeText: day?.ROUTE_TEXT || "-",
         overnightCityName: day?.overnight?.OVERNIGHT_CITY_NAME || "-",
         guideEnabled: !!day?.guide?.enabled,
         guideTypeName: day?.guide?.GUIDE_TYPE_NAME || "-",
+        guideCostPerDay: currentGuideCost,
         guideCostPerPerson: pax > 0 ? currentGuideCost / pax : currentGuideCost,
         transportationItems,
         mealItems,
@@ -454,7 +481,15 @@ const QuotationPricingDetails = () => {
       baseTotal,
       perPersonSummary,
     };
-  }, [financeData, boardBasis, pax, quotation?.NUMBER_OF_PAX, selected, quotation]);
+  }, [
+    financeData,
+    boardBasis,
+    pax,
+    quotation?.NUMBER_OF_PAX,
+    selected,
+    quotation,
+    guidePrices,
+  ]);
 
   const handleProfitChange = e => {
     const { name, value } = e.target;
@@ -504,9 +539,108 @@ const QuotationPricingDetails = () => {
     );
   };
 
+  const guideErrors = useMemo(() => {
+    const next = {};
+
+    pricingView.daysRows.forEach(day => {
+      if (!day.guideEnabled) return;
+
+      const key = day.guideKey;
+      const value = guidePrices[key];
+
+      if (!String(value || "").trim()) {
+        next[key] = "Required";
+      } else if (Number(value) < 0) {
+        next[key] = "Must be greater than or equal to 0";
+      }
+    });
+
+    return next;
+  }, [guidePrices, pricingView.daysRows]);
+
+  const missingGuidePrices = useMemo(
+    () =>
+      pricingView.daysRows.filter(
+        day => day.guideEnabled && Number(guidePrices[day.guideKey] || 0) <= 0
+      ),
+    [guidePrices, pricingView.daysRows]
+  );
+
+  const handleGuidePriceChange = (key, value) => {
+    setGuidePrices(prev => ({
+      ...prev,
+      [key]: value,
+    }));
+    setGuideTouched(prev => ({
+      ...prev,
+      [key]: true,
+    }));
+  };
+
+  const touchGuideAll = () => {
+    const next = {};
+    pricingView.daysRows.forEach(day => {
+      if (day.guideEnabled) {
+        next[day.guideKey] = true;
+      }
+    });
+    setGuideTouched(next);
+  };
+
+  const handleSaveGuidePrices = async e => {
+    e.preventDefault();
+
+    if (isTerminalStatus) {
+      notifyError("This quotation pricing record is no longer editable.");
+      return;
+    }
+
+    touchGuideAll();
+
+    if (Object.keys(guideErrors).length > 0) {
+      notifyError("Please fix guide price validation errors before saving.");
+      return;
+    }
+
+    const days = pricingView.daysRows
+      .filter(day => day.guideEnabled)
+      .map(day => {
+        const pricePerDay = Number(guidePrices[day.guideKey] || 0) || 0;
+        const pricePerPerson = pax > 0 ? pricePerDay / pax : pricePerDay;
+
+        return {
+          DAY_ID: day.dayId || null,
+          DAY_ORDER: day.dayOrder,
+          GUIDE_COST_PER_DAY: pricePerDay,
+          GUIDE_COST_PER_PERSON: pricePerPerson,
+          GUIDE_COST: pricePerDay,
+        };
+      });
+
+    setGuideSaving(true);
+
+    try {
+      await post(`/quotation-pricing/quotation/${quotationId}/guide`, {
+        DAYS: days,
+      });
+      await loadFinance({ silent: true });
+      dispatch(fetchQuotationPricing(quotationId));
+    } catch (error) {
+      notifyError(getErrorMessage(error, "Failed to save guide prices."));
+    } finally {
+      setGuideSaving(false);
+    }
+  };
+
   const handleApprove = () => {
     if (isTerminalStatus) {
       notifyError("This quotation pricing record is no longer editable.");
+      return;
+    }
+
+    if (missingGuidePrices.length > 0) {
+      touchGuideAll();
+      notifyError("Set guide prices before approving this quotation.");
       return;
     }
 
@@ -987,7 +1121,22 @@ const QuotationPricingDetails = () => {
                           No routes and days pricing data found.
                         </Alert>
                       ) : (
-                        <div className="d-flex flex-column gap-3">
+                        <Form onSubmit={handleSaveGuidePrices}>
+                          <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                            <div className="text-muted small">
+                              Add the guide cost for each day before approving the quotation.
+                            </div>
+                            <Button
+                              color="primary"
+                              type="submit"
+                              disabled={saving || guideSaving || isTerminalStatus}
+                            >
+                              {guideSaving ? <Spinner size="sm" className="me-2" /> : null}
+                              Save Guide Prices
+                            </Button>
+                          </div>
+
+                          <div className="d-flex flex-column gap-3">
                           {pricingView.daysRows.map(day => (
                             <div key={`day-${day.dayOrder}`} className="border rounded p-3">
                               <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
@@ -1109,15 +1258,59 @@ const QuotationPricingDetails = () => {
                                     <div className="text-muted small mb-2">
                                       {day.guideTypeName || "-"}
                                     </div>
-                                    <div className="fw-bold text-primary">
-                                      {formatCurrency(day.guideCostPerPerson)}
-                                    </div>
+                                    {day.guideEnabled ? (
+                                      <div>
+                                        <Label className="form-label small">
+                                          Guide Price / Day
+                                        </Label>
+                                        <InputGroup>
+                                          <Input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            value={guidePrices[day.guideKey] || ""}
+                                            onChange={e =>
+                                              handleGuidePriceChange(
+                                                day.guideKey,
+                                                e.target.value
+                                              )
+                                            }
+                                            invalid={
+                                              !!(
+                                                guideTouched[day.guideKey] &&
+                                                guideErrors[day.guideKey]
+                                              )
+                                            }
+                                            disabled={
+                                              saving || guideSaving || isTerminalStatus
+                                            }
+                                          />
+                                          <InputGroupText>DAY</InputGroupText>
+                                          <FormFeedback>
+                                            {guideErrors[day.guideKey]}
+                                          </FormFeedback>
+                                        </InputGroup>
+                                        <div className="text-muted small mt-2">
+                                          Per person from this day:{" "}
+                                          {formatCurrency(
+                                            pax > 0
+                                              ? Number(guidePrices[day.guideKey] || 0) / pax
+                                              : Number(guidePrices[day.guideKey] || 0)
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="fw-bold text-primary">
+                                        {formatCurrency(day.guideCostPerPerson)}
+                                      </div>
+                                    )}
                                   </div>
                                 </Col>
                               </Row>
                             </div>
                           ))}
-                        </div>
+                          </div>
+                        </Form>
                       )}
                     </CardBody>
                   </Card>

@@ -19,7 +19,6 @@ import { EXTRA_SERVICES, EXTRA_SERVICE_BY_ID } from "../../helpers/url_helper";
 import {
   notifySuccess,
   notifyError,
-  notifyInfo,
 } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
@@ -49,7 +48,6 @@ function* onFetchExtraServices({ payload }) {
     );
 
     yield put(fetchExtraServicesSuccess(response));
-    notifyInfo("Extra Services loaded successfully.");
   } catch (error) {
     const message = extractErrorMessage(
       error,
@@ -64,7 +62,6 @@ function* onFetchExtraService({ payload }) {
   try {
     const response = yield call(get, EXTRA_SERVICE_BY_ID(payload.id));
     yield put(fetchExtraServiceSuccess(response));
-    notifyInfo("Extra Service loaded successfully.");
   } catch (error) {
     const message = extractErrorMessage(
       error,

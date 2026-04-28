@@ -8,7 +8,7 @@ import {
   QUOTATION_PRICING_PROFIT,
   QUOTATION_PRICING_DECISION,
 } from "../../helpers/url_helper";
-import { notifyError, notifySuccess, notifyInfo } from "../../helpers/notify";
+import { notifyError, notifySuccess } from "../../helpers/notify";
 import {
   fetchQuotationPricingQueueSuccess,
   fetchQuotationPricingQueueFail,
@@ -67,7 +67,6 @@ function* onFetchQueue({ payload }) {
     });
     const normalized = Array.isArray(rows) ? rows.map(normalizePricing) : [];
     yield put(fetchQuotationPricingQueueSuccess(normalized));
-    notifyInfo("Quotation pricing queue loaded successfully.");
   } catch (error) {
     const msg = extractErrorMessage(
       error,
