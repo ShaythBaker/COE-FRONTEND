@@ -72,6 +72,13 @@ const formatDate = value => {
 const getDateValue = (...values) =>
   values.find(value => String(value || "").trim()) || "";
 
+const getDateKey = value => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  return date.toISOString().slice(0, 10);
+};
+
 const formatDateRange = (from, to, fallback = "-") => {
   if (from && to) return `${formatDate(from)} - ${formatDate(to)}`;
   if (from) return formatDate(from);
@@ -138,15 +145,22 @@ const asArray = value => {
 
 const getSeasonKey = season =>
   [
-    getId(season?._id || season?.SEASON_ID || season?.id),
-    normalizeKey(
+    getId(
       season?.SEASON_NAME ||
-        season?.HOTEL_SEASON_VALUE ||
-        season?.HOTELSEASON_VALUE ||
-        season?.ITEM_VALUE
+        season?.HOTEL_SEASON ||
+        season?.HOTEL_SEASON_ID ||
+        season?._id ||
+        season?.SEASON_ID ||
+        season?.id
     ),
-    getDateValue(season?.FROM_DATE, season?.START_DATE, season?.DATE_FROM),
-    getDateValue(season?.TO_DATE, season?.END_DATE, season?.DATE_TO),
+    normalizeKey(
+      season?.HOTEL_SEASON_VALUE ||
+        season?.HOTELSEASON_VALUE ||
+        season?.ITEM_VALUE ||
+        season?.SEASON_NAME
+    ),
+    getDateKey(getDateValue(season?.FROM_DATE, season?.START_DATE, season?.DATE_FROM)),
+    getDateKey(getDateValue(season?.TO_DATE, season?.END_DATE, season?.DATE_TO)),
   ].join("|");
 
 const mergeSeasons = (...seasonLists) => {
@@ -841,7 +855,47 @@ const QuotationPricingDetails = () => {
     const accommodationOptionsList = accommodationOptions.map((option, optionIndex) => {
       const optionKey = getId(option) || `${option?.OPTION_NAME || "Option"}-${optionIndex}`;
       const optionName = option?.OPTION_NAME || `Option ${optionIndex + 1}`;
-      const rows = accommodationRows.filter(row => row.optionKey === optionKey);
+      const rows = Object.values(
+        accommodationRows
+          .filter(row => row.optionKey === optionKey)
+          .reduce((acc, row) => {
+            const key = [
+              row.hotelId || normalizeKey(row.hotelName),
+              normalizeKey(row.seasonName),
+              getDateKey(row.seasonStartDate),
+              getDateKey(row.seasonEndDate),
+            ].join("|");
+
+            if (!acc[key]) {
+              acc[key] = row;
+              return acc;
+            }
+
+            acc[key] = {
+              ...acc[key],
+              ...row,
+              nights: Math.max(Number(acc[key].nights || 0), Number(row.nights || 0)),
+              costNights: Math.max(
+                Number(acc[key].costNights || 0),
+                Number(row.costNights || 0)
+              ),
+              totalHotelNights: Math.max(
+                Number(acc[key].totalHotelNights || 0),
+                Number(row.totalHotelNights || 0)
+              ),
+              stayPerPerson: Math.max(
+                Number(acc[key].stayPerPerson || 0),
+                Number(row.stayPerPerson || 0)
+              ),
+              costStayPerPerson: Math.max(
+                Number(acc[key].costStayPerPerson || 0),
+                Number(row.costStayPerPerson || 0)
+              ),
+            };
+
+            return acc;
+          }, {})
+      );
       const hotelStayRows = Object.values(
         rows.reduce((acc, row) => {
           const key = `${row.cityName}-${row.hotelName}`;

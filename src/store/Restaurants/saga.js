@@ -32,7 +32,7 @@ import {
   RESTAURANT_MEALS,
   RESTAURANT_MEAL_BY_ID,
 } from "../../helpers/url_helper";
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 const extractErrorMessage = (error, fallback) =>
   error?.response?.data?.message ||
@@ -47,7 +47,6 @@ function* onFetchRestaurants({ payload }) {
     const params = payload?.params || {};
     const res = yield call(get, RESTAURANTS, { params });
     yield put(fetchRestaurantsSuccess(res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(
       fetchRestaurantsFail(extractErrorMessage(e, "Error While fetching data")),
@@ -60,7 +59,6 @@ function* onFetchRestaurant({ payload }) {
   try {
     const res = yield call(get, RESTAURANT_BY_ID(payload.id));
     yield put(fetchRestaurantSuccess(res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(
       fetchRestaurantFail(extractErrorMessage(e, "Error While fetching data")),
@@ -157,7 +155,6 @@ function* onFetchMeals({ payload }) {
   try {
     const res = yield call(get, RESTAURANT_MEALS(payload.restaurantId));
     yield put(fetchMealsSuccess(payload.restaurantId, res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(
       fetchMealsFail(extractErrorMessage(e, "Error While fetching data")),

@@ -19,7 +19,7 @@ import {
 import { get, post, patch, del } from "../../helpers/api_helper";
 import { getListItems } from "../../helpers/coe_backend_helper";
 import { QUOTATIONS, QUOTATION_BY_ID, TRAVEL_AGENTS } from "../../helpers/url_helper";
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
   return (
@@ -87,7 +87,6 @@ function* onFetchQuotations({ payload }) {
     const rows = extractQuotationRows(res).map(normalizeQuotation);
 
     yield put(fetchQuotationsSuccess(rows));
-    notifyInfo("Quotations loaded successfully.");
   } catch (e) {
     const msg = extractErrorMessage(e, "Failed to fetch quotations.");
     yield put(fetchQuotationsFail(msg));
@@ -99,7 +98,6 @@ function* onFetchQuotation({ payload }) {
   try {
     const res = yield call(get, QUOTATION_BY_ID(payload.id));
     yield put(fetchQuotationSuccess(normalizeQuotation(res)));
-    notifyInfo("Quotation details loaded successfully.");
   } catch (e) {
     const msg = extractErrorMessage(e, "Failed to fetch quotation details.");
     yield put(fetchQuotationFail(msg));

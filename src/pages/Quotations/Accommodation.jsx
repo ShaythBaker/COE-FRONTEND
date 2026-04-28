@@ -21,7 +21,7 @@ import {
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { hasAnyRole } from "../../helpers/coe_roles";
-import { notifyError, notifyInfo, notifySuccess } from "../../helpers/notify";
+import { notifyError, notifyInfo } from "../../helpers/notify";
 import { get } from "../../helpers/api_helper";
 import { fetchListItems } from "../../helpers/list_items_helper";
 import { fetchQuotation } from "../../store/Quotations/actions";
@@ -910,9 +910,6 @@ const Accommodation = () => {
       setSearchResults(hotels);
       setSearched(true);
 
-      if (!silent) {
-        notifySuccess(`Hotels loaded successfully. Found ${hotels.length} hotel(s).`);
-      }
     } catch (error) {
       setOvernightResponse(null);
       setSearchResults([]);

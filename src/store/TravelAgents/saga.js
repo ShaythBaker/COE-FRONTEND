@@ -25,7 +25,7 @@ import {
   TRAVEL_AGENT_BY_ID,
   TRAVEL_AGENT_QUOTATIONS,
 } from "../../helpers/url_helper";
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 const extractErrorMessage = (error, fallback) =>
   error?.response?.data?.message ||
@@ -62,7 +62,6 @@ function* onFetchTravelAgents({ payload }) {
     const params = payload?.params || {};
     const res = yield call(get, TRAVEL_AGENTS, { params });
     yield put(fetchTravelAgentsSuccess(res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(fetchTravelAgentsFail(extractErrorMessage(e, "Error While fetching data")));
     notifyError("Error While fetching data");
@@ -73,7 +72,6 @@ function* onFetchTravelAgent({ payload }) {
   try {
     const res = yield call(get, TRAVEL_AGENT_BY_ID(payload.id));
     yield put(fetchTravelAgentSuccess(res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(fetchTravelAgentFail(extractErrorMessage(e, "Error While fetching data")));
     notifyError("Error While fetching data");
@@ -160,7 +158,6 @@ function* onFetchTravelAgentQuotations({ payload }) {
         analytics: res?.analytics || null,
       })
     );
-    notifyInfo("Travel agent quotations loaded successfully.");
   } catch (e) {
     const msg = extractErrorMessage(
       e,

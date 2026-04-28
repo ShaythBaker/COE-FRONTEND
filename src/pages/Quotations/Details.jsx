@@ -4,11 +4,18 @@ import { Link, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
+  Button,
   Card,
   CardBody,
   Col,
   Container,
+  FormFeedback,
+  Input,
   Label,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   Row,
   Spinner,
 } from "reactstrap";
@@ -17,10 +24,12 @@ import {
   fetchQuotation,
   fetchQuotationsLookups,
 } from "../../store/Quotations/actions";
-import { get } from "../../helpers/api_helper";
-import { notifyError } from "../../helpers/notify";
+import { sendQuotationForPricing } from "../../store/QuotationPricing/actions";
+import { get, patch } from "../../helpers/api_helper";
+import { notifyError, notifySuccess } from "../../helpers/notify";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import {
+  canSendQuotationForPricing,
   getQuotationReadOnlyMessage,
   getQuotationStatus,
   getQuotationStatusBadgeColor,
@@ -28,6 +37,7 @@ import {
 } from "../../helpers/quotation_pricing_helper";
 
 const PRICE_VIEW_ROLES = ["ACCOUNTING", "USER_COMPANY"];
+const GENERAL_NOTES_ROLES = ["TOUR_OPERATION"];
 
 const unwrapId = value => {
   if (!value) return "";
@@ -238,10 +248,28 @@ const SummaryHeader = ({ icon, title, subtitle, children }) => (
   </div>
 );
 
-const InfoItem = ({ label, value }) => (
-  <div className="mb-3">
-    <Label className="form-label text-muted mb-1">{label}</Label>
-    <div className="fw-medium">{value || "-"}</div>
+const SummaryField = ({ icon, label, value }) => (
+  <div className="d-flex align-items-start gap-3 h-100 rounded border bg-white p-3">
+    <div
+      className="rounded bg-light d-flex align-items-center justify-content-center"
+      style={{ width: 38, height: 38, minWidth: 38 }}
+    >
+      <i className={`${icon} text-primary font-size-18`} />
+    </div>
+    <div className="min-w-0">
+      <div className="text-muted small mb-1">{label}</div>
+      <div className="fw-semibold text-dark text-break">{value || "-"}</div>
+    </div>
+  </div>
+);
+
+const SummaryMetric = ({ icon, label, value }) => (
+  <div className="rounded border bg-light px-3 py-2 h-100">
+    <div className="d-flex align-items-center gap-2 text-muted small mb-1">
+      <i className={icon} />
+      <span>{label}</span>
+    </div>
+    <div className="fw-bold font-size-18 text-dark">{value || "-"}</div>
   </div>
 );
 
@@ -291,6 +319,7 @@ const QuotationsDetails = () => {
   const dispatch = useDispatch();
 
   const { selected, loading, lookups } = useSelector(s => s.Quotations || {});
+  const pricingSaving = useSelector(s => s.QuotationPricing?.saving || false);
   const roles = useSelector(s => s.Login?.roles || []);
   const canViewPrices = hasAnyRole(roles, PRICE_VIEW_ROLES);
 
@@ -300,6 +329,10 @@ const QuotationsDetails = () => {
   const [extraServices, setExtraServices] = useState([]);
   const [finalPricing, setFinalPricing] = useState(null);
   const [finalPricingLoading, setFinalPricingLoading] = useState(false);
+  const [generalNotesOpen, setGeneralNotesOpen] = useState(false);
+  const [generalNotes, setGeneralNotes] = useState("");
+  const [generalNotesTouched, setGeneralNotesTouched] = useState(false);
+  const [generalNotesSaving, setGeneralNotesSaving] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -307,6 +340,11 @@ const QuotationsDetails = () => {
       dispatch(fetchQuotation(id));
     }
   }, [dispatch, id]);
+
+  useEffect(() => {
+    setGeneralNotes(selected?.GENERAL_NOTES || "");
+    setGeneralNotesTouched(false);
+  }, [selected?.GENERAL_NOTES]);
 
   useEffect(() => {
     let ignore = false;
@@ -447,6 +485,74 @@ const QuotationsDetails = () => {
   const quotationStatus = getQuotationStatus(selected);
   const readOnly = isQuotationReadOnly(selected);
   const readOnlyMessage = getQuotationReadOnlyMessage(selected);
+  const isApprovedQuotation = quotationStatus === "APPROVED";
+  const canSendForPricing = canSendQuotationForPricing(selected);
+  const canEditGeneralNotes =
+    isApprovedQuotation && hasAnyRole(roles, GENERAL_NOTES_ROLES);
+  const generalNotesError =
+    generalNotes.length > 5000 ? "General notes must be 5000 characters or fewer." : "";
+  const referenceNumber = selected?.REFERANCE_NUMBER || "-";
+  const travelAgentName =
+    selected?.TRAVEL_AGENT_NAME ||
+    travelAgentMap.get(selected?.TRAVEL_AGENT_ID) ||
+    "-";
+  const nationalityName =
+    selected?.NATIONALITY_VALUE ||
+    nationalityMap.get(selected?.NATIONALITY) ||
+    "-";
+  const quotationTypeName =
+    selected?.QUOTATION_TYPE_VALUE ||
+    quotationTypeMap.get(selected?.QUOTATION_TYPE) ||
+    "-";
+  const durationDays =
+    selected?.QUOTATION_DURATION_DAYS ??
+    selected?.DURATION_IN_DAYS ??
+    "-";
+  const paxCount = selected?.NUMBER_OF_PAX ?? "-";
+  const hasGeneralNotes = String(selected?.GENERAL_NOTES || "").trim().length > 0;
+
+  const handleSaveGeneralNotes = async () => {
+    setGeneralNotesTouched(true);
+
+    if (!canEditGeneralNotes) {
+      notifyError("Only TOUR_OPERATION can update general notes for approved quotations.");
+      return;
+    }
+
+    if (generalNotesError) {
+      notifyError(generalNotesError);
+      return;
+    }
+
+    setGeneralNotesSaving(true);
+
+    try {
+      await patch(`/quotations/${selected?._id || id}`, {
+        GENERAL_NOTES: generalNotes,
+      });
+      notifySuccess("General notes saved successfully.");
+      setGeneralNotesOpen(false);
+      dispatch(fetchQuotation(id));
+    } catch (error) {
+      notifyError(getErrorMessage(error, "Failed to save general notes."));
+    } finally {
+      setGeneralNotesSaving(false);
+    }
+  };
+
+  const handleSendForPricing = () => {
+    if (!selected?._id && !id) {
+      notifyError("Quotation id is missing.");
+      return;
+    }
+
+    if (!canSendForPricing) {
+      notifyError("This quotation cannot be sent for pricing.");
+      return;
+    }
+
+    dispatch(sendQuotationForPricing(selected?._id || id, {}));
+  };
 
   const approvedFinalTotal =
     String(finalPricing?.STATUS || "").toUpperCase().trim() === "APPROVED"
@@ -484,111 +590,163 @@ const QuotationsDetails = () => {
                       <SummaryHeader
                         icon="bx bx-file"
                         title="Quotation Summary"
-                        subtitle="Clean overview of the quotation, routes, hotels, services, and pricing."
+                        subtitle="Key quotation information and next steps."
                       >
-                        {quotationStatus ? (
-                          <Badge color={getQuotationStatusBadgeColor(quotationStatus)} pill>
-                            {quotationStatus}
-                          </Badge>
-                        ) : null}
+                        <div className="d-flex flex-wrap gap-2 justify-content-end">
+                          {quotationStatus ? (
+                            <Badge color={getQuotationStatusBadgeColor(quotationStatus)} pill>
+                              {quotationStatus}
+                            </Badge>
+                          ) : null}
+                        </div>
                       </SummaryHeader>
+
+                      <div className="rounded border bg-light p-3 p-md-4 mb-3">
+                        <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+                          <div>
+                            <div className="text-muted small mb-1">Reference Number</div>
+                            <h3 className="mb-1 text-dark">{referenceNumber}</h3>
+                            <div className="text-muted">
+                              {travelAgentName} | {quotationTypeName}
+                            </div>
+                          </div>
+
+                          <div className="d-flex flex-wrap gap-2 justify-content-md-end">
+                            {canSendForPricing ? (
+                              <Button
+                                color="success"
+                                type="button"
+                                onClick={handleSendForPricing}
+                                disabled={pricingSaving}
+                              >
+                                {pricingSaving ? (
+                                  <Spinner size="sm" className="me-2" />
+                                ) : (
+                                  <i className="bx bx-send me-1" />
+                                )}
+                                Send for Pricing
+                              </Button>
+                            ) : null}
+
+                            {isApprovedQuotation ? (
+                              <Button
+                                color="light"
+                                className="border d-flex align-items-center gap-2 px-3 py-2 text-start"
+                                type="button"
+                                onClick={() => {
+                                  setGeneralNotes(selected?.GENERAL_NOTES || "");
+                                  setGeneralNotesTouched(false);
+                                  setGeneralNotesOpen(true);
+                                }}
+                              >
+                                <span
+                                  className="rounded-2 bg-primary-subtle d-flex align-items-center justify-content-center"
+                                  style={{ width: 34, height: 34, minWidth: 34 }}
+                                >
+                                  <i className="bx bx-message-square-detail text-primary font-size-18" />
+                                </span>
+                                <span>
+                                  <span className="d-block fw-semibold text-dark">
+                                    General Notes
+                                  </span>
+                                  <span className="d-block text-muted small">
+                                    {hasGeneralNotes ? "View or edit" : "Add note"}
+                                  </span>
+                                </span>
+                              </Button>
+                            ) : null}
+
+                            <Link
+                              to={`/quotations/${selected?._id || id}/plan`}
+                              className="btn btn-info"
+                            >
+                              <i className="bx bx-map me-1" />
+                              Routes and Days
+                            </Link>
+
+                            <Link
+                              to={`/quotations/${selected?._id || id}/accommodation`}
+                              className="btn btn-primary"
+                            >
+                              <i className="bx bx-hotel me-1" />
+                              Accommodation
+                            </Link>
+                          </div>
+                        </div>
+
+                        <Row className="g-3">
+                          <Col sm="6" lg="3">
+                            <SummaryMetric
+                              icon="bx bx-calendar-event"
+                              label="Start Date"
+                              value={formatDateLabel(selected?.QUOTATION_START_DATE)}
+                            />
+                          </Col>
+                          <Col sm="6" lg="3">
+                            <SummaryMetric
+                              icon="bx bx-calendar-check"
+                              label="End Date"
+                              value={formatDateLabel(selected?.QUOTATION_END_DATE)}
+                            />
+                          </Col>
+                          <Col sm="6" lg="3">
+                            <SummaryMetric
+                              icon="bx bx-time-five"
+                              label="Duration"
+                              value={
+                                durationDays === "-"
+                                  ? "-"
+                                  : `${durationDays} day${Number(durationDays) === 1 ? "" : "s"}`
+                              }
+                            />
+                          </Col>
+                          <Col sm="6" lg="3">
+                            <SummaryMetric
+                              icon="bx bx-group"
+                              label="Pax"
+                              value={paxCount}
+                            />
+                          </Col>
+                        </Row>
+                      </div>
 
                       <Row className="g-3">
                         <Col md="6">
-                          <InfoItem
-                            label="Reference Number"
-                            value={selected?.REFERANCE_NUMBER || "-"}
-                          />
-                        </Col>
-                        <Col md="6">
-                          <InfoItem
+                          <SummaryField
+                            icon="bx bx-buildings"
                             label="Travel Agent"
-                            value={
-                              selected?.TRAVEL_AGENT_NAME ||
-                              travelAgentMap.get(selected?.TRAVEL_AGENT_ID) ||
-                              "-"
-                            }
+                            value={travelAgentName}
                           />
                         </Col>
                         <Col md="6">
-                          <InfoItem
-                            label="Nationality"
-                            value={
-                              selected?.NATIONALITY_VALUE ||
-                              nationalityMap.get(selected?.NATIONALITY) ||
-                              "-"
-                            }
-                          />
-                        </Col>
-                        <Col md="6">
-                          <InfoItem
+                          <SummaryField
+                            icon="bx bx-id-card"
                             label="Quotation Type"
-                            value={
-                              selected?.QUOTATION_TYPE_VALUE ||
-                              quotationTypeMap.get(selected?.QUOTATION_TYPE) ||
-                              "-"
-                            }
+                            value={quotationTypeName}
                           />
                         </Col>
-                        <Col md="4">
-                          <InfoItem
-                            label="Start Date"
-                            value={formatDateLabel(selected?.QUOTATION_START_DATE)}
+                        <Col md="6">
+                          <SummaryField
+                            icon="bx bx-flag"
+                            label="Nationality"
+                            value={nationalityName}
                           />
                         </Col>
-                        <Col md="4">
-                          <InfoItem
-                            label="End Date"
-                            value={formatDateLabel(selected?.QUOTATION_END_DATE)}
-                          />
-                        </Col>
-                        <Col md="4">
-                          <InfoItem
-                            label="Duration"
-                            value={
-                              selected?.QUOTATION_DURATION_DAYS ??
-                              selected?.DURATION_IN_DAYS ??
-                              "-"
-                            }
-                          />
-                        </Col>
-                        <Col md="4">
-                          <InfoItem
-                            label="Number of Pax"
-                            value={selected?.NUMBER_OF_PAX ?? "-"}
-                          />
-                        </Col>
-                        <Col md="4">
-                          <InfoItem
-                            label="Created On"
+                        <Col md="6">
+                          <SummaryField
+                            icon="bx bx-calendar-plus"
+                            label="Created"
                             value={formatDateLabel(selected?.CREATED_ON)}
                           />
                         </Col>
-                        <Col md="4">
-                          <InfoItem
-                            label="Updated On"
+                        <Col md="6">
+                          <SummaryField
+                            icon="bx bx-refresh"
+                            label="Last Updated"
                             value={formatDateLabel(selected?.UPDATED_ON)}
                           />
                         </Col>
                       </Row>
-
-                      <div className="d-flex flex-wrap gap-2 mt-2">
-                        <Link
-                          to={`/quotations/${selected?._id || id}/plan`}
-                          className="btn btn-info"
-                        >
-                          <i className="bx bx-map me-1" />
-                          Routes and Days
-                        </Link>
-
-                        <Link
-                          to={`/quotations/${selected?._id || id}/accommodation`}
-                          className="btn btn-primary"
-                        >
-                          <i className="bx bx-hotel me-1" />
-                          Accommodation
-                        </Link>
-                      </div>
                     </>
                   )}
                 </CardBody>
@@ -1182,6 +1340,81 @@ const QuotationsDetails = () => {
               </Card>
             </Col>
           </Row>
+
+          <Modal
+            isOpen={generalNotesOpen}
+            toggle={() => !generalNotesSaving && setGeneralNotesOpen(false)}
+            centered
+          >
+            <ModalHeader toggle={() => !generalNotesSaving && setGeneralNotesOpen(false)}>
+              <div className="d-flex align-items-center gap-2">
+                <span
+                  className="rounded-circle bg-primary-subtle d-flex align-items-center justify-content-center"
+                  style={{ width: 36, height: 36, minWidth: 36 }}
+                >
+                  <i className="bx bx-note text-primary font-size-18" />
+                </span>
+                <span>
+                  <span className="d-block">General Notes</span>
+                  <span className="d-block text-muted small fw-normal">
+                    {referenceNumber}
+                  </span>
+                </span>
+              </div>
+            </ModalHeader>
+            <ModalBody>
+              <div className="rounded border bg-light p-3">
+                <div className="d-flex justify-content-between align-items-center gap-3 mb-2">
+                  <Label className="form-label mb-0">Notes</Label>
+                  <Badge color={generalNotesError ? "danger" : "light"} className="text-dark">
+                    {generalNotes.length}/5000
+                  </Badge>
+                </div>
+                <Input
+                  type="textarea"
+                  rows="8"
+                  value={generalNotes}
+                  onChange={e => {
+                    setGeneralNotes(e.target.value);
+                    setGeneralNotesTouched(true);
+                  }}
+                  invalid={!!(generalNotesTouched && generalNotesError)}
+                  disabled={!canEditGeneralNotes || generalNotesSaving}
+                  placeholder={
+                    canEditGeneralNotes
+                      ? "Write the approved quotation notes here."
+                      : "Only TOUR_OPERATION can update notes."
+                  }
+                  className="bg-white"
+                />
+                <FormFeedback>{generalNotesError}</FormFeedback>
+                <div className="text-muted small mt-2">
+                  Visible from the approved quotation summary.
+                </div>
+              </div>
+            </ModalBody>
+            <ModalFooter>
+              <Button
+                color="light"
+                type="button"
+                onClick={() => setGeneralNotesOpen(false)}
+                disabled={generalNotesSaving}
+              >
+                Close
+              </Button>
+              {canEditGeneralNotes ? (
+                <Button
+                  color="primary"
+                  type="button"
+                  onClick={handleSaveGeneralNotes}
+                  disabled={generalNotesSaving}
+                >
+                  {generalNotesSaving ? <Spinner size="sm" className="me-2" /> : null}
+                  Save
+                </Button>
+              ) : null}
+            </ModalFooter>
+          </Modal>
         </Container>
       </div>
     </React.Fragment>

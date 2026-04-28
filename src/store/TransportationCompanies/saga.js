@@ -29,7 +29,7 @@ import {
   TRANSPORTATION_TYPES,
   TRANSPORTATION_SIZES,
 } from "../../helpers/url_helper";
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
   return (
@@ -67,7 +67,6 @@ function* onFetchTransportationCompanies({ payload }) {
     const res = yield call(get, TRANSPORTATION_COMPANIES, { params });
     const rows = Array.isArray(res) ? res.map(normalizeCompany) : [];
     yield put(fetchTransportationCompaniesSuccess(rows));
-    notifyInfo("Transportation companies loaded successfully.");
   } catch (e) {
     const msg = extractErrorMessage(e, "Failed to fetch transportation companies.");
     yield put(fetchTransportationCompaniesFail(msg));

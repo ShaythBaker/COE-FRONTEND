@@ -17,7 +17,7 @@ import {
   TRANSPORTATION_SIZES,
   TRANSPORTATION_SIZE_BY_ID,
 } from "../../helpers/url_helper";
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
   return (
@@ -35,7 +35,6 @@ function* onFetchTransportationSizes({ payload }) {
     const params = payload?.params || {};
     const response = yield call(get, TRANSPORTATION_SIZES, { params });
     yield put(fetchTransportationSizesSuccess(response));
-    notifyInfo("Transportation sizes loaded successfully.");
   } catch (error) {
     const message = extractErrorMessage(
       error,

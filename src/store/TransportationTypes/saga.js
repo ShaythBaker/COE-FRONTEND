@@ -20,7 +20,6 @@ import {
 import {
   notifySuccess,
   notifyError,
-  notifyInfo,
 } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
@@ -38,7 +37,6 @@ function* onFetchTransportationTypes({ payload }) {
     const params = payload?.params || {};
     const response = yield call(get, TRANSPORTATION_TYPES, { params });
     yield put(fetchTransportationTypesSuccess(response));
-    notifyInfo("Transportation types loaded successfully.");
   } catch (error) {
     const message = extractErrorMessage(
       error,
