@@ -1,5 +1,5 @@
 // path: src/pages/QuotationPricing/Details.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -26,7 +26,8 @@ import {
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
-import { get } from "../../helpers/api_helper";
+import { get, post } from "../../helpers/api_helper";
+import { fetchListItems } from "../../helpers/list_items_helper";
 import {
   approveQuotationPricing,
   fetchQuotationPricing,
@@ -36,6 +37,14 @@ import {
 import { fetchQuotation } from "../../store/Quotations/actions";
 
 const ALLOWED_ROLES = ["ACCOUNTING", "COMPANY_ADMIN"];
+
+const getId = value => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (value?._id) return getId(value._id);
+  if (value?.$oid) return value.$oid;
+  return "";
+};
 
 const formatCurrency = value => {
   const n = Number(value || 0);
@@ -58,6 +67,158 @@ const formatDate = value => {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleDateString("en-GB");
+};
+
+const getDateValue = (...values) =>
+  values.find(value => String(value || "").trim()) || "";
+
+const formatDateRange = (from, to, fallback = "-") => {
+  if (from && to) return `${formatDate(from)} - ${formatDate(to)}`;
+  if (from) return formatDate(from);
+  if (to) return formatDate(to);
+  return fallback;
+};
+
+const getDurationDays = (from, to) => {
+  if (!from || !to) return null;
+
+  const start = new Date(from);
+  const end = new Date(to);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Math.max(1, Math.round((end - start) / dayMs) + 1);
+};
+
+const addDays = (value, days) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate() + days);
+  return date;
+};
+
+const getOverlapNights = (stayStartValue, nights, seasonStartValue, seasonEndValue) => {
+  if (!stayStartValue || !seasonStartValue || !seasonEndValue || !nights) return nights;
+
+  const stayStart = new Date(stayStartValue);
+  const stayEnd = addDays(stayStartValue, nights);
+  const seasonStart = new Date(seasonStartValue);
+  const seasonEnd = addDays(seasonEndValue, 1);
+
+  if (
+    Number.isNaN(stayStart.getTime()) ||
+    !stayEnd ||
+    Number.isNaN(seasonStart.getTime()) ||
+    !seasonEnd
+  ) {
+    return nights;
+  }
+
+  const from = Math.max(stayStart.getTime(), seasonStart.getTime());
+  const to = Math.min(stayEnd.getTime(), seasonEnd.getTime());
+  if (to <= from) return 0;
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Math.round((to - from) / dayMs);
+};
+
+const formatStars = value => {
+  const stars = String(value || "").trim();
+  if (!stars) return "-";
+  return `${stars} Star${stars === "1" ? "" : "s"}`;
+};
+
+const normalizeKey = value => String(value || "").trim().toLowerCase();
+
+const asArray = value => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  return [value];
+};
+
+const getSeasonKey = season =>
+  [
+    getId(season?._id || season?.SEASON_ID || season?.id),
+    normalizeKey(
+      season?.SEASON_NAME ||
+        season?.HOTEL_SEASON_VALUE ||
+        season?.HOTELSEASON_VALUE ||
+        season?.ITEM_VALUE
+    ),
+    getDateValue(season?.FROM_DATE, season?.START_DATE, season?.DATE_FROM),
+    getDateValue(season?.TO_DATE, season?.END_DATE, season?.DATE_TO),
+  ].join("|");
+
+const mergeSeasons = (...seasonLists) => {
+  const map = new Map();
+
+  seasonLists.flatMap(asArray).forEach(season => {
+    if (!season || typeof season !== "object") return;
+    const key = getSeasonKey(season);
+    if (!key.replaceAll("|", "")) return;
+    map.set(key, {
+      ...(map.get(key) || {}),
+      ...season,
+    });
+  });
+
+  return Array.from(map.values());
+};
+
+const collectAccommodationEntries = value => {
+  const entries = [];
+  const seen = new WeakSet();
+
+  const walk = node => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+
+    if (
+      Array.isArray(node?.OPTIONS) &&
+      node.OPTIONS.some(option => Array.isArray(option?.CITY_GROUPS))
+    ) {
+      entries.push(node);
+    }
+
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+
+    Object.values(node).forEach(child => {
+      if (child && typeof child === "object") walk(child);
+    });
+  };
+
+  walk(value);
+  return entries;
+};
+
+const collectHotelIds = value => {
+  const ids = new Set();
+  const seen = new WeakSet();
+
+  const walk = node => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+
+    if (node?.HOTEL_NAME || node?.HOTEL_ID || node?.HOTEL) {
+      const id = getId(node?.HOTEL_ID || node?.HOTEL || node?._id);
+      if (id) ids.add(id);
+    }
+
+    Object.values(node).forEach(child => {
+      if (child && typeof child === "object") walk(child);
+    });
+  };
+
+  walk(value);
+  return Array.from(ids);
 };
 
 const getStatusColor = status => {
@@ -146,9 +307,16 @@ const QuotationPricingDetails = () => {
     state => state.QuotationPricing || {}
   );
   const quotation = useSelector(state => state.Quotations?.selected || null);
+  const hotelLookups = useSelector(state => state.Hotels?.lookups || {});
 
   const [financeLoading, setFinanceLoading] = useState(false);
   const [financeData, setFinanceData] = useState(null);
+  const [savedAccommodationData, setSavedAccommodationData] = useState(null);
+  const [hotelSeasonRatesById, setHotelSeasonRatesById] = useState({});
+  const [hotelSeasonLookups, setHotelSeasonLookups] = useState([]);
+  const [guideSaving, setGuideSaving] = useState(false);
+  const [guidePrices, setGuidePrices] = useState({});
+  const [guideTouched, setGuideTouched] = useState({});
 
   const [profitForm, setProfitForm] = useState({
     PROFIT_TYPE: "PERCENT",
@@ -158,6 +326,24 @@ const QuotationPricingDetails = () => {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectTouched, setRejectTouched] = useState(false);
+
+  const hotelSeasonNameById = useMemo(() => {
+    const map = new Map();
+
+    [...(hotelLookups?.HOTELSEASONS || []), ...hotelSeasonLookups].forEach(item => {
+      const id = getId(item?._id || item?.id);
+      const label =
+        item?.ITEM_VALUE ||
+        item?.SEASON_NAME ||
+        item?.HOTEL_SEASON_VALUE ||
+        item?.HOTELSEASON_VALUE ||
+        item?.name ||
+        "";
+      if (id && label) map.set(id, label);
+    });
+
+    return map;
+  }, [hotelLookups?.HOTELSEASONS, hotelSeasonLookups]);
 
   useEffect(() => {
     if (!canAccess) {
@@ -175,35 +361,126 @@ const QuotationPricingDetails = () => {
   useEffect(() => {
     let ignore = false;
 
-    const loadFinance = async () => {
-      if (!canAccess || !quotationId) return;
-      setFinanceLoading(true);
+    const loadHotelSeasonLookups = async () => {
+      if (!canAccess) return;
 
       try {
-        const response = await get(`/quotation-finances/quotation/${quotationId}`);
+        const items = await fetchListItems("HOTELSEASONS");
         if (!ignore) {
-          setFinanceData(response || null);
+          setHotelSeasonLookups(Array.isArray(items) ? items : []);
         }
       } catch (error) {
         if (!ignore) {
-          setFinanceData(null);
-          notifyError(
-            getErrorMessage(error, "Failed to load quotation finance details.")
-          );
-        }
-      } finally {
-        if (!ignore) {
-          setFinanceLoading(false);
+          setHotelSeasonLookups([]);
         }
       }
     };
 
-    loadFinance();
+    loadHotelSeasonLookups();
 
     return () => {
       ignore = true;
     };
+  }, [canAccess]);
+
+  const loadFinance = useCallback(async ({ silent = false } = {}) => {
+    if (!canAccess || !quotationId) return;
+
+    if (!silent) {
+      setFinanceLoading(true);
+    }
+
+    try {
+      const [financeResult, accommodationResult] = await Promise.allSettled([
+        get(`/quotation-finances/quotation/${quotationId}`),
+        get(`/quotation-accumidation?QUOTATION_ID=${encodeURIComponent(quotationId)}`),
+      ]);
+
+      if (financeResult.status === "fulfilled") {
+        setFinanceData(financeResult.value || null);
+      } else {
+        setFinanceData(null);
+        notifyError(
+          getErrorMessage(
+            financeResult.reason,
+            "Failed to load quotation finance details."
+          )
+        );
+      }
+
+      if (accommodationResult.status === "fulfilled") {
+        setSavedAccommodationData(accommodationResult.value || null);
+      } else {
+        setSavedAccommodationData(null);
+      }
+    } catch (error) {
+      setFinanceData(null);
+      setSavedAccommodationData(null);
+      notifyError(
+        getErrorMessage(error, "Failed to load quotation finance details.")
+      );
+    } finally {
+      if (!silent) {
+        setFinanceLoading(false);
+      }
+    }
   }, [canAccess, quotationId]);
+
+  useEffect(() => {
+    loadFinance();
+  }, [loadFinance]);
+
+  const hotelIdsForSeasonRates = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...collectHotelIds(financeData),
+            ...collectHotelIds(savedAccommodationData),
+            ...collectHotelIds(quotation),
+            ...collectHotelIds(selected),
+          ].filter(Boolean)
+        )
+      ),
+    [financeData, savedAccommodationData, quotation, selected]
+  );
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadHotelSeasonRates = async () => {
+      const missingIds = hotelIdsForSeasonRates.filter(
+        id => !Array.isArray(hotelSeasonRatesById[id])
+      );
+
+      if (missingIds.length === 0) return;
+
+      const results = await Promise.allSettled(
+        missingIds.map(id => get(`/hotels/${id}/season-rates`))
+      );
+
+      if (ignore) return;
+
+      setHotelSeasonRatesById(prev => {
+        const next = { ...prev };
+
+        results.forEach((result, index) => {
+          const id = missingIds[index];
+          next[id] = result.status === "fulfilled" && Array.isArray(result.value)
+            ? result.value
+            : [];
+        });
+
+        return next;
+      });
+    };
+
+    loadHotelSeasonRates();
+
+    return () => {
+      ignore = true;
+    };
+  }, [hotelIdsForSeasonRates, hotelSeasonRatesById]);
 
   useEffect(() => {
     if (!selected) return;
@@ -231,6 +508,22 @@ const QuotationPricingDetails = () => {
       0
   ) || 0;
 
+  useEffect(() => {
+    const days = Array.isArray(financeData?.DAYS) ? financeData.DAYS : [];
+    const next = {};
+
+    days.forEach(day => {
+      const key = getId(day) || String(day?.DAY_ORDER || "");
+      if (!key) return;
+
+      const totalGuideCost = Number(day?.guide?.GUIDE_COST || 0) || 0;
+      next[key] = totalGuideCost ? String(totalGuideCost) : "";
+    });
+
+    setGuidePrices(next);
+    setGuideTouched({});
+  }, [financeData]);
+
   const profitErrors = useMemo(() => {
     const next = {};
     if (!String(profitForm.PROFIT_TYPE || "").trim()) {
@@ -250,6 +543,12 @@ const QuotationPricingDetails = () => {
     const extraServices = Array.isArray(financeData?.EXTRA_SERVICES)
       ? financeData.EXTRA_SERVICES
       : [];
+    const savedAccommodationEntries = [
+      ...collectAccommodationEntries(savedAccommodationData),
+      ...collectAccommodationEntries(quotation),
+      ...collectAccommodationEntries(selected),
+      ...collectAccommodationEntries(financeData),
+    ];
 
     const resolveHotelBoardBase = seasonRates => {
       const bb = Number(seasonRates?.BB_RATE_AMOUNT || 0);
@@ -278,6 +577,158 @@ const QuotationPricingDetails = () => {
       };
     };
 
+    const resolveSeasonName = (seasonRates, fallback) => {
+      const rawName =
+        seasonRates?.SEASON_NAME ||
+        seasonRates?.HOTEL_SEASON_VALUE ||
+        seasonRates?.HOTELSEASON_VALUE ||
+        seasonRates?.ITEM_VALUE ||
+        "";
+      const id = getId(rawName || seasonRates?.SEASON_ID || seasonRates?.HOTEL_SEASON);
+
+      return hotelSeasonNameById.get(id) || rawName || fallback;
+    };
+
+    const savedStayLookup = new Map();
+
+    savedAccommodationEntries.forEach(entry => {
+      const options = Array.isArray(entry?.OPTIONS) ? entry.OPTIONS : [];
+
+      options.forEach(option => {
+        const optionName = option?.OPTION_NAME || "";
+        const cityGroups = Array.isArray(option?.CITY_GROUPS) ? option.CITY_GROUPS : [];
+
+        cityGroups.forEach(cityGroup => {
+          const cityName = cityGroup?.CITY_NAME || "";
+          const stays = Array.isArray(cityGroup?.STAYS) ? cityGroup.STAYS : [];
+
+          stays.forEach(stay => {
+            const seasons = Array.isArray(stay?.SEASONS) ? stay.SEASONS : [];
+            if (seasons.length === 0) return;
+
+            const hotelId = getId(stay?.HOTEL_ID || stay?.HOTEL || stay?.HOTEL_REF);
+            const hotelName = stay?.HOTEL_NAME || "";
+            const keys = [
+              `${normalizeKey(optionName)}|${normalizeKey(cityName)}|id:${hotelId}`,
+              `${normalizeKey(optionName)}|${normalizeKey(cityName)}|name:${normalizeKey(
+                hotelName
+              )}`,
+              `${normalizeKey(cityName)}|id:${hotelId}`,
+              `${normalizeKey(cityName)}|name:${normalizeKey(hotelName)}`,
+              `id:${hotelId}`,
+              `name:${normalizeKey(hotelName)}`,
+            ].filter(key => !key.endsWith("id:") && !key.endsWith("name:"));
+
+            keys.forEach(key => {
+              savedStayLookup.set(key, mergeSeasons(savedStayLookup.get(key), seasons));
+            });
+          });
+        });
+      });
+    });
+
+    const findSavedSeasons = (option, cityGroup, stay) => {
+      const optionName = option?.OPTION_NAME || "";
+      const cityName = cityGroup?.CITY_NAME || stay?.HOTEL_CITY_VALUE || "";
+      const hotelId = getId(stay?.HOTEL_ID || stay?.HOTEL || stay?.HOTEL_REF);
+      const hotelName = stay?.HOTEL_NAME || "";
+
+      const keys = [
+        `${normalizeKey(optionName)}|${normalizeKey(cityName)}|id:${hotelId}`,
+        `${normalizeKey(optionName)}|${normalizeKey(cityName)}|name:${normalizeKey(
+          hotelName
+        )}`,
+        `${normalizeKey(cityName)}|id:${hotelId}`,
+        `${normalizeKey(cityName)}|name:${normalizeKey(hotelName)}`,
+        `id:${hotelId}`,
+        `name:${normalizeKey(hotelName)}`,
+      ].filter(key => !key.endsWith("id:") && !key.endsWith("name:"));
+
+      for (const key of keys) {
+        const seasons = savedStayLookup.get(key);
+        if (Array.isArray(seasons) && seasons.length > 0) return seasons;
+      }
+
+      return [];
+    };
+
+    const buildSupplementRows = rows => {
+      const datedRows = rows.filter(row => row.seasonStartDate && row.seasonEndDate);
+
+      if (datedRows.length === 0) {
+        return ["BB", "HB", "FB", "SS"].map(name => ({
+          duration: "-",
+          seasons: "-",
+          name,
+          price: rows.reduce(
+            (sum, row) =>
+              sum +
+              Number(row[String(name).toLowerCase()] || 0) *
+                Number(row.totalHotelNights || row.nights || 0),
+            0
+          ),
+        }));
+      }
+
+      const boundaryTimes = new Set();
+
+      datedRows.forEach(row => {
+        const start = new Date(row.seasonStartDate);
+        const endExclusive = addDays(row.seasonEndDate, 1);
+
+        if (!Number.isNaN(start.getTime()) && endExclusive) {
+          boundaryTimes.add(start.getTime());
+          boundaryTimes.add(endExclusive.getTime());
+        }
+      });
+
+      const sortedBoundaries = Array.from(boundaryTimes).sort((a, b) => a - b);
+      const periodRows = [];
+
+      for (let index = 0; index < sortedBoundaries.length - 1; index += 1) {
+        const periodStart = new Date(sortedBoundaries[index]);
+        const periodEndExclusive = new Date(sortedBoundaries[index + 1]);
+        const periodEnd = new Date(periodEndExclusive);
+        periodEnd.setDate(periodEnd.getDate() - 1);
+
+        const activeRows = datedRows.filter(row => {
+          const start = new Date(row.seasonStartDate);
+          const endExclusive = addDays(row.seasonEndDate, 1);
+          if (Number.isNaN(start.getTime()) || !endExclusive) return false;
+
+          return start.getTime() < periodEndExclusive.getTime() &&
+            endExclusive.getTime() > periodStart.getTime();
+        });
+
+        if (activeRows.length === 0) continue;
+
+        const duration = formatDateRange(periodStart, periodEnd);
+        const seasons = Array.from(new Set(activeRows.map(row => row.seasonName))).join(
+          " + "
+        );
+
+        ["BB", "HB", "FB", "SS"].forEach(name => {
+          const field = String(name).toLowerCase();
+          const price = activeRows.reduce(
+            (sum, row) =>
+              sum +
+              Number(row[field] || 0) *
+                Number(row.totalHotelNights || row.nights || 0),
+            0
+          );
+
+          periodRows.push({
+            duration,
+            seasons,
+            name,
+            price,
+          });
+        });
+      }
+
+      return periodRows;
+    };
+
     const accommodationOptions = Array.isArray(accommodation?.OPTIONS)
       ? accommodation.OPTIONS
       : [];
@@ -285,7 +736,8 @@ const QuotationPricingDetails = () => {
     const accommodationRows = [];
     let accommodationTotal = 0;
 
-    accommodationOptions.forEach(option => {
+    accommodationOptions.forEach((option, optionIndex) => {
+      const optionKey = getId(option) || `${option?.OPTION_NAME || "Option"}-${optionIndex}`;
       const cityGroups = Array.isArray(option?.CITY_GROUPS) ? option.CITY_GROUPS : [];
 
       cityGroups.forEach(cityGroup => {
@@ -293,47 +745,149 @@ const QuotationPricingDetails = () => {
 
         stays.forEach(stay => {
           const nights = Number(stay?.NIGHTS || 0) || 0;
-          const seasonRates = stay?.SEASON_RATES || {};
-          const { bb, hb, fb, ss, perPerson } = resolveHotelBoardBase(seasonRates);
+          const stayStartDate = stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "";
+          const hotelId = getId(stay?.HOTEL_ID || stay?.HOTEL || stay?.HOTEL_REF);
+          const financeSeasonEntries = Array.isArray(stay?.SEASONS) ? stay.SEASONS : [];
+          const savedSeasonEntries = findSavedSeasons(option, cityGroup, stay);
+          const directHotelSeasonEntries = Array.isArray(hotelSeasonRatesById[hotelId])
+            ? hotelSeasonRatesById[hotelId]
+            : [];
+          const mergedSeasonEntries = mergeSeasons(
+            directHotelSeasonEntries,
+            savedSeasonEntries,
+            financeSeasonEntries
+          );
+          const seasonEntries =
+            mergedSeasonEntries.length > 0
+              ? mergedSeasonEntries
+              : [stay?.SEASON_RATES || {}];
 
-          const stayPerPerson = perPerson * nights;
-          const stayTotal = stayPerPerson * pax;
+          seasonEntries.forEach((season, seasonIndex) => {
+            const seasonRates = {
+              ...(stay?.SEASON_RATES || {}),
+              ...(season || {}),
+            };
+            const { bb, hb, fb, ss, perPerson } = resolveHotelBoardBase(seasonRates);
+            const seasonStartDate = getDateValue(
+              seasonRates?.FROM_DATE,
+              seasonRates?.START_DATE,
+              seasonRates?.DATE_FROM,
+              stay?.FROM_DATE,
+              stay?.START_DATE,
+              stay?.DATE_FROM
+            );
+            const seasonEndDate = getDateValue(
+              seasonRates?.TO_DATE,
+              seasonRates?.END_DATE,
+              seasonRates?.DATE_TO,
+              stay?.TO_DATE,
+              stay?.END_DATE,
+              stay?.DATE_TO
+            );
+            const seasonNights =
+              seasonEntries.length > 1
+                ? getOverlapNights(stayStartDate, nights, seasonStartDate, seasonEndDate)
+                : nights;
 
-          accommodationTotal += stayTotal;
+            const costNights = seasonNights > 0 ? seasonNights : 0;
+            const displayNights = seasonNights > 0 ? seasonNights : nights;
 
-          accommodationRows.push({
-            optionName: option?.OPTION_NAME || "-",
-            cityName: cityGroup?.CITY_NAME || stay?.HOTEL_CITY_VALUE || "-",
-            overnightDate: stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "",
-            hotelName: stay?.HOTEL_NAME || "-",
-            seasonName: stay?.SEASON_NAME || "-",
-            nights,
-            bb,
-            hb,
-            fb,
-            ss,
-            perPerson,
-            stayPerPerson,
+            const stayPerPerson = perPerson * displayNights;
+            const costStayPerPerson = perPerson * costNights;
+            const stayTotal = costStayPerPerson * pax;
+
+            accommodationTotal += stayTotal;
+
+            accommodationRows.push({
+              optionKey,
+              optionName: option?.OPTION_NAME || "-",
+              cityName: cityGroup?.CITY_NAME || stay?.HOTEL_CITY_VALUE || "-",
+              overnightDate: stayStartDate,
+              hotelId,
+              hotelName: stay?.HOTEL_NAME || "-",
+              hotelStars: stay?.HOTEL_STARS || option?.SELECTED_HOTEL_STARS || "",
+              seasonName: resolveSeasonName(
+                seasonRates,
+                stay?.SEASON_NAME || `Season ${seasonIndex + 1}`
+              ),
+              seasonStartDate,
+              seasonEndDate,
+              seasonDuration: formatDateRange(
+                seasonStartDate,
+                seasonEndDate,
+                stayStartDate
+                  ? `${formatDate(stayStartDate)} (${displayNights} night${
+                      displayNights === 1 ? "" : "s"
+                    })`
+                  : `${displayNights} night${displayNights === 1 ? "" : "s"}`
+              ),
+              seasonDays: getDurationDays(seasonStartDate, seasonEndDate),
+              nights: displayNights,
+              costNights,
+              totalHotelNights: nights,
+              bb,
+              hb,
+              fb,
+              ss,
+              perPerson,
+              stayPerPerson,
+              costStayPerPerson,
+            });
           });
         });
       });
     });
 
-    const accommodationGroups = accommodationRows.reduce((acc, row) => {
-      const key = row.optionName || "Option";
-      if (!acc[key]) {
-        acc[key] = [];
-      }
-      acc[key].push(row);
-      return acc;
-    }, {});
+    const accommodationOptionsList = accommodationOptions.map((option, optionIndex) => {
+      const optionKey = getId(option) || `${option?.OPTION_NAME || "Option"}-${optionIndex}`;
+      const optionName = option?.OPTION_NAME || `Option ${optionIndex + 1}`;
+      const rows = accommodationRows.filter(row => row.optionKey === optionKey);
+      const hotelStayRows = Object.values(
+        rows.reduce((acc, row) => {
+          const key = `${row.cityName}-${row.hotelName}`;
 
-    const accommodationOptionsList = Object.entries(accommodationGroups).map(
-      ([optionName, rows]) => ({
+          if (!acc[key]) {
+            acc[key] = {
+              cityName: row.cityName,
+              hotelName: row.hotelName,
+              nights: row.totalHotelNights || row.nights,
+            };
+          }
+          return acc;
+        }, {})
+      );
+      const supplementRows = buildSupplementRows(rows);
+      const supplementGroups = Object.values(
+        supplementRows.reduce((acc, row) => {
+          const key = `${row.duration}-${row.seasons}`;
+
+          if (!acc[key]) {
+            acc[key] = {
+              duration: row.duration,
+              seasons: row.seasons,
+              rows: [],
+            };
+          }
+
+          acc[key].rows.push(row);
+          return acc;
+        }, {})
+      );
+
+      return {
+        optionKey,
         optionName,
+        optionStars: option?.SELECTED_HOTEL_STARS || rows[0]?.hotelStars || "",
         rows,
-      })
-    );
+        hotelStayRows,
+        hotelsPerPerson: rows.reduce(
+          (sum, row) => sum + (row.costStayPerPerson ?? row.stayPerPerson),
+          0
+        ),
+        supplementRows,
+        supplementGroups,
+      };
+    });
 
     const daysRows = [];
     let transportationTotal = 0;
@@ -391,16 +945,23 @@ const QuotationPricingDetails = () => {
         };
       });
 
-      const currentGuideCost = Number(day?.guide?.GUIDE_COST || 0) || 0;
+      const guideKey = getId(day) || String(day?.DAY_ORDER || "");
+      const guideInputValue = guidePrices[guideKey];
+      const currentGuideCost = String(guideInputValue || "").trim()
+        ? Number(guideInputValue) || 0
+        : Number(day?.guide?.GUIDE_COST || 0) || 0;
       guideTotal += currentGuideCost;
 
       daysRows.push({
+        dayId: getId(day),
+        guideKey,
         dayOrder: Number(day?.DAY_ORDER || 0) || 0,
         dayDate: day?.DAY_DATE || "",
         routeText: day?.ROUTE_TEXT || "-",
         overnightCityName: day?.overnight?.OVERNIGHT_CITY_NAME || "-",
         guideEnabled: !!day?.guide?.enabled,
         guideTypeName: day?.guide?.GUIDE_TYPE_NAME || "-",
+        guideCostPerDay: currentGuideCost,
         guideCostPerPerson: pax > 0 ? currentGuideCost / pax : currentGuideCost,
         transportationItems,
         mealItems,
@@ -430,13 +991,94 @@ const QuotationPricingDetails = () => {
       guideTotal +
       extraServicesTotal;
 
-    const perPersonSummary = {
-      accommodation: pax > 0 ? accommodationTotal / pax : accommodationTotal,
+    const sharedPerPersonSummary = {
       transportation: pax > 0 ? transportationTotal / pax : transportationTotal,
       meals: pax > 0 ? mealsTotal / pax : mealsTotal,
       entranceFees: pax > 0 ? entranceFeesTotal / pax : entranceFeesTotal,
       guide: pax > 0 ? guideTotal / pax : guideTotal,
       extraServices: pax > 0 ? extraServicesTotal / pax : extraServicesTotal,
+    };
+
+    const sharedPerPersonTotal =
+      sharedPerPersonSummary.transportation +
+      sharedPerPersonSummary.meals +
+      sharedPerPersonSummary.entranceFees +
+      sharedPerPersonSummary.guide +
+      sharedPerPersonSummary.extraServices;
+
+    const profitType = String(profitForm.PROFIT_TYPE || selected?.PROFIT_TYPE || "PERCENT")
+      .toUpperCase();
+    const profitValue = Number(profitForm.PROFIT_VALUE || selected?.PROFIT_VALUE || 0) || 0;
+
+    const calculateProfit = amount => {
+      if (profitType === "PERCENT") {
+        return amount * (profitValue / 100);
+      }
+
+      return profitValue;
+    };
+
+    const optionSummaries = accommodationOptionsList.map((option, index) => {
+      const basePerPerson = option.hotelsPerPerson + sharedPerPersonTotal;
+      const profitPerPerson = calculateProfit(basePerPerson);
+      const finalTotal = basePerPerson + profitPerPerson;
+      const seasonPriceRows = option.rows.map(row => {
+        const seasonBasePrice = row.stayPerPerson;
+
+        return {
+          optionName: option.optionName || `Option ${index + 1}`,
+          seasonName: row.seasonName,
+          hotelName: row.hotelName,
+          pricePerPerson: seasonBasePrice,
+        };
+      });
+      const otherPerPersonRows = [
+        {
+          name: "Transportation",
+          pricePerPerson: sharedPerPersonSummary.transportation,
+        },
+        {
+          name: "Meals",
+          pricePerPerson: sharedPerPersonSummary.meals,
+        },
+        {
+          name: "Entrance Fees",
+          pricePerPerson: sharedPerPersonSummary.entranceFees,
+        },
+        {
+          name: "Guide",
+          pricePerPerson: sharedPerPersonSummary.guide,
+        },
+        {
+          name: "Extra Services",
+          pricePerPerson: sharedPerPersonSummary.extraServices,
+        },
+      ];
+
+      return {
+        optionKey: option.optionKey,
+        optionName: option.optionName || `Option ${index + 1}`,
+        optionStars: option.optionStars,
+        rows: option.rows,
+        hotelStayRows: option.hotelStayRows,
+        supplementRows: option.supplementRows,
+        supplementGroups: option.supplementGroups,
+        seasonPriceRows,
+        otherPerPersonRows,
+        hotelsPerPerson: option.hotelsPerPerson,
+        ...sharedPerPersonSummary,
+        sharedPerPersonTotal,
+        basePerPerson,
+        profitType,
+        profitValue,
+        profitPerPerson,
+        finalTotal,
+      };
+    });
+
+    const perPersonSummary = {
+      accommodation: pax > 0 ? accommodationTotal / pax : accommodationTotal,
+      ...sharedPerPersonSummary,
       baseTotal: pax > 0 ? baseTotal / pax : baseTotal,
     };
 
@@ -453,8 +1095,22 @@ const QuotationPricingDetails = () => {
       extraServicesTotal,
       baseTotal,
       perPersonSummary,
+      sharedPerPersonSummary,
+      optionSummaries,
     };
-  }, [financeData, boardBasis, pax, quotation?.NUMBER_OF_PAX, selected, quotation]);
+  }, [
+    financeData,
+    boardBasis,
+    pax,
+    quotation?.NUMBER_OF_PAX,
+    selected,
+    quotation,
+    guidePrices,
+    profitForm,
+    savedAccommodationData,
+    hotelSeasonRatesById,
+    hotelSeasonNameById,
+  ]);
 
   const handleProfitChange = e => {
     const { name, value } = e.target;
@@ -504,9 +1160,108 @@ const QuotationPricingDetails = () => {
     );
   };
 
+  const guideErrors = useMemo(() => {
+    const next = {};
+
+    pricingView.daysRows.forEach(day => {
+      if (!day.guideEnabled) return;
+
+      const key = day.guideKey;
+      const value = guidePrices[key];
+
+      if (!String(value || "").trim()) {
+        next[key] = "Required";
+      } else if (Number(value) < 0) {
+        next[key] = "Must be greater than or equal to 0";
+      }
+    });
+
+    return next;
+  }, [guidePrices, pricingView.daysRows]);
+
+  const missingGuidePrices = useMemo(
+    () =>
+      pricingView.daysRows.filter(
+        day => day.guideEnabled && Number(guidePrices[day.guideKey] || 0) <= 0
+      ),
+    [guidePrices, pricingView.daysRows]
+  );
+
+  const handleGuidePriceChange = (key, value) => {
+    setGuidePrices(prev => ({
+      ...prev,
+      [key]: value,
+    }));
+    setGuideTouched(prev => ({
+      ...prev,
+      [key]: true,
+    }));
+  };
+
+  const touchGuideAll = () => {
+    const next = {};
+    pricingView.daysRows.forEach(day => {
+      if (day.guideEnabled) {
+        next[day.guideKey] = true;
+      }
+    });
+    setGuideTouched(next);
+  };
+
+  const handleSaveGuidePrices = async e => {
+    e.preventDefault();
+
+    if (isTerminalStatus) {
+      notifyError("This quotation pricing record is no longer editable.");
+      return;
+    }
+
+    touchGuideAll();
+
+    if (Object.keys(guideErrors).length > 0) {
+      notifyError("Please fix guide price validation errors before saving.");
+      return;
+    }
+
+    const days = pricingView.daysRows
+      .filter(day => day.guideEnabled)
+      .map(day => {
+        const pricePerDay = Number(guidePrices[day.guideKey] || 0) || 0;
+        const pricePerPerson = pax > 0 ? pricePerDay / pax : pricePerDay;
+
+        return {
+          DAY_ID: day.dayId || null,
+          DAY_ORDER: day.dayOrder,
+          GUIDE_COST_PER_DAY: pricePerDay,
+          GUIDE_COST_PER_PERSON: pricePerPerson,
+          GUIDE_COST: pricePerDay,
+        };
+      });
+
+    setGuideSaving(true);
+
+    try {
+      await post(`/quotation-pricing/quotation/${quotationId}/guide`, {
+        DAYS: days,
+      });
+      await loadFinance({ silent: true });
+      dispatch(fetchQuotationPricing(quotationId));
+    } catch (error) {
+      notifyError(getErrorMessage(error, "Failed to save guide prices."));
+    } finally {
+      setGuideSaving(false);
+    }
+  };
+
   const handleApprove = () => {
     if (isTerminalStatus) {
       notifyError("This quotation pricing record is no longer editable.");
+      return;
+    }
+
+    if (missingGuidePrices.length > 0) {
+      touchGuideAll();
+      notifyError("Set guide prices before approving this quotation.");
       return;
     }
 
@@ -608,14 +1363,6 @@ const QuotationPricingDetails = () => {
                           </div>
                         </div>
 
-                        <div className="text-xl-end">
-                          <div className="text-muted small mb-1">Final Total</div>
-                          <div className="fw-bold font-size-24 text-primary">
-                            {formatCurrency(
-                              selected?.FINAL_TOTAL || pricingView?.baseTotal || 0
-                            )}
-                          </div>
-                        </div>
                       </div>
 
                       <Row className="g-3">
@@ -789,70 +1536,243 @@ const QuotationPricingDetails = () => {
                     <CardBody>
                       <SectionHeader
                         icon="bx bx-calculator"
-                        title="Per Person Summary"
-                        subtitle="Clean summary of the person price only."
+                        title="Options Summary"
+                        subtitle="Each option has its own hotel person price, then the shared person costs and profit are added clearly."
                       />
 
-                      <Row className="g-3">
-                        <Col md="6" xl="2">
-                          <PriceCard
-                            title="Hotels"
-                            value={pricingView.perPersonSummary.accommodation}
-                          />
-                        </Col>
-                        <Col md="6" xl="2">
-                          <PriceCard
-                            title="Transportation"
-                            value={pricingView.perPersonSummary.transportation}
-                          />
-                        </Col>
-                        <Col md="6" xl="2">
-                          <PriceCard
-                            title="Meals"
-                            value={pricingView.perPersonSummary.meals}
-                          />
-                        </Col>
-                        <Col md="6" xl="2">
-                          <PriceCard
-                            title="Entrance Fees"
-                            value={pricingView.perPersonSummary.entranceFees}
-                          />
-                        </Col>
-                        <Col md="6" xl="2">
-                          <PriceCard
-                            title="Guide"
-                            value={pricingView.perPersonSummary.guide}
-                          />
-                        </Col>
-                        <Col md="6" xl="2">
-                          <PriceCard
-                            title="Extra Services"
-                            value={pricingView.perPersonSummary.extraServices}
-                          />
-                        </Col>
-                      </Row>
+                      {pricingView.optionSummaries.length === 0 ? (
+                        <Alert color="info" className="mb-0">
+                          No option pricing data found.
+                        </Alert>
+                      ) : (
+                        <div className="d-flex flex-column gap-4">
+                          {pricingView.optionSummaries.map((option, index) => (
+                            <div
+                              className="border rounded bg-white overflow-hidden"
+                              key={option.optionKey || option.optionName}
+                            >
+                              <div className="p-3 border-bottom bg-light">
+                                <div className="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                                  <div>
+                                    <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                      <Badge color="primary" pill>
+                                        Option {index + 1}
+                                      </Badge>
+                                      <h5 className="mb-0">{option.optionName}</h5>
+                                      <Badge color="light" className="text-dark border" pill>
+                                        {formatStars(option.optionStars)}
+                                      </Badge>
+                                    </div>
+                                    <div className="text-muted small">
+                                      Hotels, seasons, supplements, and final person price in
+                                      one clear view.
+                                    </div>
+                                  </div>
 
-                      <Row className="g-3 mt-1">
-                        <Col md="4">
-                          <PriceCard
-                            title="Base Total Per Person"
-                            value={pricingView.perPersonSummary.baseTotal}
-                            subtitle={`Pax: ${pax || 0}`}
-                          />
-                        </Col>
-                        <Col md="4">
-                          <PriceCard
-                            title="Profit Amount"
-                            value={selected?.PROFIT_AMOUNT}
-                          />
-                        </Col>
-                        <Col md="4">
-                          <PriceCard
-                            title="Final Total"
-                            value={selected?.FINAL_TOTAL || pricingView.baseTotal}
-                          />
-                        </Col>
-                      </Row>
+                                  <div className="text-end">
+                                    <div className="text-muted small">Final Total</div>
+                                    <div className="fw-bold font-size-24 text-primary">
+                                      {formatCurrency(option.finalTotal)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="p-3">
+                                <div className="mb-4">
+                                  <div className="fw-semibold mb-2">Hotels In Option</div>
+                                  <div className="table-responsive">
+                                    <table className="table table-sm table-nowrap align-middle mb-0">
+                                      <thead className="table-light">
+                                        <tr>
+                                          <th>City</th>
+                                          <th>Hotel</th>
+                                          <th className="text-end">Nights</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {option.hotelStayRows.map((row, rowIndex) => (
+                                          <tr key={`${row.hotelName}-stay-${rowIndex}`}>
+                                            <td>{row.cityName}</td>
+                                            <td className="fw-semibold">{row.hotelName}</td>
+                                            <td className="text-end">{row.nights}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+
+                                <div className="border rounded p-3">
+                                  <div className="fw-semibold mb-2">Season Pricing</div>
+                                  <div className="table-responsive">
+                                    <table className="table table-sm align-middle mb-0">
+                                      <thead className="table-light">
+                                        <tr>
+                                          <th>Hotel</th>
+                                          <th>Season</th>
+                                          <th>Duration</th>
+                                          <th className="text-end">Price / Person</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {option.rows.map((row, rowIndex) => {
+                                          const seasonPrice =
+                                            option.seasonPriceRows[rowIndex]?.pricePerPerson ||
+                                            row.stayPerPerson;
+
+                                          return (
+                                            <tr key={`${row.hotelName}-season-price-${rowIndex}`}>
+                                              <td className="fw-semibold">{row.hotelName}</td>
+                                              <td>{row.seasonName}</td>
+                                              <td>
+                                                <div>{row.seasonDuration}</div>
+                                                {row.seasonDays ? (
+                                                  <div className="text-muted small">
+                                                    {row.seasonDays} day
+                                                    {row.seasonDays === 1 ? "" : "s"}
+                                                  </div>
+                                                ) : null}
+                                              </td>
+                                              <td className="text-end fw-semibold text-primary">
+                                                {formatCurrency(seasonPrice)}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+
+                                <div className="border rounded p-3 mt-3">
+                                  <div className="fw-semibold mb-2">
+                                    Other Per Person Prices
+                                  </div>
+                                  <div className="table-responsive">
+                                    <table className="table table-sm align-middle mb-0">
+                                      <thead className="table-light">
+                                        <tr>
+                                          <th>Item</th>
+                                          <th className="text-end">Price / Person</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {option.otherPerPersonRows.map(row => (
+                                          <tr key={`${option.optionKey}-${row.name}`}>
+                                            <td>{row.name}</td>
+                                            <td className="text-end fw-semibold text-primary">
+                                              {formatCurrency(row.pricePerPerson)}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+
+                                <Row className="g-3 mt-1">
+                                  <Col xl="7">
+                                    <div className="border rounded p-3 h-100 bg-white">
+                                      <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                                        <div>
+                                          <div className="fw-semibold mb-1">
+                                            Supplements By Duration
+                                          </div>
+                                          <div className="text-muted small">
+                                            BB, HB, FB, and SS are summed for the hotels active in
+                                            each date range.
+                                          </div>
+                                        </div>
+                                        <Badge color="light" className="text-dark border">
+                                          {option.supplementGroups.length} period
+                                          {option.supplementGroups.length === 1 ? "" : "s"}
+                                        </Badge>
+                                      </div>
+
+                                      <div className="d-flex flex-column gap-3">
+                                        {option.supplementGroups.map(group => (
+                                          <div
+                                            className="border rounded overflow-hidden"
+                                            key={`${option.optionKey}-${group.duration}-${group.seasons}`}
+                                          >
+                                            <div className="bg-light px-3 py-2 border-bottom">
+                                              <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                                                <div className="fw-semibold">{group.duration}</div>
+                                                <Badge
+                                                  color="primary"
+                                                  className="rounded-pill px-3"
+                                                >
+                                                  {group.seasons}
+                                                </Badge>
+                                              </div>
+                                            </div>
+
+                                            <Row className="g-0">
+                                              {group.rows.map(row => (
+                                                <Col
+                                                  xs="6"
+                                                  md="3"
+                                                  key={`${group.duration}-${row.name}`}
+                                                >
+                                                  <div className="p-3 h-100 border-end border-bottom">
+                                                    <div className="text-muted small mb-1">
+                                                      {row.name}
+                                                    </div>
+                                                    <div className="fw-bold text-primary font-size-16">
+                                                      {formatCurrency(row.price)}
+                                                    </div>
+                                                  </div>
+                                                </Col>
+                                              ))}
+                                            </Row>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </Col>
+
+                                  <Col xl="5">
+                                    <div className="h-100 rounded bg-primary text-white p-3">
+                                      <div className="d-flex justify-content-between gap-3 mb-2">
+                                        <span className="text-white text-opacity-75">
+                                          Cost / Person
+                                        </span>
+                                        <span className="fw-semibold">
+                                          {formatCurrency(option.basePerPerson)}
+                                        </span>
+                                      </div>
+                                      <div className="d-flex justify-content-between gap-3 mb-2">
+                                        <span className="text-white text-opacity-75">
+                                          Profit Amount
+                                        </span>
+                                        <span className="fw-semibold">
+                                          {formatCurrency(option.profitPerPerson)}
+                                        </span>
+                                      </div>
+                                      <div className="border-top border-white border-opacity-25 mt-3 pt-3 d-flex justify-content-between align-items-end gap-3">
+                                        <div>
+                                          <div className="small text-white text-opacity-75">
+                                            Final Total
+                                          </div>
+                                          <div className="fw-bold font-size-24">
+                                            {formatCurrency(option.finalTotal)}
+                                          </div>
+                                        </div>
+                                        <Badge color="light" className="text-primary">
+                                          {option.profitType === "PERCENT"
+                                            ? `${formatCurrency(option.profitValue)}%`
+                                            : "Fixed"}
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  </Col>
+                                </Row>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </CardBody>
                   </Card>
                 </Col>
@@ -987,7 +1907,22 @@ const QuotationPricingDetails = () => {
                           No routes and days pricing data found.
                         </Alert>
                       ) : (
-                        <div className="d-flex flex-column gap-3">
+                        <Form onSubmit={handleSaveGuidePrices}>
+                          <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                            <div className="text-muted small">
+                              Add the guide cost for each day before approving the quotation.
+                            </div>
+                            <Button
+                              color="primary"
+                              type="submit"
+                              disabled={saving || guideSaving || isTerminalStatus}
+                            >
+                              {guideSaving ? <Spinner size="sm" className="me-2" /> : null}
+                              Save Guide Prices
+                            </Button>
+                          </div>
+
+                          <div className="d-flex flex-column gap-3">
                           {pricingView.daysRows.map(day => (
                             <div key={`day-${day.dayOrder}`} className="border rounded p-3">
                               <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
@@ -1109,15 +2044,59 @@ const QuotationPricingDetails = () => {
                                     <div className="text-muted small mb-2">
                                       {day.guideTypeName || "-"}
                                     </div>
-                                    <div className="fw-bold text-primary">
-                                      {formatCurrency(day.guideCostPerPerson)}
-                                    </div>
+                                    {day.guideEnabled ? (
+                                      <div>
+                                        <Label className="form-label small">
+                                          Guide Price / Day
+                                        </Label>
+                                        <InputGroup>
+                                          <Input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            value={guidePrices[day.guideKey] || ""}
+                                            onChange={e =>
+                                              handleGuidePriceChange(
+                                                day.guideKey,
+                                                e.target.value
+                                              )
+                                            }
+                                            invalid={
+                                              !!(
+                                                guideTouched[day.guideKey] &&
+                                                guideErrors[day.guideKey]
+                                              )
+                                            }
+                                            disabled={
+                                              saving || guideSaving || isTerminalStatus
+                                            }
+                                          />
+                                          <InputGroupText>DAY</InputGroupText>
+                                          <FormFeedback>
+                                            {guideErrors[day.guideKey]}
+                                          </FormFeedback>
+                                        </InputGroup>
+                                        <div className="text-muted small mt-2">
+                                          Per person from this day:{" "}
+                                          {formatCurrency(
+                                            pax > 0
+                                              ? Number(guidePrices[day.guideKey] || 0) / pax
+                                              : Number(guidePrices[day.guideKey] || 0)
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="fw-bold text-primary">
+                                        {formatCurrency(day.guideCostPerPerson)}
+                                      </div>
+                                    )}
                                   </div>
                                 </Col>
                               </Row>
                             </div>
                           ))}
-                        </div>
+                          </div>
+                        </Form>
                       )}
                     </CardBody>
                   </Card>
