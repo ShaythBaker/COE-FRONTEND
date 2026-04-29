@@ -24,6 +24,11 @@ import RoleProtected from "../../components/Common/RoleProtected";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 import {
+  ATTACHMENT_TYPES,
+  getAttachmentDownloadUrl,
+  uploadAttachmentAndGetId,
+} from "../../helpers/attachments_helper";
+import {
   fetchTravelAgents,
   fetchTravelAgentsLookups,
   createTravelAgent,
@@ -38,10 +43,59 @@ const emptyAgent = {
   AGENT_EMAIL: "",
   AGENT_COUNTRY: "",
   AGENT_PHONE: "",
+  AGENT_LOGO_ATTACHMENT_ID: "",
 };
 
 const isEmail = (v) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || "").trim());
+
+const AgentLogo = ({ attachmentId, name }) => {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (!attachmentId) {
+      setUrl("");
+      return () => {
+        mounted = false;
+      };
+    }
+
+    getAttachmentDownloadUrl(attachmentId)
+      .then((downloadUrl) => {
+        if (mounted) setUrl(downloadUrl || "");
+      })
+      .catch(() => {
+        if (mounted) setUrl("");
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [attachmentId]);
+
+  if (!url) {
+    return (
+      <div
+        className="rounded bg-light border d-flex align-items-center justify-content-center"
+        style={{ width: 42, height: 42 }}
+        title={name || "Travel agent"}
+      >
+        <i className="bx bx-image text-muted" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={`${name || "Travel agent"} logo`}
+      className="rounded border bg-white"
+      style={{ width: 42, height: 42, objectFit: "contain", padding: 4 }}
+    />
+  );
+};
 
 const TravelAgents = () => {
   const dispatch = useDispatch();
@@ -58,6 +112,9 @@ const TravelAgents = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [form, setForm] = useState({ ...emptyAgent });
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState("");
+  const [savingWithLogo, setSavingWithLogo] = useState(false);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [touched, setTouched] = useState({});
@@ -66,6 +123,12 @@ const TravelAgents = () => {
     dispatch(fetchTravelAgentsLookups());
     dispatch(fetchTravelAgents({ q: searchName || undefined }));
   }, [dispatch, searchName]);
+
+  useEffect(() => {
+    return () => {
+      if (logoPreview) URL.revokeObjectURL(logoPreview);
+    };
+  }, [logoPreview]);
 
   const countryMap = useMemo(() => {
     const map = new Map();
@@ -89,11 +152,46 @@ const TravelAgents = () => {
   const onChange = (name, value) =>
     setForm((prev) => ({ ...prev, [name]: value }));
 
+  const resetLogoFile = () => {
+    if (logoPreview) URL.revokeObjectURL(logoPreview);
+    setLogoFile(null);
+    setLogoPreview("");
+  };
+
+  const onLogoChange = (file) => {
+    resetLogoFile();
+    if (!file) return;
+
+    if (!String(file.type || "").startsWith("image/")) {
+      notifyError("Please choose an image file for the logo.");
+      return;
+    }
+
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  };
+
+  const buildPayloadWithLogo = async () => {
+    if (!logoFile) return { ...form };
+
+    const attachmentId = await uploadAttachmentAndGetId({
+      file: logoFile,
+      ATTACHMENT_TYPE: ATTACHMENT_TYPES.TRAVEL_AGENT_LOGO,
+      META: { AGENT_NAME: form.AGENT_NAME },
+    });
+
+    return {
+      ...form,
+      AGENT_LOGO_ATTACHMENT_ID: attachmentId,
+    };
+  };
+
   const openCreate = () => {
     if (!canMutate) return notifyError("Permission/role mismatch");
     setTouched({});
     setEditing(null);
     setForm({ ...emptyAgent });
+    resetLogoFile();
     setCreateOpen(true);
   };
 
@@ -106,7 +204,9 @@ const TravelAgents = () => {
       AGENT_EMAIL: row?.AGENT_EMAIL || "",
       AGENT_COUNTRY: row?.AGENT_COUNTRY || "",
       AGENT_PHONE: row?.AGENT_PHONE || "",
+      AGENT_LOGO_ATTACHMENT_ID: row?.AGENT_LOGO_ATTACHMENT_ID || "",
     });
+    resetLogoFile();
     setEditOpen(true);
   };
 
@@ -116,7 +216,7 @@ const TravelAgents = () => {
     setDeleteOpen(true);
   };
 
-  const submitCreate = (e) => {
+  const submitCreate = async (e) => {
     e.preventDefault();
     setTouched({
       AGENT_NAME: true,
@@ -127,16 +227,25 @@ const TravelAgents = () => {
 
     if (Object.keys(errors).length) return notifyError("Validation fail");
 
-    dispatch(
-      createTravelAgent(form, () => {
-        setCreateOpen(false);
-        setForm({ ...emptyAgent });
-        dispatch(fetchTravelAgents({ q: searchName || undefined }));
-      }),
-    );
+    setSavingWithLogo(true);
+    try {
+      const payload = await buildPayloadWithLogo();
+      dispatch(
+        createTravelAgent(payload, () => {
+          setCreateOpen(false);
+          setForm({ ...emptyAgent });
+          resetLogoFile();
+          dispatch(fetchTravelAgents({ q: searchName || undefined }));
+        }),
+      );
+    } catch (error) {
+      notifyError(error?.message || "Failed to upload travel agent logo.");
+    } finally {
+      setSavingWithLogo(false);
+    }
   };
 
-  const submitEdit = (e) => {
+  const submitEdit = async (e) => {
     e.preventDefault();
     setTouched({
       AGENT_NAME: true,
@@ -147,14 +256,23 @@ const TravelAgents = () => {
 
     if (Object.keys(errors).length) return notifyError("Validation fail");
 
-    dispatch(
-      updateTravelAgent(editing?._id, form, () => {
-        setEditOpen(false);
-        setEditing(null);
-        setForm({ ...emptyAgent });
-        dispatch(fetchTravelAgents({ q: searchName || undefined }));
-      }),
-    );
+    setSavingWithLogo(true);
+    try {
+      const payload = await buildPayloadWithLogo();
+      dispatch(
+        updateTravelAgent(editing?._id, payload, () => {
+          setEditOpen(false);
+          setEditing(null);
+          setForm({ ...emptyAgent });
+          resetLogoFile();
+          dispatch(fetchTravelAgents({ q: searchName || undefined }));
+        }),
+      );
+    } catch (error) {
+      notifyError(error?.message || "Failed to upload travel agent logo.");
+    } finally {
+      setSavingWithLogo(false);
+    }
   };
 
   const confirmDelete = () => {
@@ -221,6 +339,35 @@ const TravelAgents = () => {
           invalid={!!(touched.AGENT_PHONE && errors.AGENT_PHONE)}
         />
         <FormFeedback>{errors.AGENT_PHONE}</FormFeedback>
+      </Col>
+
+      <Col md={12} className="mb-3">
+        <Label>Agent Logo</Label>
+        <div className="d-flex align-items-center gap-3">
+          {logoPreview ? (
+            <img
+              src={logoPreview}
+              alt="Selected travel agent logo"
+              className="rounded border bg-white"
+              style={{ width: 72, height: 72, objectFit: "contain", padding: 6 }}
+            />
+          ) : (
+            <AgentLogo
+              attachmentId={form.AGENT_LOGO_ATTACHMENT_ID}
+              name={form.AGENT_NAME}
+            />
+          )}
+          <div className="flex-grow-1">
+            <Input
+              type="file"
+              accept="image/*"
+              onChange={(e) => onLogoChange(e.target.files?.[0])}
+            />
+            <div className="text-muted small mt-1">
+              Upload a square or horizontal logo image.
+            </div>
+          </div>
+        </div>
       </Col>
     </Row>
   );
@@ -289,6 +436,7 @@ const TravelAgents = () => {
                   <Table className="table align-middle table-nowrap mb-0">
                     <thead className="table-light">
                       <tr>
+                        <th style={{ width: 72 }}>Logo</th>
                         <th>Agent Name</th>
                         <th>Email</th>
                         <th>Country</th>
@@ -300,6 +448,12 @@ const TravelAgents = () => {
                     <tbody>
                       {(items || []).map((x) => (
                         <tr key={x._id}>
+                          <td>
+                            <AgentLogo
+                              attachmentId={x.AGENT_LOGO_ATTACHMENT_ID}
+                              name={x.AGENT_NAME}
+                            />
+                          </td>
                           <td>{x.AGENT_NAME || "-"}</td>
                           <td>{x.AGENT_EMAIL || "-"}</td>
                           <td>{countryMap.get(x.AGENT_COUNTRY) || "-"}</td>
@@ -360,7 +514,7 @@ const TravelAgents = () => {
                 >
                   Cancel
                 </Button>
-                <Button color="primary" type="submit" disabled={loading}>
+                <Button color="primary" type="submit" disabled={loading || savingWithLogo}>
                   Save
                 </Button>
               </ModalFooter>
@@ -385,7 +539,7 @@ const TravelAgents = () => {
                 >
                   Cancel
                 </Button>
-                <Button color="primary" type="submit" disabled={loading}>
+                <Button color="primary" type="submit" disabled={loading || savingWithLogo}>
                   Update
                 </Button>
               </ModalFooter>

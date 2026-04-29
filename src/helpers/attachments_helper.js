@@ -6,6 +6,7 @@ import {
   updateAttachmentApi,
   deleteAttachmentApi,
 } from "./coe_backend_helper";
+import { axiosApi } from "./api_helper";
 
 export const ATTACHMENT_TYPES = {
   PROFILE_IMG: "PROFILE_IMG",
@@ -14,6 +15,7 @@ export const ATTACHMENT_TYPES = {
   INVOICE: "INVOICE",
   HOTEL_IMAGE: "HOTEL_IMAGE",
   PLACE_IMAGE: "PLACE_IMAGE",
+  TRAVEL_AGENT_LOGO: "TRAVEL_AGENT_LOGO",
 };
 
 export const extractAttachmentErrorMessage = (error, fallback = "Attachment request failed") => {
@@ -115,6 +117,22 @@ export const getAttachmentById = async (id) => {
 export const getAttachmentDownloadUrl = async (id) => {
   const response = await getAttachmentById(id);
   return response?.DOWNLOAD_URL || "";
+};
+
+/**
+ * Returns the attachment binary through the COE API.
+ * This avoids S3 CORS/read restrictions when embedding images into PDFs.
+ */
+export const getAttachmentBlob = async (id) => {
+  if (!id) {
+    throw new Error("Attachment id is required.");
+  }
+
+  const response = await axiosApi.get(`/attachments/${id}/download`, {
+    responseType: "blob",
+  });
+
+  return response.data;
 };
 
 /**

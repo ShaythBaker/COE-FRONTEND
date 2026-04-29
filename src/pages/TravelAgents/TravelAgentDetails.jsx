@@ -17,6 +17,7 @@ import {
 import ReactEcharts from "echarts-for-react";
 
 import RoleProtected from "../../components/Common/RoleProtected";
+import { getAttachmentDownloadUrl } from "../../helpers/attachments_helper";
 import {
   fetchTravelAgent,
   fetchTravelAgentQuotations,
@@ -27,6 +28,53 @@ const FREQUENCY_VIEWS = [
   { key: "daily", label: "Daily" },
   { key: "monthly", label: "Monthly" },
 ];
+
+const AgentLogo = ({ attachmentId, name }) => {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (!attachmentId) {
+      setUrl("");
+      return () => {
+        mounted = false;
+      };
+    }
+
+    getAttachmentDownloadUrl(attachmentId)
+      .then((downloadUrl) => {
+        if (mounted) setUrl(downloadUrl || "");
+      })
+      .catch(() => {
+        if (mounted) setUrl("");
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [attachmentId]);
+
+  if (!url) {
+    return (
+      <div
+        className="rounded border bg-light d-flex align-items-center justify-content-center"
+        style={{ width: 96, height: 72 }}
+      >
+        <i className="bx bx-image text-muted font-size-24" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={`${name || "Travel agent"} logo`}
+      className="rounded border bg-white"
+      style={{ width: 96, height: 72, objectFit: "contain", padding: 8 }}
+    />
+  );
+};
 
 const unwrapId = (value) => {
   if (!value) return "";
@@ -312,25 +360,31 @@ const TravelAgentDetails = () => {
             <>
               <Card className="mb-4">
                 <CardBody>
-                  <Row>
-                    <Col md={6} className="mb-3">
+                  <Row className="align-items-start">
+                    <Col md={2} className="mb-3">
+                      <AgentLogo
+                        attachmentId={selected?.AGENT_LOGO_ATTACHMENT_ID}
+                        name={selected?.AGENT_NAME}
+                      />
+                    </Col>
+                    <Col md={5} className="mb-3">
                       <b>Agent Name:</b> {selected?.AGENT_NAME || "-"}
                     </Col>
-                    <Col md={6} className="mb-3">
+                    <Col md={5} className="mb-3">
                       <b>Agent Email:</b> {selected?.AGENT_EMAIL || "-"}
                     </Col>
-                    <Col md={6} className="mb-3">
+                    <Col md={5} className="mb-3">
                       <b>Country:</b>{" "}
                       {countryMap.get(unwrapId(selected?.AGENT_COUNTRY)) || "-"}
                     </Col>
-                    <Col md={6} className="mb-3">
+                    <Col md={5} className="mb-3">
                       <b>Phone:</b> {selected?.AGENT_PHONE || "-"}
                     </Col>
-                    <Col md={6} className="mb-3">
+                    <Col md={5} className="mb-3">
                       <b>Status:</b>{" "}
                       {selected?.ACTIVE_STATUS ? "Active" : "Inactive"}
                     </Col>
-                    <Col md={6} className="mb-3">
+                    <Col md={5} className="mb-3">
                       <b>Created On:</b> {formatDate(selected?.CREATED_ON)}
                     </Col>
                   </Row>

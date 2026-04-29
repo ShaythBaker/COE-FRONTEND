@@ -35,6 +35,7 @@ import {
   getQuotationStatusBadgeColor,
   isQuotationReadOnly,
 } from "../../helpers/quotation_pricing_helper";
+import { generateQuotationPdf } from "../../helpers/quotation_pdf";
 
 const PRICE_VIEW_ROLES = ["ACCOUNTING", "COMPANY_ADMIN", "USER_COMPANY"];
 const GENERAL_NOTES_ROLES = ["TOUR_OPERATION"];
@@ -198,7 +199,56 @@ const getOptionHotelRows = (option, boardBasis, pax) => {
             season?.HOTEL_SEASON_VALUE ||
             stay?.SEASON_NAME ||
             `Season ${seasonIndex + 1}`,
+          seasonStartDate:
+            season?.FROM_DATE ||
+            season?.START_DATE ||
+            season?.DATE_FROM ||
+            stay?.FROM_DATE ||
+            stay?.START_DATE ||
+            "",
+          seasonEndDate:
+            season?.TO_DATE ||
+            season?.END_DATE ||
+            season?.DATE_TO ||
+            stay?.TO_DATE ||
+            stay?.END_DATE ||
+            "",
+          overnightDate: stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "",
           nights,
+          costNights: nights,
+          bb: getDirectAmount([
+            season?.BB_RATE_AMOUNT,
+            season?.BB_AMOUNT,
+            season?.BB_RATE,
+            season?.BB_PRICE,
+            season?.BB,
+            season?.bb,
+          ]),
+          hb: getDirectAmount([
+            season?.HB_RATE_AMOUNT,
+            season?.HB_AMOUNT,
+            season?.HB_RATE,
+            season?.HB_PRICE,
+            season?.HB,
+            season?.hb,
+          ]),
+          fb: getDirectAmount([
+            season?.FB_RATE_AMOUNT,
+            season?.FB_AMOUNT,
+            season?.FB_RATE,
+            season?.FB_PRICE,
+            season?.FB,
+            season?.fb,
+          ]),
+          ss: getDirectAmount([
+            season?.SINGLE_SUPPLIMENT_AMOUNT,
+            season?.SS_RATE_AMOUNT,
+            season?.SS_AMOUNT,
+            season?.SS_RATE,
+            season?.SS_PRICE,
+            season?.SS,
+            season?.ss,
+          ]),
           rate,
           total: rate * nights,
         });
@@ -207,6 +257,69 @@ const getOptionHotelRows = (option, boardBasis, pax) => {
   });
 
   return rows;
+};
+
+const getSupplementAmount = (row, key) =>
+  toNumber(row?.[key] ?? row?.[key.toUpperCase()] ?? row?.[`${key}_RATE`]);
+
+const getUsedSeasonRate = (row, boardBasis, pax) => {
+  const board = String(boardBasis || "BB").toUpperCase();
+  const bb = getSupplementAmount(row, "bb");
+  const hb = getSupplementAmount(row, "hb");
+  const fb = getSupplementAmount(row, "fb");
+  const ss = getSupplementAmount(row, "ss");
+  let amount = bb;
+
+  if (board === "HB") amount += hb;
+  if (board === "FB") amount += fb;
+  if (Number(pax) === 1) amount += ss;
+
+  return amount;
+};
+
+const buildFormulaLabel = (boardBasis, nights, pax) => {
+  const parts = [String(boardBasis || "BB").toUpperCase()];
+  if (Number(pax) === 1) parts.push("SS");
+  return `${parts.join(" + ")} x ${nights || 0}`;
+};
+
+const buildSeasonSummaryRows = (rows, boardBasis, pax, priceFactor = 1) => {
+  const factor = Number.isFinite(Number(priceFactor)) && Number(priceFactor) > 0
+    ? Number(priceFactor)
+    : 1;
+  const normalizedRows = asArray(rows).map((row, index) => {
+    const nights = toNumber(row?.costNights ?? row?.nights);
+    const displayNights = nights || toNumber(row?.nights) || 0;
+    const usedRate = getUsedSeasonRate(row, boardBasis, pax) * factor;
+    const price = toNumber(row?.costStayPerPerson ?? row?.stayPerPerson) * factor;
+
+    return {
+      key: `${row?.cityName || row?.CITY_NAME || "city"}-${row?.hotelName || row?.HOTEL_NAME || "hotel"}-${row?.seasonName || row?.SEASON_NAME || "season"}-${index}`,
+      cityName: row?.cityName || row?.CITY_NAME || "-",
+      hotelName: row?.hotelName || row?.HOTEL_NAME || "-",
+      seasonName: row?.seasonName || row?.SEASON_NAME || "-",
+      seasonDuration:
+        row?.seasonDuration ||
+        getSeasonLabel({
+          SEASON_NAME: row?.seasonName || row?.SEASON_NAME,
+          FROM_DATE: row?.seasonStartDate || row?.FROM_DATE,
+          TO_DATE: row?.seasonEndDate || row?.TO_DATE,
+        }),
+      overnightDate: row?.overnightDate || row?.OVERNIGHT_DATE || "",
+      nights: displayNights,
+      usedRate: usedRate || toNumber(row?.perPerson ?? row?.rate),
+      formula: buildFormulaLabel(boardBasis, displayNights, pax),
+      price: price || usedRate * displayNights,
+      bb: getSupplementAmount(row, "bb") * factor,
+      hb: getSupplementAmount(row, "hb") * factor,
+      fb: getSupplementAmount(row, "fb") * factor,
+      ss: getSupplementAmount(row, "ss") * factor,
+      isApplicable: nights > 0 || toNumber(row?.costStayPerPerson) > 0,
+    };
+  });
+
+  const applicableRows = normalizedRows.filter(row => row.isApplicable);
+  return applicableRows.length ? applicableRows : normalizedRows;
 };
 
 const getAmount = value => {
@@ -419,6 +532,178 @@ const Pill = ({ icon, text, color = "light" }) => (
   </Badge>
 );
 
+const FinalOptionMetric = ({ label, value, subtitle, tone = "light", icon }) => {
+  const toneClass =
+    tone === "primary"
+      ? "bg-primary bg-opacity-10 border-primary border-opacity-25"
+      : tone === "success"
+      ? "bg-success bg-opacity-10 border-success border-opacity-25"
+      : "bg-white";
+
+  return (
+    <div className={`rounded border p-3 h-100 ${toneClass}`}>
+      <div className="d-flex align-items-start justify-content-between gap-2 mb-2">
+        <div className="text-muted small">{label}</div>
+        {icon ? <i className={`${icon} text-primary font-size-18`} /> : null}
+      </div>
+      <div className="h4 mb-1 text-dark">{formatMoney(value)}</div>
+      <div className="text-muted small">{subtitle}</div>
+    </div>
+  );
+};
+
+const FinalOptionPriceSummary = ({ option }) => {
+  const sourceRows = [
+    { label: "Accommodation", value: option.hotelsDisplayPrice },
+    { label: "Shared services", value: option.sharedDisplayPrice },
+  ].filter(row => toNumber(row.value) > 0);
+
+  return (
+    <div className="rounded overflow-hidden border bg-white mb-3">
+      <div className="bg-light px-3 py-3 border-bottom">
+        <div className="d-flex flex-wrap align-items-start justify-content-between gap-3">
+          <div>
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+              <Badge color="primary" pill>
+                Option {option.optionIndex + 1}
+              </Badge>
+              <h5 className="mb-0">{option.optionName}</h5>
+              {option.optionStars ? (
+                <Badge color="light" className="text-dark border" pill>
+                  {option.optionStars} Stars
+                </Badge>
+              ) : null}
+            </div>
+            <div className="text-muted small">
+              Full price source: hotel seasons, board basis, shared daily costs,
+              and final person total.
+            </div>
+          </div>
+          <div className="text-end">
+            <div className="text-muted small">Final Total / Person</div>
+            <div className="display-6 mb-0 fw-bold text-primary">
+              {formatMoney(option.finalPerPerson)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3">
+        <Row className="g-3 mb-3">
+          <Col md="6">
+            <FinalOptionMetric
+              icon="bx bx-hotel"
+              label="Hotels / Person"
+              value={option.hotelsDisplayPrice}
+              subtitle="Selected hotel seasons and board basis"
+            />
+          </Col>
+          <Col md="6">
+            <FinalOptionMetric
+              icon="bx bx-trip"
+              label="Shared / Person"
+              value={option.sharedDisplayPrice}
+              subtitle="Transport, meals, fees, guide, services"
+            />
+          </Col>
+        </Row>
+
+        <div className="d-flex flex-wrap gap-2">
+          {sourceRows.map(row => (
+            <Badge
+              key={row.label}
+              color="light"
+              className="text-dark border rounded-pill px-3 py-2 fw-normal"
+            >
+              <span className="text-muted">{row.label}</span>{" "}
+              <span className="fw-semibold">{formatMoney(row.value)}</span>
+            </Badge>
+          ))}
+          <Badge color="primary" className="rounded-pill px-3 py-2 fw-normal">
+            Final {formatMoney(option.finalPerPerson)}
+          </Badge>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const FinalSeasonSummaryTable = ({ rows }) => {
+  if (!rows?.length) return null;
+
+  return (
+    <div className="rounded overflow-hidden border bg-white mb-3">
+      <div className="bg-light px-3 py-2 border-bottom">
+        <div className="fw-semibold">Hotel Season Price Summary</div>
+        <div className="text-muted small">
+          Applicable hotel seasons, dates, supplements, used rate, and selected
+          season price.
+        </div>
+      </div>
+      <div className="table-responsive">
+        <table className="table table-sm align-middle mb-0">
+          <thead className="table-light">
+            <tr>
+              <th>City</th>
+              <th>Hotel</th>
+              <th>Season</th>
+              <th>Dates</th>
+              <th className="text-end">Nights</th>
+              <th>Supplements</th>
+              <th className="text-end">Used Rate</th>
+              <th>Formula</th>
+              <th className="text-end">Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(row => (
+              <tr key={row.key}>
+                <td className="fw-semibold">{row.cityName}</td>
+                <td>{row.hotelName}</td>
+                <td>
+                  <div className="fw-semibold text-primary">{row.seasonName}</div>
+                  {row.overnightDate ? (
+                    <div className="text-muted small">
+                      Overnight: {formatDateLabel(row.overnightDate)}
+                    </div>
+                  ) : null}
+                </td>
+                <td>{row.seasonDuration}</td>
+                <td className="text-end">{row.nights}</td>
+                <td style={{ minWidth: 180 }}>
+                  <div className="d-flex flex-wrap gap-1">
+                    {[
+                      ["BB", row.bb],
+                      ["HB", row.hb],
+                      ["FB", row.fb],
+                      ["SS", row.ss],
+                    ].map(([label, value]) => (
+                      <Badge
+                        key={label}
+                        color={value > 0 ? "light" : "secondary"}
+                        className={`border fw-normal ${
+                          value > 0 ? "text-dark" : "bg-opacity-10"
+                        }`}
+                      >
+                        {label} {formatMoney(value)}
+                      </Badge>
+                    ))}
+                  </div>
+                </td>
+                <td className="text-end fw-semibold">{formatMoney(row.usedRate)}</td>
+                <td>{row.formula}</td>
+                <td className="text-end fw-bold text-primary">
+                  {formatMoney(row.price)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 const QuotationsDetails = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
@@ -439,6 +724,7 @@ const QuotationsDetails = () => {
   const [generalNotes, setGeneralNotes] = useState("");
   const [generalNotesTouched, setGeneralNotesTouched] = useState(false);
   const [generalNotesSaving, setGeneralNotesSaving] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -533,6 +819,15 @@ const QuotationsDetails = () => {
     });
     return map;
   }, [lookups]);
+
+  const selectedTravelAgent = useMemo(() => {
+    const travelAgentId = unwrapId(selected?.TRAVEL_AGENT_ID);
+    return (
+      (lookups?.travelAgents || []).find(
+        item => unwrapId(item?._id) === travelAgentId
+      ) || null
+    );
+  }, [lookups?.travelAgents, selected?.TRAVEL_AGENT_ID]);
 
   const nationalityMap = useMemo(() => {
     const map = new Map();
@@ -715,20 +1010,67 @@ const QuotationsDetails = () => {
         const hotelsPerPerson = toNumber(option?.hotelsPerPerson);
         const sharedPerPerson = toNumber(option?.sharedPerPersonTotal ?? option?.sharedPerPerson);
         const finalPerPerson = toNumber(option?.finalTotal ?? option?.finalPerPerson);
+        const hotelsDisplayPrice =
+          toNumber(option?.hotelsDisplayPrice ?? option?.hotelsPerPerson) ||
+          hotelsPerPerson;
+        const sharedDisplayPrice =
+          toNumber(
+            option?.sharedDisplayPrice ??
+              option?.sharedPerPersonTotal ??
+              option?.sharedPerPerson
+          ) || sharedPerPerson;
+        const basePerPerson =
+          toNumber(option?.basePerPerson) ||
+          hotelsDisplayPrice + sharedDisplayPrice;
+        const profitPerPerson =
+          toNumber(option?.profitPerPerson) ||
+          Math.max(0, finalPerPerson - basePerPerson);
+        const priceFactor = basePerPerson > 0 ? finalPerPerson / basePerPerson : 1;
+        const finalHotelsDisplayPrice = hotelsPerPerson * priceFactor;
+        const finalSharedDisplayPrice = sharedPerPerson * priceFactor;
+        const detailRowsAfterAdjustment = detailRows.map(row => ({
+          ...row,
+          afterProfit: toNumber(row.afterProfit) * priceFactor,
+        }));
+        const hotelRowsAfterAdjustment = hotelRows.map(row => ({
+          ...row,
+          rateAfterProfit: toNumber(row.rateAfterProfit) * priceFactor,
+          afterProfit: toNumber(row.afterProfit) * priceFactor,
+        }));
+        const seasonSummaryRows = buildSeasonSummaryRows(
+          option?.rows,
+          finalPricing?.BOARD_BASIS || option?.boardBasis || "BB",
+          selected?.NUMBER_OF_PAX || 1,
+          priceFactor
+        );
 
         return {
           key: option?.optionKey || `${option?.optionName || "option"}-${index}`,
+          optionIndex: Number.isFinite(Number(option?.optionIndex))
+            ? Number(option.optionIndex)
+            : index,
           optionName: option?.optionName || `Option ${index + 1}`,
+          optionStars:
+            option?.optionStars ||
+            option?.selectedStars ||
+            option?.hotelStars ||
+            "",
           boardBasis: String(finalPricing?.BOARD_BASIS || option?.boardBasis || "BB").toUpperCase(),
+          profitType: String(
+            option?.profitType || finalPricing?.PROFIT_TYPE || "PERCENT"
+          ).toUpperCase(),
+          profitValue: toNumber(option?.profitValue ?? finalPricing?.PROFIT_VALUE),
           hotelsPerPerson,
           sharedPerPerson,
-          hotelsDisplayPrice: hotelsPerPerson,
-          sharedDisplayPrice: sharedPerPerson,
-          basePerPerson: toNumber(option?.basePerPerson),
-          profitPerPerson: toNumber(option?.profitPerPerson),
+          hotelsDisplayPrice: finalHotelsDisplayPrice || hotelsDisplayPrice,
+          sharedDisplayPrice: finalSharedDisplayPrice || sharedDisplayPrice,
+          basePerPerson,
+          profitPerPerson,
+          finalAdjustmentPerPerson: profitPerPerson,
           finalPerPerson,
-          detailRows,
-          hotelRows,
+          detailRows: detailRowsAfterAdjustment,
+          hotelRows: hotelRowsAfterAdjustment,
+          seasonSummaryRows,
         };
       });
     }
@@ -765,6 +1107,7 @@ const QuotationsDetails = () => {
       const profitPerPerson =
         profitType === "PERCENT" ? basePerPerson * (profitValue / 100) : profitValue;
       const finalPerPerson = basePerPerson + profitPerPerson;
+      const priceFactor = basePerPerson > 0 ? finalPerPerson / basePerPerson : 1;
 
       const detailRows = [
         { name: "Accommodation", amount: hotelsPerPerson },
@@ -788,20 +1131,70 @@ const QuotationsDetails = () => {
 
       return {
         key: `${option?.OPTION_NAME || "option"}-${index}`,
+        optionIndex: index,
         optionName: option?.OPTION_NAME || `Option ${index + 1}`,
+        optionStars: option?.SELECTED_HOTEL_STARS || "",
         boardBasis,
+        profitType,
+        profitValue,
         hotelsPerPerson,
         sharedPerPerson,
-        hotelsDisplayPrice: addProportionalProfit(hotelsPerPerson, basePerPerson),
-        sharedDisplayPrice: addProportionalProfit(sharedPerPerson, basePerPerson),
+        hotelsDisplayPrice: hotelsPerPerson * priceFactor,
+        sharedDisplayPrice: sharedPerPerson * priceFactor,
         basePerPerson,
         profitPerPerson,
+        finalAdjustmentPerPerson: profitPerPerson,
         finalPerPerson,
         detailRows,
         hotelRows: hotelRowsAfterProfit,
+        seasonSummaryRows: buildSeasonSummaryRows(hotelRows, boardBasis, pax, priceFactor),
       };
     });
   }, [finalPricing, isApprovedFinalPricing, selected?.NUMBER_OF_PAX]);
+
+  const handleDownloadPdf = async () => {
+    if (!selected) {
+      notifyError("Quotation details are still loading.");
+      return;
+    }
+
+    if (!isApprovedFinalPricing || approvedFinalOptions.length === 0) {
+      notifyError("Approved final price is not available yet.");
+      return;
+    }
+
+    setPdfGenerating(true);
+
+    try {
+      await generateQuotationPdf({
+        quotation: selected,
+        quotationInfo: {
+          referenceNumber,
+          travelAgentName,
+          travelAgentEmail: selectedTravelAgent?.AGENT_EMAIL || "",
+          travelAgentPhone: selectedTravelAgent?.AGENT_PHONE || "",
+          travelAgentCountry:
+            nationalityMap.get(unwrapId(selectedTravelAgent?.AGENT_COUNTRY)) || "",
+          travelAgentLogoAttachmentId:
+            unwrapId(selectedTravelAgent?.AGENT_LOGO_ATTACHMENT_ID) || "",
+          quotationTypeName,
+          nationalityName,
+          validityDays,
+          tripDays,
+          tripNights,
+          paxCount,
+          quotationStatus,
+        },
+        approvedFinalOptions,
+        daysRoutes,
+      });
+      notifySuccess("PDF downloaded successfully.");
+    } catch (error) {
+      notifyError(getErrorMessage(error, "Failed to download quotation PDF."));
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
 
   document.title = "Quotation Details | Skote";
 
@@ -1055,7 +1448,23 @@ const QuotationsDetails = () => {
                       icon="bx bx-badge-dollar"
                       title="Final Price"
                       subtitle="Approved option prices."
-                    />
+                    >
+                      {isApprovedFinalPricing && approvedFinalOptions.length > 0 ? (
+                        <Button
+                          color="primary"
+                          type="button"
+                          onClick={handleDownloadPdf}
+                          disabled={pdfGenerating || summaryLoading}
+                        >
+                          {pdfGenerating ? (
+                            <Spinner size="sm" className="me-2" />
+                          ) : (
+                            <i className="bx bx-download me-1" />
+                          )}
+                          Download as PDF file
+                        </Button>
+                      ) : null}
+                    </SummaryHeader>
                     {finalPricingLoading ? (
                       <LoadingState text="Loading approved final price..." />
                     ) : !isApprovedFinalPricing ? (
@@ -1106,6 +1515,11 @@ const QuotationsDetails = () => {
 
                               {isOpen ? (
                                 <div className="bg-light border-top p-3">
+                                  <FinalOptionPriceSummary option={option} />
+                                  <FinalSeasonSummaryTable
+                                    rows={option.seasonSummaryRows}
+                                  />
+
                                   <Row className="g-3 mb-3">
                                     <Col md="4">
                                       <SummaryField
@@ -1124,7 +1538,7 @@ const QuotationsDetails = () => {
                                     <Col md="4">
                                       <SummaryField
                                         icon="bx bx-purchase-tag"
-                                        label="Final Price / Person"
+                                        label="Final Total / Person"
                                         value={formatMoney(option.finalPerPerson)}
                                       />
                                     </Col>
