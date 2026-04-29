@@ -10,6 +10,7 @@ export const QUOTATION_PRICING_STATUS = Object.freeze({
 
 export const QUOTATION_PRICE_VIEW_ROLES = Object.freeze([
   "ACCOUNTING",
+  "COMPANY_ADMIN",
   "USER_COMPANY",
 ]);
 

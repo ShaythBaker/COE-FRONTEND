@@ -1,5 +1,5 @@
 // path: src/store/QuotationDays/saga.js
-import { all, call, put, takeLatest } from "redux-saga/effects";
+import { all, call, put, takeEvery, takeLatest } from "redux-saga/effects";
 import { get, post, patch } from "../../helpers/api_helper";
 import { getListItems } from "../../helpers/coe_backend_helper";
 import { notifyError, notifySuccess } from "../../helpers/notify";
@@ -24,6 +24,7 @@ import {
 } from "./actions";
 import {
   TRANSPORTATION_TYPES,
+  TRANSPORTATION_SIZES,
   TRANSPORTATION_COMPANIES,
   RESTAURANTS,
   RESTAURANT_MEALS,
@@ -70,9 +71,17 @@ function* onFetchQuotationDays({ payload }) {
 
 function* onFetchQuotationDayLookups() {
   try {
-    const [transportationTypes, transportationCompanies, guideTypes, restaurants, cities] = yield all([
+    const [
+      transportationTypes,
+      transportationCompanies,
+      transportationSizes,
+      guideTypes,
+      restaurants,
+      cities,
+    ] = yield all([
       call(get, TRANSPORTATION_TYPES),
       call(get, TRANSPORTATION_COMPANIES),
+      call(get, TRANSPORTATION_SIZES),
       call(getListItems, "GUIDE_TYPE"),
       call(get, RESTAURANTS),
       call(getListItems, "CITIES"),
@@ -82,6 +91,7 @@ function* onFetchQuotationDayLookups() {
       fetchQuotationDayLookupsSuccess({
         transportationTypes: Array.isArray(transportationTypes) ? transportationTypes : [],
         transportationCompanies: Array.isArray(transportationCompanies) ? transportationCompanies : [],
+        transportationSizes: Array.isArray(transportationSizes) ? transportationSizes : [],
         guideTypes: Array.isArray(guideTypes) ? guideTypes : [],
         restaurants: Array.isArray(restaurants) ? restaurants : [],
         cities: Array.isArray(cities) ? cities : [],
@@ -126,9 +136,7 @@ function* onFetchRouteEntranceFeePlaces({ payload }) {
     const cityId = payload?.cityId;
     const nationalityId = payload?.nationalityId;
 
-    const query = `${PLACES}?PLACE_CITY=${encodeURIComponent(cityId)}&ENTRANCE_FEE_NATIONALATY=${encodeURIComponent(
-      nationalityId
-    )}`;
+    const query = `${PLACES}?PLACE_CITY=${encodeURIComponent(cityId)}`;
 
     const res = yield call(get, query);
 
@@ -221,7 +229,7 @@ export default function* quotationDaysSaga() {
     takeLatest(T.FETCH_QUOTATION_DAY_LOOKUPS, onFetchQuotationDayLookups),
     takeLatest(T.FETCH_RESTAURANT_MEALS, onFetchRestaurantMeals),
     takeLatest(T.FETCH_RESTAURANTS_BY_CITY, onFetchRestaurantsByCity),
-    takeLatest(T.FETCH_ROUTE_ENTRANCE_FEE_PLACES, onFetchRouteEntranceFeePlaces),
+    takeEvery(T.FETCH_ROUTE_ENTRANCE_FEE_PLACES, onFetchRouteEntranceFeePlaces),
     takeLatest(T.FETCH_TRANSPORTATION_BEST_RATE, onFetchTransportationBestRate),
     takeLatest(T.CREATE_QUOTATION_DAY, onCreateQuotationDay),
     takeLatest(T.UPDATE_QUOTATION_DAY, onUpdateQuotationDay),

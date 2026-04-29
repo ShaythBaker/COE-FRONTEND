@@ -36,8 +36,9 @@ import {
   isQuotationReadOnly,
 } from "../../helpers/quotation_pricing_helper";
 
-const PRICE_VIEW_ROLES = ["ACCOUNTING", "USER_COMPANY"];
+const PRICE_VIEW_ROLES = ["ACCOUNTING", "COMPANY_ADMIN", "USER_COMPANY"];
 const GENERAL_NOTES_ROLES = ["TOUR_OPERATION"];
+const APPROVED_FINAL_PRICE_ROLES = ["TOUR_OPERATION"];
 
 const unwrapId = value => {
   if (!value) return "";
@@ -102,6 +103,110 @@ const formatMoney = value => {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "-";
   return amount.toFixed(2);
+};
+
+const toNumber = value => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const getDirectAmount = candidates => {
+  for (let i = 0; i < candidates.length; i += 1) {
+    const amount = Number(candidates[i]);
+    if (Number.isFinite(amount)) return amount;
+  }
+
+  return 0;
+};
+
+const getHotelRate = (row, boardBasis = "BB", pax = 0) => {
+  const board = String(boardBasis || "BB").toUpperCase();
+  const bb = getDirectAmount([
+    row?.BB_RATE_AMOUNT,
+    row?.BB_AMOUNT,
+    row?.BB_RATE,
+    row?.BB_PRICE,
+    row?.BB,
+    row?.bb,
+    row?.ROOM_RATE,
+    row?.SEASON_PRICE,
+    row?.PRICE,
+    row?.RATE,
+  ]);
+  const hb = getDirectAmount([
+    row?.HB_RATE_AMOUNT,
+    row?.HB_AMOUNT,
+    row?.HB_RATE,
+    row?.HB_PRICE,
+    row?.HB,
+    row?.hb,
+  ]);
+  const fb = getDirectAmount([
+    row?.FB_RATE_AMOUNT,
+    row?.FB_AMOUNT,
+    row?.FB_RATE,
+    row?.FB_PRICE,
+    row?.FB,
+    row?.fb,
+  ]);
+  const ss = getDirectAmount([
+    row?.SINGLE_SUPPLIMENT_AMOUNT,
+    row?.SS_RATE_AMOUNT,
+    row?.SS_AMOUNT,
+    row?.SS_RATE,
+    row?.SS_PRICE,
+    row?.SS,
+    row?.ss,
+  ]);
+
+  let rate = bb;
+  if (board === "HB") rate += hb;
+  if (board === "FB") rate += fb;
+  if (Number(pax) === 1) rate += ss;
+
+  return rate;
+};
+
+const getOptionHotelRows = (option, boardBasis, pax) => {
+  const rows = [];
+  const cityGroups = asArray(option?.CITY_GROUPS);
+
+  cityGroups.forEach(cityGroup => {
+    asArray(cityGroup?.STAYS).forEach(stay => {
+      const seasons = asArray(stay?.SEASONS).length
+        ? asArray(stay.SEASONS)
+        : [stay?.SEASON_RATES || stay || {}];
+
+      seasons.forEach((season, seasonIndex) => {
+        const nights = toNumber(
+          season?.NIGHTS ??
+            season?.TOTAL_NIGHTS ??
+            stay?.NIGHTS ??
+            cityGroup?.TOTAL_NIGHTS
+        );
+        const rate = getHotelRate(
+          { ...(stay?.SEASON_RATES || {}), ...season },
+          boardBasis,
+          pax
+        );
+
+        rows.push({
+          cityName: cityGroup?.CITY_NAME || stay?.HOTEL_CITY_VALUE || "-",
+          hotelName: stay?.HOTEL_NAME || "-",
+          seasonName:
+            season?.SEASON_NAME ||
+            season?.HOTEL_SEASON_VALUE ||
+            stay?.SEASON_NAME ||
+            `Season ${seasonIndex + 1}`,
+          nights,
+          rate,
+          total: rate * nights,
+        });
+      });
+    });
+  });
+
+  return rows;
 };
 
 const getAmount = value => {
@@ -329,6 +434,7 @@ const QuotationsDetails = () => {
   const [extraServices, setExtraServices] = useState([]);
   const [finalPricing, setFinalPricing] = useState(null);
   const [finalPricingLoading, setFinalPricingLoading] = useState(false);
+  const [expandedFinalOptionKey, setExpandedFinalOptionKey] = useState("");
   const [generalNotesOpen, setGeneralNotesOpen] = useState(false);
   const [generalNotes, setGeneralNotes] = useState("");
   const [generalNotesTouched, setGeneralNotesTouched] = useState(false);
@@ -504,10 +610,14 @@ const QuotationsDetails = () => {
     selected?.QUOTATION_TYPE_VALUE ||
     quotationTypeMap.get(selected?.QUOTATION_TYPE) ||
     "-";
-  const durationDays =
+  const validityDays =
     selected?.QUOTATION_DURATION_DAYS ??
     selected?.DURATION_IN_DAYS ??
     "-";
+  const tripDays = selected?.NUMBER_OF_DAYS ?? selected?.TRIP_DAYS ?? "-";
+  const tripNights =
+    selected?.NUMBER_OF_NIGHTS ??
+    (tripDays === "-" ? "-" : Math.max(0, Number(tripDays) - 1));
   const paxCount = selected?.NUMBER_OF_PAX ?? "-";
   const hasGeneralNotes = String(selected?.GENERAL_NOTES || "").trim().length > 0;
 
@@ -554,10 +664,144 @@ const QuotationsDetails = () => {
     dispatch(sendQuotationForPricing(selected?._id || id, {}));
   };
 
-  const approvedFinalTotal =
-    String(finalPricing?.STATUS || "").toUpperCase().trim() === "APPROVED"
-      ? finalPricing?.FINAL_TOTAL
-      : null;
+  const isApprovedFinalPricing =
+    String(finalPricing?.STATUS || "").toUpperCase().trim() === "APPROVED";
+  const canViewApprovedFinalPrice =
+    isApprovedQuotation && hasAnyRole(roles, APPROVED_FINAL_PRICE_ROLES);
+
+  const approvedFinalOptions = useMemo(() => {
+    if (!isApprovedFinalPricing) return [];
+
+    const directOptionSummaries =
+      finalPricing?.OPTION_SUMMARIES ||
+      finalPricing?.FINAL_OPTIONS ||
+      finalPricing?.PRICING_VIEW?.optionSummaries ||
+      finalPricing?.SNAPSHOT?.OPTION_SUMMARIES ||
+      finalPricing?.SNAPSHOT?.FINAL_OPTIONS ||
+      finalPricing?.SNAPSHOT?.PRICING_VIEW?.optionSummaries ||
+      [];
+
+    if (Array.isArray(directOptionSummaries) && directOptionSummaries.length > 0) {
+      return directOptionSummaries.map((option, index) => {
+        const sharedRows = [
+          { name: "Transportation", amount: option?.transportation },
+          { name: "Meals", amount: option?.meals },
+          { name: "Entrance Fees", amount: option?.entranceFees },
+          { name: "Guide", amount: option?.guide },
+          { name: "Extra Services", amount: option?.extraServices },
+        ].filter(row => toNumber(row.amount) > 0);
+
+        const otherRows = asArray(option?.otherPerPersonRows).map(row => ({
+          name: row?.name || "Other Service",
+          amount: toNumber(row?.pricePerPerson ?? row?.amount),
+        }));
+
+        const detailRows = [
+          { name: "Accommodation", amount: toNumber(option?.hotelsPerPerson) },
+          ...(otherRows.length ? otherRows : sharedRows),
+        ]
+          .filter(row => toNumber(row.amount) > 0)
+          .map(row => ({ ...row, afterProfit: toNumber(row.amount) }));
+
+        const hotelRows = asArray(option?.rows).map(row => ({
+          cityName: row?.cityName || row?.CITY_NAME || "-",
+          hotelName: row?.hotelName || row?.HOTEL_NAME || "-",
+          seasonName: row?.seasonName || row?.SEASON_NAME || "-",
+          nights: toNumber(row?.costNights ?? row?.nights),
+          rateAfterProfit: toNumber(row?.perPerson ?? row?.rate),
+          afterProfit: toNumber(row?.costStayPerPerson ?? row?.stayPerPerson ?? row?.total),
+        }));
+
+        const hotelsPerPerson = toNumber(option?.hotelsPerPerson);
+        const sharedPerPerson = toNumber(option?.sharedPerPersonTotal ?? option?.sharedPerPerson);
+        const finalPerPerson = toNumber(option?.finalTotal ?? option?.finalPerPerson);
+
+        return {
+          key: option?.optionKey || `${option?.optionName || "option"}-${index}`,
+          optionName: option?.optionName || `Option ${index + 1}`,
+          boardBasis: String(finalPricing?.BOARD_BASIS || option?.boardBasis || "BB").toUpperCase(),
+          hotelsPerPerson,
+          sharedPerPerson,
+          hotelsDisplayPrice: hotelsPerPerson,
+          sharedDisplayPrice: sharedPerPerson,
+          basePerPerson: toNumber(option?.basePerPerson),
+          profitPerPerson: toNumber(option?.profitPerPerson),
+          finalPerPerson,
+          detailRows,
+          hotelRows,
+        };
+      });
+    }
+
+    const snapshot = finalPricing?.SNAPSHOT || {};
+    const accommodation = snapshot?.ACCOMMODATION || {};
+    const options = asArray(accommodation?.OPTIONS);
+    const boardBasis = String(finalPricing?.BOARD_BASIS || snapshot?.BASE_BREAKDOWN?.BOARD_BASIS || "BB").toUpperCase();
+    const pax = toNumber(snapshot?.QUOTATION?.NUMBER_OF_PAX || selected?.NUMBER_OF_PAX || 1) || 1;
+    const breakdown = snapshot?.BASE_BREAKDOWN || {};
+    const sharedCostTotal =
+      toNumber(breakdown.TRANSPORTATION) +
+      toNumber(breakdown.MEALS) +
+      toNumber(breakdown.ENTRANCE_FEES) +
+      toNumber(breakdown.GUIDE) +
+      toNumber(breakdown.EXTRA_SERVICES);
+    const sharedPerPerson = sharedCostTotal / pax;
+    const profitType = String(finalPricing?.PROFIT_TYPE || "PERCENT").toUpperCase();
+    const profitValue = toNumber(finalPricing?.PROFIT_VALUE);
+    const addProportionalProfit = (amount, baseTotal) => {
+      if (profitType === "PERCENT") return amount + amount * (profitValue / 100);
+      if (!baseTotal) return amount;
+      return amount + (amount / baseTotal) * profitValue;
+    };
+
+    const fallbackHotelPerPerson =
+      options.length <= 1 ? toNumber(breakdown.HOTELS) / pax : 0;
+
+    return options.map((option, index) => {
+      const hotelRows = getOptionHotelRows(option, boardBasis, pax);
+      const hotelsPerPerson =
+        hotelRows.reduce((sum, row) => sum + row.total, 0) || fallbackHotelPerPerson;
+      const basePerPerson = hotelsPerPerson + sharedPerPerson;
+      const profitPerPerson =
+        profitType === "PERCENT" ? basePerPerson * (profitValue / 100) : profitValue;
+      const finalPerPerson = basePerPerson + profitPerPerson;
+
+      const detailRows = [
+        { name: "Accommodation", amount: hotelsPerPerson },
+        { name: "Transportation", amount: toNumber(breakdown.TRANSPORTATION) / pax },
+        { name: "Meals", amount: toNumber(breakdown.MEALS) / pax },
+        { name: "Entrance Fees", amount: toNumber(breakdown.ENTRANCE_FEES) / pax },
+        { name: "Guide", amount: toNumber(breakdown.GUIDE) / pax },
+        { name: "Extra Services", amount: toNumber(breakdown.EXTRA_SERVICES) / pax },
+      ]
+        .filter(row => row.amount > 0)
+        .map(row => ({ ...row, afterProfit: addProportionalProfit(row.amount, basePerPerson) }));
+
+      const hotelRowsAfterProfit = hotelRows.map(row => {
+        const afterProfit = addProportionalProfit(row.total, basePerPerson);
+        return {
+          ...row,
+          rateAfterProfit: row.nights > 0 ? afterProfit / row.nights : afterProfit,
+          afterProfit,
+        };
+      });
+
+      return {
+        key: `${option?.OPTION_NAME || "option"}-${index}`,
+        optionName: option?.OPTION_NAME || `Option ${index + 1}`,
+        boardBasis,
+        hotelsPerPerson,
+        sharedPerPerson,
+        hotelsDisplayPrice: addProportionalProfit(hotelsPerPerson, basePerPerson),
+        sharedDisplayPrice: addProportionalProfit(sharedPerPerson, basePerPerson),
+        basePerPerson,
+        profitPerPerson,
+        finalPerPerson,
+        detailRows,
+        hotelRows: hotelRowsAfterProfit,
+      };
+    });
+  }, [finalPricing, isApprovedFinalPricing, selected?.NUMBER_OF_PAX]);
 
   document.title = "Quotation Details | Skote";
 
@@ -692,11 +936,22 @@ const QuotationsDetails = () => {
                           <Col sm="6" lg="3">
                             <SummaryMetric
                               icon="bx bx-time-five"
-                              label="Duration"
+                              label="Validity"
                               value={
-                                durationDays === "-"
+                                validityDays === "-"
                                   ? "-"
-                                  : `${durationDays} day${Number(durationDays) === 1 ? "" : "s"}`
+                                  : `${validityDays} day${Number(validityDays) === 1 ? "" : "s"}`
+                              }
+                            />
+                          </Col>
+                          <Col sm="6" lg="3">
+                            <SummaryMetric
+                              icon="bx bx-calendar"
+                              label="Trip"
+                              value={
+                                tripDays === "-"
+                                  ? "-"
+                                  : `${tripDays} day${Number(tripDays) === 1 ? "" : "s"} / ${tripNights} night${Number(tripNights) === 1 ? "" : "s"}`
                               }
                             />
                           </Col>
@@ -791,32 +1046,163 @@ const QuotationsDetails = () => {
             </Col>
           </Row>
 
-          <Row className="mb-4">
-            <Col xl="12">
-              <Card className="border-0 shadow-sm">
-                <CardBody className="p-4">
-                  <SummaryHeader
-                    icon="bx bx-badge-dollar"
-                    title="Approved Final Price"
-                    subtitle="Visible for all roles after approval."
-                  />
-                  {finalPricingLoading ? (
-                    <LoadingState text="Loading approved final price..." />
-                  ) : approvedFinalTotal !== null && approvedFinalTotal !== undefined ? (
-                    <div className="text-center py-4">
-                      <div className="text-muted mb-2">Final Total After Profit</div>
-                      <h1 className="mb-1">{Number(approvedFinalTotal).toFixed(2)}</h1>
-                      <div className="text-success fw-medium">
-                        Approved quotation final amount
+          {canViewApprovedFinalPrice ? (
+            <Row className="mb-4">
+              <Col xl="12">
+                <Card className="border-0 shadow-sm">
+                  <CardBody className="p-4">
+                    <SummaryHeader
+                      icon="bx bx-badge-dollar"
+                      title="Final Price"
+                      subtitle="Approved option prices."
+                    />
+                    {finalPricingLoading ? (
+                      <LoadingState text="Loading approved final price..." />
+                    ) : !isApprovedFinalPricing ? (
+                      <EmptyState text="The final approved price is not available yet." />
+                    ) : approvedFinalOptions.length === 0 ? (
+                      <EmptyState text="No approved option prices were found." />
+                    ) : (
+                      <div className="border rounded overflow-hidden">
+                        {approvedFinalOptions.map((option, index) => {
+                          const isOpen = expandedFinalOptionKey === option.key;
+
+                          return (
+                            <div
+                              key={option.key}
+                              className={index === 0 ? "" : "border-top"}
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-link w-100 text-start text-decoration-none p-3 bg-white"
+                                onClick={() =>
+                                  setExpandedFinalOptionKey(isOpen ? "" : option.key)
+                                }
+                              >
+                                <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+                                  <div className="d-flex align-items-center gap-2">
+                                    <i
+                                      className={`bx ${
+                                        isOpen ? "bx-chevron-down" : "bx-chevron-right"
+                                      } font-size-18 text-primary`}
+                                    />
+                                    <div>
+                                      <div className="fw-semibold text-dark">
+                                        {option.optionName}
+                                      </div>
+                                      <div className="text-muted small">
+                                        Board basis {option.boardBasis} | price
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="text-end">
+                                    <div className="text-muted small">Final Total</div>
+                                    <div className="h4 mb-0 text-primary">
+                                      {formatMoney(option.finalPerPerson)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+
+                              {isOpen ? (
+                                <div className="bg-light border-top p-3">
+                                  <Row className="g-3 mb-3">
+                                    <Col md="4">
+                                      <SummaryField
+                                        icon="bx bx-hotel"
+                                        label="Hotels / Person"
+                                        value={formatMoney(option.hotelsDisplayPrice)}
+                                      />
+                                    </Col>
+                                    <Col md="4">
+                                      <SummaryField
+                                        icon="bx bx-plus-circle"
+                                        label="Other Services / Person"
+                                        value={formatMoney(option.sharedDisplayPrice)}
+                                      />
+                                    </Col>
+                                    <Col md="4">
+                                      <SummaryField
+                                        icon="bx bx-purchase-tag"
+                                        label="Final Price / Person"
+                                        value={formatMoney(option.finalPerPerson)}
+                                      />
+                                    </Col>
+                                  </Row>
+
+                                  <div className="table-responsive bg-white border rounded mb-3">
+                                    <table className="table table-sm align-middle mb-0">
+                                      <thead className="table-light">
+                                        <tr>
+                                          <th>Price Source</th>
+                                          <th className="text-end">Price</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {option.detailRows.map(row => (
+                                          <tr key={row.name}>
+                                            <td>{row.name}</td>
+                                            <td className="text-end fw-semibold">
+                                              {formatMoney(row.afterProfit)}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                        <tr className="table-primary">
+                                          <td className="fw-bold">Final Price / Person</td>
+                                          <td className="text-end fw-bold">
+                                            {formatMoney(option.finalPerPerson)}
+                                          </td>
+                                        </tr>
+                                      </tbody>
+                                    </table>
+                                  </div>
+
+                                  {option.hotelRows.length ? (
+                                    <div className="table-responsive bg-white border rounded">
+                                      <table className="table table-sm align-middle mb-0">
+                                        <thead className="table-light">
+                                          <tr>
+                                            <th>City</th>
+                                            <th>Hotel</th>
+                                            <th>Season</th>
+                                            <th className="text-end">Nights</th>
+                                            <th className="text-end">Used Rate</th>
+                                            <th className="text-end">Hotel Price</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {option.hotelRows.map((row, rowIndex) => (
+                                            <tr
+                                              key={`${row.hotelName}-${row.seasonName}-${rowIndex}`}
+                                            >
+                                              <td>{row.cityName}</td>
+                                              <td className="fw-semibold">{row.hotelName}</td>
+                                              <td>{row.seasonName}</td>
+                                              <td className="text-end">{row.nights}</td>
+                                              <td className="text-end">
+                                                {formatMoney(row.rateAfterProfit)}
+                                              </td>
+                                              <td className="text-end fw-semibold">
+                                                {formatMoney(row.afterProfit)}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  ) : (
-                    <EmptyState text="The final approved price is not available yet." />
-                  )}
-                </CardBody>
-              </Card>
-            </Col>
-          </Row>
+                    )}
+                  </CardBody>
+                </Card>
+              </Col>
+            </Row>
+          ) : null}
 
           <Row className="g-3 mb-4">
             <Col xl="12">

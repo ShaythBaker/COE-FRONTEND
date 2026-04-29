@@ -79,6 +79,17 @@ const routeKey = (cityId, nationalityId) => `${cityId || ""}__${nationalityId ||
 const bestRateKey = (typeId, pax, transportationCompanyId) =>
   `${typeId || ""}__${pax || 0}__${transportationCompanyId || ""}`;
 
+const getQuotationPax = quotation => {
+  const value =
+    quotation?.NUMBER_OF_PAX ??
+    quotation?.PAX ??
+    quotation?.NO_OF_PAX ??
+    quotation?.TOTAL_PAX ??
+    quotation?.pax;
+  const pax = Number(value);
+  return Number.isFinite(pax) && pax > 0 ? pax : 0;
+};
+
 const getTransportationTypeLabel = item =>
   item?.TRANSPORTATION_TYPE_NAME ||
   item?.NAME ||
@@ -138,8 +149,56 @@ const getSizeTypeLabel = item =>
   item?.VALUE ||
   "-";
 
+const isActiveRecord = item => item?.ACTIVE_STATUS !== false;
+
+const getCapacityMin = size => {
+  const value =
+    size?.MINIMUM_CAPACITY ??
+    size?.MIN_CAPACITY ??
+    size?.MINIMUM ??
+    size?.CAPACITY ??
+    0;
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+};
+
+const getCapacityMax = size => {
+  const value =
+    size?.MAXIMUM_CAPACITY ??
+    size?.MAX_CAPACITY ??
+    size?.MAXIMUM ??
+    size?.CAPACITY ??
+    0;
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+};
+
+const isTransportationSizeValidForPax = (size, pax) => {
+  const currentPax = Number(pax);
+  if (!size || !Number.isFinite(currentPax) || currentPax <= 0) return false;
+
+  const min = getCapacityMin(size);
+  const max = getCapacityMax(size);
+
+  if (max <= 0) return false;
+
+  return currentPax >= min && currentPax <= max;
+};
+
+const clearTransportationRateFields = () => ({
+  TRANSPORTATION_BY: "",
+  TRANSPORTATION_COMPANY_NAME: "",
+  TRANSPORTATION_RATE_ID: "",
+  TRANSPORTATION_RATE: null,
+  TRANSPORTATION_SIZE_LABEL: "",
+  TRANSPORTATION_MIN_CAPACITY: null,
+  TRANSPORTATION_MAX_CAPACITY: null,
+});
+
 const getEntranceFeeAmount = (place, nationalityId) => {
-  if (!place || !nationalityId) return 0;
+  if (!place || !nationalityId) return null;
 
   const fee = Array.isArray(place.ENTRANCE_FEES)
     ? place.ENTRANCE_FEES.find(
@@ -148,6 +207,8 @@ const getEntranceFeeAmount = (place, nationalityId) => {
           getId(item?.NATIONALITY_ID) === nationalityId
       )
     : null;
+
+  if (!fee) return null;
 
   return Number(fee?.ENTRANCE_FEE_AMOUNT ?? 0) || 0;
 };
@@ -161,6 +222,12 @@ const buildDayState = ({
 }) => {
   const cityById = new Map(cities.map(city => [getId(city), city]));
   const existingSelectedPlaces = Array.isArray(existing?.PLACES) ? existing.PLACES : [];
+  const existingTransportationRows = Array.isArray(existing?.TRANSPORTATION_RESOLVED)
+    ? existing.TRANSPORTATION_RESOLVED
+    : Array.isArray(existing?.transportation?.TRANSPORTATION_RESOLVED)
+      ? existing.transportation.TRANSPORTATION_RESOLVED
+      : [];
+  const existingTransportation = existingTransportationRows[0] || {};
 
   const existingCityNames = Array.from(
     new Set(
@@ -187,41 +254,50 @@ const buildDayState = ({
 
     TRANSPORTATION_TYPE: existing?.TRANSPORTATION?.ids?.TRANSPORTATION_TYPE ||
       existing?.TRANSPORTATION_TYPE ||
+      existingTransportation?.TRANSPORTATION_TYPE_ID ||
       "",
     TRANSPORTATION_COMPANY_ID:
       existing?.TRANSPORTATION?.ids?.TRANSPORTATION_COMPANY_ID ||
       existing?.TRANSPORTATION_COMPANY_ID ||
+      existingTransportation?.TRANSPORTATION_COMPANY_ID ||
       "",
     TRANSPORTATION_COMPANY_NAME:
       existing?.TRANSPORTATION?.texts?.TRANSPORTATION_COMPANY_NAME ||
       existing?.TRANSPORTATION_COMPANY_NAME ||
+      existingTransportation?.TRANSPORTATION_COMPANY_NAME ||
       "",
     TRANSPORTATION_BY:
       existing?.TRANSPORTATION?.ids?.TRANSPORTATION_BY ||
       existing?.TRANSPORTATION_BY ||
+      existingTransportation?.TRANSPORTATION_SIZE_ID ||
       "",
     TRANSPORTATION_RATE_ID:
       existing?.TRANSPORTATION?.ids?.TRANSPORTATION_RATE_ID ||
       existing?.TRANSPORTATION_RATE_ID ||
+      existingTransportation?.RATE_ID ||
       getId(existing?.TRANSPORTATION_RATE_ID || existing?.TRANSPORTATION_RATE),
     TRANSPORTATION_RATE:
       existing?.TRANSPORTATION?.RATE ??
       existing?.TRANSPORTATION_RATE_AMOUNT ??
       existing?.TRANSPORTATION_RATE ??
+      existingTransportation?.RATE ??
       existing?.RATE ??
       null,
     TRANSPORTATION_SIZE_LABEL:
       existing?.TRANSPORTATION?.texts?.TRANSPORTATION_SIZE_LABEL ||
       existing?.TRANSPORTATION_BY_VALUE ||
       existing?.TRANSPORTATION_SIZE_LABEL ||
+      existingTransportation?.TRANSPORTATION_BY ||
       "",
     TRANSPORTATION_MIN_CAPACITY:
       existing?.TRANSPORTATION?.capacities?.MINIMUM_CAPACITY ??
       existing?.MINIMUM_CAPACITY ??
+      existingTransportation?.MINIMUM_CAPACITY ??
       null,
     TRANSPORTATION_MAX_CAPACITY:
       existing?.TRANSPORTATION?.capacities?.MAXIMUM_CAPACITY ??
       existing?.MAXIMUM_CAPACITY ??
+      existingTransportation?.MAXIMUM_CAPACITY ??
       null,
 
     hasGuide: !!(
@@ -332,13 +408,19 @@ const PlanQuotation = () => {
 
   const transportationTypes = lookups?.transportationTypes || [];
   const transportationCompanies = lookups?.transportationCompanies || [];
+  const transportationSizes = lookups?.transportationSizes || [];
   const guideTypes = lookups?.guideTypes || [];
   const cities = lookups?.cities || [];
 
   const quotationStartDate = toDateOnly(quotation?.QUOTATION_START_DATE);
-  const totalDays = Number(quotation?.DURATION_IN_DAYS) > 0 ? Number(quotation?.DURATION_IN_DAYS) : 0;
+  const totalDays =
+    Number(quotation?.NUMBER_OF_DAYS) > 0
+      ? Number(quotation.NUMBER_OF_DAYS)
+      : Number(quotation?.DURATION_IN_DAYS) > 0
+      ? Number(quotation.DURATION_IN_DAYS)
+      : 0;
   const quotationNationalityId = getId(quotation?.NATIONALITY);
-  const quotationPax = Number(quotation?.NUMBER_OF_PAX || 0);
+  const quotationPax = getQuotationPax(quotation);
 
   const cityNameMap = useMemo(() => {
     const map = new Map();
@@ -377,7 +459,30 @@ const PlanQuotation = () => {
       });
     });
 
-    setDayForms(generatedDays);
+    setDayForms(prev => {
+      const currentByOrder = new Map(
+        prev.map(day => [Number(day?.DAY_ORDER || 0), day])
+      );
+
+      return generatedDays.map(generatedDay => {
+        const current = currentByOrder.get(Number(generatedDay.DAY_ORDER || 0));
+        const hasUnsavedChanges = Object.keys(current?.touched || {}).length > 0;
+
+        if (!current || !hasUnsavedChanges) {
+          return generatedDay;
+        }
+
+        return {
+          ...generatedDay,
+          ...current,
+          _id: current._id || generatedDay._id,
+          ORIGINAL_QUOTATION_ID:
+            current.ORIGINAL_QUOTATION_ID || generatedDay.ORIGINAL_QUOTATION_ID,
+          DAY_ORDER: generatedDay.DAY_ORDER,
+          DAY_DATE: generatedDay.DAY_DATE,
+        };
+      });
+    });
     setOpenDays(prev => {
       if (Object.keys(prev).length) return prev;
 
@@ -425,8 +530,6 @@ const PlanQuotation = () => {
   ]);
 
   useEffect(() => {
-    if (!quotationPax) return;
-
     setDayForms(prev =>
       prev.map(day => {
         if (!day.TRANSPORTATION_TYPE || !day.TRANSPORTATION_COMPANY_ID) return day;
@@ -440,39 +543,97 @@ const PlanQuotation = () => {
         const bestRate = transportationBestRateByKey?.[key];
         const bestRateError = transportationBestRateErrorByKey?.[key];
 
-        if (bestRate?.size?._id) {
+        const apiBestRate =
+          bestRate?.size && isTransportationSizeValidForPax(bestRate.size, quotationPax)
+            ? bestRate
+            : null;
+
+        const localBestRate = findLocalBestTransportationRate(
+          day.TRANSPORTATION_TYPE,
+          day.TRANSPORTATION_COMPANY_ID
+        );
+
+        const rateToApply = apiBestRate || localBestRate;
+
+        if (rateToApply?.size && getId(rateToApply.size)) {
           return {
             ...day,
-            TRANSPORTATION_BY: getId(bestRate?.size),
-            TRANSPORTATION_COMPANY_ID: getId(bestRate?.company),
-            TRANSPORTATION_COMPANY_NAME: getCompanyLabel(bestRate?.company),
-            TRANSPORTATION_RATE_ID: getId(bestRate?.rate),
-            TRANSPORTATION_RATE: bestRate?.rate?.RATE ?? null,
-            TRANSPORTATION_SIZE_LABEL: getSizeTypeLabel(bestRate?.size),
-            TRANSPORTATION_MIN_CAPACITY:
-              bestRate?.size?.MINIMUM_CAPACITY ?? bestRate?.size?.CAPACITY ?? null,
-            TRANSPORTATION_MAX_CAPACITY:
-              bestRate?.size?.MAXIMUM_CAPACITY ?? bestRate?.size?.CAPACITY ?? null,
+            ...getTransportationRateFields(
+              rateToApply,
+              day.TRANSPORTATION_COMPANY_ID
+            ),
           };
         }
 
-        if (bestRateError) {
+        if (bestRateError || day.TRANSPORTATION_BY) {
           return {
             ...day,
-            TRANSPORTATION_BY: "",
-            TRANSPORTATION_COMPANY_NAME: "",
-            TRANSPORTATION_RATE_ID: "",
-            TRANSPORTATION_RATE: null,
-            TRANSPORTATION_SIZE_LABEL: "",
-            TRANSPORTATION_MIN_CAPACITY: null,
-            TRANSPORTATION_MAX_CAPACITY: null,
+            ...clearTransportationRateFields(),
           };
         }
 
         return day;
       })
     );
-  }, [quotationPax, transportationBestRateByKey, transportationBestRateErrorByKey]);
+  }, [
+    quotationPax,
+    transportationBestRateByKey,
+    transportationBestRateErrorByKey,
+    transportationCompanies,
+    transportationSizes,
+  ]);
+
+  const findLocalBestTransportationRate = (typeId, companyId) => {
+    if (!typeId || !companyId || !quotationPax) return null;
+
+    const company = transportationCompanies.find(item => getId(item) === companyId);
+    const rates = Array.isArray(company?.TRANSPORTATION_RATES)
+      ? company.TRANSPORTATION_RATES
+      : [];
+
+    const candidates = rates
+      .map(rate => {
+        if (!isActiveRecord(rate)) return null;
+        if (getId(rate?.TRANSPORTATION_TYPE_ID) !== typeId) return null;
+
+        const size =
+          transportationSizes.find(
+            item => getId(item) === getId(rate?.TRANSPORTATION_SIZE_ID)
+          ) || null;
+
+        if (!size || !isActiveRecord(size)) return null;
+        if (!isTransportationSizeValidForPax(size, quotationPax)) return null;
+
+        return { company, rate, size };
+      })
+      .filter(Boolean);
+
+    if (!candidates.length) return null;
+
+    return candidates.sort((a, b) => {
+      const aMax = getCapacityMax(a.size);
+      const bMax = getCapacityMax(b.size);
+      if (aMax !== bMax) return aMax - bMax;
+
+      return Number(a?.rate?.RATE || 0) - Number(b?.rate?.RATE || 0);
+    })[0];
+  };
+
+  const getTransportationRateFields = (rateToApply, fallbackCompanyId = "") => {
+    if (!rateToApply?.size?._id) return {};
+
+    return {
+      TRANSPORTATION_BY: getId(rateToApply.size),
+      TRANSPORTATION_COMPANY_ID:
+        getId(rateToApply.company) || fallbackCompanyId,
+      TRANSPORTATION_COMPANY_NAME: getCompanyLabel(rateToApply.company),
+      TRANSPORTATION_RATE_ID: getId(rateToApply.rate),
+      TRANSPORTATION_RATE: rateToApply?.rate?.RATE ?? null,
+      TRANSPORTATION_SIZE_LABEL: getSizeTypeLabel(rateToApply.size),
+      TRANSPORTATION_MIN_CAPACITY: getCapacityMin(rateToApply.size),
+      TRANSPORTATION_MAX_CAPACITY: getCapacityMax(rateToApply.size),
+    };
+  };
 
   const parseRouteCities = routeText => {
     const names = String(routeText || "")
@@ -577,23 +738,21 @@ const PlanQuotation = () => {
 
       if (field === "TRANSPORTATION_TYPE") {
         next.TRANSPORTATION_COMPANY_ID = "";
-        next.TRANSPORTATION_COMPANY_NAME = "";
-        next.TRANSPORTATION_BY = "";
-        next.TRANSPORTATION_RATE_ID = "";
-        next.TRANSPORTATION_RATE = null;
-        next.TRANSPORTATION_SIZE_LABEL = "";
-        next.TRANSPORTATION_MIN_CAPACITY = null;
-        next.TRANSPORTATION_MAX_CAPACITY = null;
+        Object.assign(next, clearTransportationRateFields());
       }
 
       if (field === "TRANSPORTATION_COMPANY_ID") {
-        next.TRANSPORTATION_COMPANY_NAME = "";
-        next.TRANSPORTATION_BY = "";
-        next.TRANSPORTATION_RATE_ID = "";
-        next.TRANSPORTATION_RATE = null;
-        next.TRANSPORTATION_SIZE_LABEL = "";
-        next.TRANSPORTATION_MIN_CAPACITY = null;
-        next.TRANSPORTATION_MAX_CAPACITY = null;
+        Object.assign(next, clearTransportationRateFields());
+
+        const localBestRate = findLocalBestTransportationRate(
+          next.TRANSPORTATION_TYPE,
+          value
+        );
+
+        Object.assign(
+          next,
+          getTransportationRateFields(localBestRate, value)
+        );
       }
 
       return next;
@@ -906,6 +1065,22 @@ const PlanQuotation = () => {
     const snapshot = buildDaySnapshot(day);
 
     return {
+      ORIGINAL_QUOTATION_ID: snapshot.basic.ORIGINAL_QUOTATION_ID,
+      DAY_ORDER: snapshot.basic.DAY_ORDER,
+      DAY_DATE: snapshot.basic.DAY_DATE,
+      ROUTE_TEXT: snapshot.basic.ROUTE_TEXT,
+      TRANSPORTATION_TYPE: day.TRANSPORTATION_TYPE || null,
+      TRANSPORTATION_COMPANY_ID: day.TRANSPORTATION_COMPANY_ID || null,
+      TRANSPORTATION_BY: day.TRANSPORTATION_BY || null,
+      TRANSPORTATION_RATE_ID: day.TRANSPORTATION_RATE_ID || null,
+      TRANSPORTATION_RATE: day.TRANSPORTATION_RATE ?? null,
+      TRANSPORTATION_RESOLVED: snapshot.transportation.TRANSPORTATION_RESOLVED,
+      GUIDE_TYPE: day.hasGuide ? day.GUIDE_TYPE || null : null,
+      MEALS: snapshot.meals.enabled ? snapshot.meals.rows : [],
+      PLACES: snapshot.entranceFees.selectedPlaces,
+      NTRANCE_FEES: snapshot.entranceFees.selectedPlaces,
+      TOTAL_ENTRANCE_FEES: snapshot.entranceFees.total,
+      OVERNIGHT_CITY: snapshot.overnight.OVERNIGHT_CITY,
       basic: snapshot.basic,
       route: snapshot.route,
       transportation: snapshot.transportation,
@@ -997,6 +1172,7 @@ const PlanQuotation = () => {
       setDayValue(day.DAY_ORDER, current => ({
         ...current,
         _id: savedDay?._id || current._id,
+        touched: {},
       }));
     };
 
@@ -1048,7 +1224,7 @@ const PlanQuotation = () => {
                   </div>
 
                   <Row className="mt-4 gy-3">
-                    <Col md="6">
+                    <Col md="4">
                       <div>
                         <div className="text-muted small">Quotation Type</div>
                         <div className="fw-semibold">
@@ -1056,11 +1232,19 @@ const PlanQuotation = () => {
                         </div>
                       </div>
                     </Col>
-                    <Col md="6">
+                    <Col md="4">
                       <div>
                         <div className="text-muted small">Nationality</div>
                         <div className="fw-semibold">
                           {quotation?.NATIONALITY_VALUE || "-"}
+                        </div>
+                      </div>
+                    </Col>
+                    <Col md="4">
+                      <div>
+                        <div className="text-muted small">Pax</div>
+                        <div className="fw-semibold">
+                          {quotationPax || "-"}
                         </div>
                       </div>
                     </Col>
@@ -1238,6 +1422,7 @@ const PlanQuotation = () => {
                                             <thead className="table-light">
                                               <tr>
                                                 <th>Place Name</th>
+                                                <th style={{ width: 220 }}>City</th>
                                                 {canViewPrices ? <th style={{ width: 180 }}>Price</th> : null}
                                                 <th style={{ width: 180 }}>Insert</th>
                                               </tr>
@@ -1250,11 +1435,32 @@ const PlanQuotation = () => {
                                                 return (
                                                   <tr key={placeId}>
                                                     <td className="fw-medium">{place?.PLACE_NAME || "-"}</td>
+                                                    <td>
+                                                      {getCityLabel(
+                                                        cities.find(
+                                                          city => getId(city) === getId(place?.PLACE_CITY)
+                                                        ) || {}
+                                                      )}
+                                                    </td>
                                                     {canViewPrices ? (
                                                       <td>
-                                                        <Badge color="primary" pill>
-                                                          {formatMoney(getEntranceFeeAmount(place, quotationNationalityId))}
-                                                        </Badge>
+                                                        {getEntranceFeeAmount(
+                                                          place,
+                                                          quotationNationalityId
+                                                        ) === null ? (
+                                                          <span className="text-muted small">
+                                                            No price for nationality
+                                                          </span>
+                                                        ) : (
+                                                          <Badge color="primary" pill>
+                                                            {formatMoney(
+                                                              getEntranceFeeAmount(
+                                                                place,
+                                                                quotationNationalityId
+                                                              )
+                                                            )}
+                                                          </Badge>
+                                                        )}
                                                       </td>
                                                     ) : null}
                                                     <td>
@@ -1409,18 +1615,13 @@ const PlanQuotation = () => {
                                         <div className="bg-light rounded p-3 text-muted small">
                                           Select transportation company first.
                                         </div>
-                                      ) : currentBestRateLoading ? (
+                                      ) : currentBestRateLoading && !day.TRANSPORTATION_BY ? (
                                         <div className="bg-light rounded p-3 d-flex align-items-center">
                                           <Spinner size="sm" className="me-2" />
                                           <span className="text-muted small">
                                             Loading best transportation rate...
                                           </span>
                                         </div>
-                                      ) : currentBestRateError ? (
-                                        <Alert color="danger" className="mb-0">
-                                          <div className="fw-semibold mb-1">Transportation rate not found</div>
-                                          <div>{currentBestRateError}</div>
-                                        </Alert>
                                       ) : day.TRANSPORTATION_BY ? (
                                         <div className="border rounded p-3">
                                           <Row className="g-3">
@@ -1461,6 +1662,11 @@ const PlanQuotation = () => {
                                             ) : null}
                                           </Row>
                                         </div>
+                                      ) : currentBestRateError ? (
+                                        <Alert color="danger" className="mb-0">
+                                          <div className="fw-semibold mb-1">Transportation rate not found</div>
+                                          <div>{currentBestRateError}</div>
+                                        </Alert>
                                       ) : (
                                         <div className="bg-light rounded p-3 text-muted small">
                                           No transportation size found for the selected company, type and pax.

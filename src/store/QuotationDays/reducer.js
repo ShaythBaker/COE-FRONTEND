@@ -13,6 +13,7 @@ const initialState = {
   lookups: {
     transportationTypes: [],
     transportationCompanies: [],
+    transportationSizes: [],
     guideTypes: [],
     restaurants: [],
     cities: [],
@@ -37,6 +38,32 @@ const initialState = {
 const routeKey = (cityId, nationalityId) => `${cityId || ""}__${nationalityId || ""}`;
 const bestRateKey = (typeId, pax, transportationCompanyId) =>
   `${typeId || ""}__${pax || 0}__${transportationCompanyId || ""}`;
+
+const upsertDay = (items, nextDay) => {
+  if (!nextDay) return Array.isArray(items) ? items : [];
+
+  const currentItems = Array.isArray(items) ? items : [];
+  const nextId = nextDay?._id || "";
+  const nextOrder = Number(nextDay?.DAY_ORDER || nextDay?.basic?.DAY_ORDER || 0);
+  const existingIndex = currentItems.findIndex(item => {
+    const itemId = item?._id || "";
+    const itemOrder = Number(item?.DAY_ORDER || item?.basic?.DAY_ORDER || 0);
+
+    return (nextId && itemId === nextId) || (!!nextOrder && itemOrder === nextOrder);
+  });
+
+  if (existingIndex === -1) {
+    return [...currentItems, nextDay].sort(
+      (a, b) =>
+        Number(a?.DAY_ORDER || a?.basic?.DAY_ORDER || 0) -
+        Number(b?.DAY_ORDER || b?.basic?.DAY_ORDER || 0)
+    );
+  }
+
+  return currentItems.map((item, index) =>
+    index === existingIndex ? nextDay : item
+  );
+};
 
 const QuotationDays = (state = initialState, action) => {
   switch (action.type) {
@@ -69,6 +96,7 @@ const QuotationDays = (state = initialState, action) => {
         ...state,
         loading: false,
         error: "",
+        items: upsertDay(state.items, action.payload),
       };
 
     case T.FETCH_QUOTATION_DAYS_FAIL:

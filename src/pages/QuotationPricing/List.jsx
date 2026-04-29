@@ -37,15 +37,6 @@ const formatDateTime = value => {
   return d.toLocaleString("en-GB");
 };
 
-const formatCurrency = value => {
-  const n = Number(value || 0);
-  if (Number.isNaN(n)) return "-";
-  return n.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
-};
-
 const getStatusColor = status => {
   switch (String(status || "").toUpperCase()) {
     case "SEND_FOR_PRICING":
@@ -163,9 +154,6 @@ const QuotationPricingList = () => {
                           <th>Status</th>
                           <th>Board Basis</th>
                           <th>Pax</th>
-                          <th>Base Total</th>
-                          <th>Profit</th>
-                          <th>Final Total</th>
                           <th>Sent On</th>
                           <th style={{ width: 140 }}>Action</th>
                         </tr>
@@ -173,14 +161,14 @@ const QuotationPricingList = () => {
                       <tbody>
                         {queueLoading ? (
                           <tr>
-                            <td colSpan="10" className="text-center py-4">
+                            <td colSpan="7" className="text-center py-4">
                               <Spinner size="sm" className="me-2" />
                               Loading...
                             </td>
                           </tr>
                         ) : filteredItems.length === 0 ? (
                           <tr>
-                            <td colSpan="10" className="text-center text-muted py-4">
+                            <td colSpan="7" className="text-center text-muted py-4">
                               No quotation pricing records found.
                             </td>
                           </tr>
@@ -198,9 +186,6 @@ const QuotationPricingList = () => {
                               </td>
                               <td>{row?.BOARD_BASIS || "-"}</td>
                               <td>{row?.NUMBER_OF_PAX ?? "-"}</td>
-                              <td>{formatCurrency(row?.BASE_TOTAL)}</td>
-                              <td>{formatCurrency(row?.PROFIT_AMOUNT)}</td>
-                              <td>{formatCurrency(row?.FINAL_TOTAL)}</td>
                               <td>{formatDateTime(row?.SENT_ON)}</td>
                               <td>
                                 <Link

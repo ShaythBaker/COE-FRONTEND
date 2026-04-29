@@ -29,7 +29,6 @@ import { notifyError } from "../../helpers/notify";
 import { get, post } from "../../helpers/api_helper";
 import { fetchListItems } from "../../helpers/list_items_helper";
 import {
-  approveQuotationPricing,
   fetchQuotationPricing,
   rejectQuotationPricing,
   updateQuotationPricingProfit,
@@ -37,6 +36,12 @@ import {
 import { fetchQuotation } from "../../store/Quotations/actions";
 
 const ALLOWED_ROLES = ["ACCOUNTING", "COMPANY_ADMIN"];
+const SUPPLEMENT_PRICE_FIELDS = [
+  { key: "bb", label: "BB" },
+  { key: "hb", label: "HB" },
+  { key: "fb", label: "FB" },
+  { key: "ss", label: "SS" },
+];
 
 const getId = value => {
   if (!value) return "";
@@ -340,6 +345,13 @@ const QuotationPricingDetails = () => {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectTouched, setRejectTouched] = useState(false);
+  const [pricingSearch, setPricingSearch] = useState("");
+  const [pricingOptionFilter, setPricingOptionFilter] = useState("ALL");
+  const [expandedPriceCity, setExpandedPriceCity] = useState("");
+  const [expandedPriceHotel, setExpandedPriceHotel] = useState("");
+  const [expandedPriceSeason, setExpandedPriceSeason] = useState("");
+  const [selectedSupplements, setSelectedSupplements] = useState(["bb"]);
+  const [selectedHotelSeasonKeys, setSelectedHotelSeasonKeys] = useState({});
 
   const hotelSeasonNameById = useMemo(() => {
     const map = new Map();
@@ -1111,6 +1123,7 @@ const QuotationPricingDetails = () => {
 
       return {
         optionKey: option.optionKey,
+        optionIndex: index,
         optionName: option.optionName || `Option ${index + 1}`,
         optionStars: option.optionStars,
         rows: option.rows,
@@ -1165,6 +1178,251 @@ const QuotationPricingDetails = () => {
     hotelSeasonRatesById,
     hotelSeasonNameById,
   ]);
+
+  const accommodationOptionChoices = useMemo(
+    () =>
+      pricingView.accommodationOptionsList.map((option, index) => ({
+        key: option.optionKey || `${option.optionName}-${index}`,
+        label: option.optionName || `Option ${index + 1}`,
+        index,
+      })),
+    [pricingView.accommodationOptionsList]
+  );
+
+  const filteredOptionSummaries = useMemo(() => {
+    const query = normalizeKey(pricingSearch);
+
+    return pricingView.optionSummaries.filter((option, index) => {
+      const optionKey = option.optionKey || `${option.optionName}-${index}`;
+      if (pricingOptionFilter !== "ALL" && optionKey !== pricingOptionFilter) {
+        return false;
+      }
+
+      if (!query) return true;
+
+      const searchable = [
+        option.optionName,
+        option.optionStars,
+        ...option.hotelStayRows.map(row => `${row.cityName} ${row.hotelName}`),
+        ...option.rows.map(row => `${row.cityName} ${row.hotelName} ${row.seasonName}`),
+      ].join(" ");
+
+      return normalizeKey(searchable).includes(query);
+    });
+  }, [pricingSearch, pricingOptionFilter, pricingView.optionSummaries]);
+
+  const accommodationTableRows = useMemo(() => {
+    const query = normalizeKey(pricingSearch);
+
+    return pricingView.accommodationOptionsList.flatMap((option, optionIndex) => {
+      const optionKey = option.optionKey || `${option.optionName}-${optionIndex}`;
+
+      return option.rows
+        .map((row, rowIndex) => ({
+          ...row,
+          optionKey,
+          optionIndex,
+          optionName: option.optionName || `Option ${optionIndex + 1}`,
+          rowIndex,
+        }))
+        .filter(row => {
+          if (pricingOptionFilter !== "ALL" && row.optionKey !== pricingOptionFilter) {
+            return false;
+          }
+
+          if (!query) return true;
+
+          return normalizeKey(
+            [
+              row.optionName,
+              row.cityName,
+              row.hotelName,
+              row.hotelStars,
+              row.seasonName,
+              row.seasonDuration,
+              row.overnightDate,
+            ].join(" ")
+          ).includes(query);
+        });
+    });
+  }, [pricingSearch, pricingOptionFilter, pricingView.accommodationOptionsList]);
+
+  const selectedOptionDetail = useMemo(() => {
+    if (pricingOptionFilter === "ALL") return null;
+
+    return pricingView.optionSummaries.find((option, index) => {
+      const optionKey = option.optionKey || `${option.optionName}-${index}`;
+      return optionKey === pricingOptionFilter;
+    }) || null;
+  }, [pricingOptionFilter, pricingView.optionSummaries]);
+
+  const selectedOptionPriceTree = useMemo(() => {
+    if (!selectedOptionDetail) return [];
+
+    const cityMap = new Map();
+
+    selectedOptionDetail.rows.forEach((row, rowIndex) => {
+      const cityName = row.cityName || "-";
+      const hotelName = row.hotelName || "-";
+      const seasonName = row.seasonName || "-";
+      const cityKey = normalizeKey(cityName) || `city-${rowIndex}`;
+      const hotelKey = `${cityKey}|${normalizeKey(hotelName) || `hotel-${rowIndex}`}`;
+      const seasonKey = [
+        hotelKey,
+        normalizeKey(seasonName),
+        getDateKey(row.seasonStartDate),
+        getDateKey(row.seasonEndDate),
+      ].join("|");
+
+      if (!cityMap.has(cityKey)) {
+        cityMap.set(cityKey, {
+          key: cityKey,
+          name: cityName,
+          total: 0,
+          hotels: new Map(),
+        });
+      }
+
+      const city = cityMap.get(cityKey);
+      city.total += Number(row.stayPerPerson || 0);
+
+      if (!city.hotels.has(hotelKey)) {
+        city.hotels.set(hotelKey, {
+          key: hotelKey,
+          name: hotelName,
+          total: 0,
+          seasons: new Map(),
+        });
+      }
+
+      const hotel = city.hotels.get(hotelKey);
+      hotel.total += Number(row.stayPerPerson || 0);
+
+      if (!hotel.seasons.has(seasonKey)) {
+        hotel.seasons.set(seasonKey, {
+          key: seasonKey,
+          name: seasonName,
+          duration: row.seasonDuration,
+          total: 0,
+          nights: 0,
+          rows: [],
+        });
+      }
+
+      const season = hotel.seasons.get(seasonKey);
+      season.total += Number(row.stayPerPerson || 0);
+      season.nights += Number(row.nights || 0);
+      season.rows.push({
+        ...row,
+        rowIndex,
+      });
+    });
+
+    return Array.from(cityMap.values()).map(city => ({
+      ...city,
+      hotels: Array.from(city.hotels.values()).map(hotel => ({
+        ...hotel,
+        seasons: Array.from(hotel.seasons.values()),
+      })),
+    }));
+  }, [selectedOptionDetail]);
+
+  useEffect(() => {
+    setExpandedPriceCity("");
+    setExpandedPriceHotel("");
+    setExpandedPriceSeason("");
+    setSelectedHotelSeasonKeys({});
+  }, [pricingOptionFilter]);
+
+  const selectedSupplementTotal = useMemo(() => {
+    if (!selectedOptionPriceTree.length || selectedSupplements.length === 0) {
+      return {
+        total: 0,
+        rows: [],
+      };
+    }
+
+    const rows = [];
+
+    selectedOptionPriceTree.forEach(city => {
+      city.hotels.forEach(hotel => {
+        const selectedSeasonKey =
+          selectedHotelSeasonKeys[hotel.key] || hotel.seasons[0]?.key || "";
+        const selectedSeason = hotel.seasons.find(
+          season => season.key === selectedSeasonKey
+        );
+
+        if (!selectedSeason) return;
+
+        const price = selectedSeason.rows.reduce((sum, row) => {
+          const perNight = selectedSupplements.reduce(
+            (fieldSum, field) => fieldSum + Number(row[field] || 0),
+            0
+          );
+
+          return sum + perNight * Number(row.nights || 0);
+        }, 0);
+
+        rows.push({
+          cityName: city.name,
+          hotelName: hotel.name,
+          hotelKey: hotel.key,
+          seasonKey: selectedSeason.key,
+          seasonName: selectedSeason.name,
+          duration: selectedSeason.duration,
+          nights: selectedSeason.nights,
+          price,
+          rows: selectedSeason.rows,
+        });
+      });
+    });
+
+    return {
+      total: rows.reduce((sum, row) => sum + row.price, 0),
+      rows,
+    };
+  }, [selectedHotelSeasonKeys, selectedOptionPriceTree, selectedSupplements]);
+
+  const toggleSupplement = key => {
+    if (key === "bb") return;
+
+    setSelectedSupplements(prev => {
+      const withoutBoardAdds = prev.filter(item => item !== "hb" && item !== "fb");
+
+      if (key === "hb" || key === "fb") {
+        return prev.includes(key) ? withoutBoardAdds : [...withoutBoardAdds, key];
+      }
+
+      if (prev.includes(key)) {
+        return prev.filter(item => item !== key);
+      }
+
+      return [...prev, key];
+    });
+  };
+
+  const selectedCalculatedTotals = useMemo(() => {
+    if (!selectedOptionDetail) {
+      return {
+        basePerPerson: 0,
+        profitPerPerson: 0,
+        finalTotal: 0,
+      };
+    }
+
+    const basePerPerson =
+      selectedSupplementTotal.total + selectedOptionDetail.sharedPerPersonTotal;
+    const profitPerPerson =
+      selectedOptionDetail.profitType === "PERCENT"
+        ? basePerPerson * (Number(selectedOptionDetail.profitValue || 0) / 100)
+        : Number(selectedOptionDetail.profitValue || 0);
+
+    return {
+      basePerPerson,
+      profitPerPerson,
+      finalTotal: basePerPerson + profitPerPerson,
+    };
+  }, [selectedOptionDetail, selectedSupplementTotal.total]);
 
   const handleProfitChange = e => {
     const { name, value } = e.target;
@@ -1307,7 +1565,7 @@ const QuotationPricingDetails = () => {
     }
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (isTerminalStatus) {
       notifyError("This quotation pricing record is no longer editable.");
       return;
@@ -1319,12 +1577,69 @@ const QuotationPricingDetails = () => {
       return;
     }
 
-    dispatch(
-      approveQuotationPricing(quotationId, () => {
-        dispatch(fetchQuotationPricing(quotationId));
-        dispatch(fetchQuotation(quotationId));
-      })
-    );
+    const optionSummaries = pricingView.optionSummaries.map((option, index) => ({
+      optionKey: option.optionKey || `${option.optionName || "Option"}-${index}`,
+      optionIndex: option.optionIndex ?? index,
+      optionName: option.optionName || `Option ${index + 1}`,
+      optionStars: option.optionStars || "",
+      rows: option.rows || [],
+      hotelStayRows: option.hotelStayRows || [],
+      supplementRows: option.supplementRows || [],
+      supplementGroups: option.supplementGroups || [],
+      seasonPriceRows: option.seasonPriceRows || [],
+      otherPerPersonRows: option.otherPerPersonRows || [],
+      hotelsPerPerson: Number(option.hotelsPerPerson || 0),
+      transportation: Number(option.transportation || 0),
+      meals: Number(option.meals || 0),
+      entranceFees: Number(option.entranceFees || 0),
+      guide: Number(option.guide || 0),
+      extraServices: Number(option.extraServices || 0),
+      sharedPerPersonTotal: Number(option.sharedPerPersonTotal || 0),
+      basePerPerson: Number(option.basePerPerson || 0),
+      profitType: option.profitType || selected?.PROFIT_TYPE || profitForm.PROFIT_TYPE || "PERCENT",
+      profitValue: Number(
+        option.profitValue ??
+          selected?.PROFIT_VALUE ??
+          profitForm.PROFIT_VALUE ??
+          0
+      ),
+      profitPerPerson: Number(option.profitPerPerson || 0),
+      finalTotal: Number(option.finalTotal || 0),
+    }));
+
+    const payload = {
+      DECISION: "APPROVE",
+      BOARD_BASIS: boardBasis || selected?.BOARD_BASIS || "BB",
+      PROFIT_TYPE: selected?.PROFIT_TYPE || profitForm.PROFIT_TYPE || "PERCENT",
+      PROFIT_VALUE: Number(selected?.PROFIT_VALUE ?? profitForm.PROFIT_VALUE ?? 0),
+      OPTION_SUMMARIES: optionSummaries,
+      FINAL_OPTIONS: optionSummaries,
+      FINAL_TOTAL: optionSummaries[0]?.finalTotal || 0,
+      PRICING_VIEW: {
+        optionSummaries,
+        perPersonSummary: pricingView.perPersonSummary,
+        sharedPerPersonSummary: pricingView.sharedPerPersonSummary,
+      },
+      SNAPSHOT: {
+        ...(selected?.SNAPSHOT || {}),
+        OPTION_SUMMARIES: optionSummaries,
+        FINAL_OPTIONS: optionSummaries,
+        PRICING_VIEW: {
+          optionSummaries,
+          perPersonSummary: pricingView.perPersonSummary,
+          sharedPerPersonSummary: pricingView.sharedPerPersonSummary,
+        },
+      },
+    };
+
+    try {
+      await post(`/quotation-pricing/quotation/${quotationId}/decision`, payload);
+      dispatch(fetchQuotationPricing(quotationId));
+      dispatch(fetchQuotation(quotationId));
+      await loadFinance({ silent: true });
+    } catch (error) {
+      notifyError(getErrorMessage(error, "Failed to approve quotation pricing."));
+    }
   };
 
   const handleReject = () => {
@@ -1599,233 +1914,795 @@ const QuotationPricingDetails = () => {
                           No option pricing data found.
                         </Alert>
                       ) : (
-                        <div className="d-flex flex-column gap-4">
-                          {pricingView.optionSummaries.map((option, index) => (
-                            <div
-                              className="border rounded bg-white overflow-hidden"
-                              key={option.optionKey || option.optionName}
-                            >
-                              <div className="p-3 border-bottom bg-light">
+                        <>
+                          <Row className="g-3 mb-3">
+                            <Col lg="7">
+                              <InputGroup>
+                                <InputGroupText>
+                                  <i className="bx bx-search" />
+                                </InputGroupText>
+                                <Input
+                                  value={pricingSearch}
+                                  onChange={e => setPricingSearch(e.target.value)}
+                                  placeholder="Search option, city, hotel, or season"
+                                />
+                              </InputGroup>
+                            </Col>
+                            <Col lg="5">
+                              <Input
+                                type="select"
+                                value={pricingOptionFilter}
+                                onChange={e => setPricingOptionFilter(e.target.value)}
+                              >
+                                <option value="ALL">All options</option>
+                                {accommodationOptionChoices.map(option => (
+                                  <option key={option.key} value={option.key}>
+                                    Option {option.index + 1} - {option.label}
+                                  </option>
+                                ))}
+                              </Input>
+                            </Col>
+                          </Row>
+
+                          <div className="d-flex flex-wrap gap-2 mb-3">
+                            <Badge color="light" className="text-dark border">
+                              Showing {filteredOptionSummaries.length} of{" "}
+                              {pricingView.optionSummaries.length} options
+                            </Badge>
+                            <Badge color="light" className="text-dark border">
+                              {accommodationTableRows.length} season rows
+                            </Badge>
+                          </div>
+
+                          <div
+                            className="table-responsive border rounded"
+                            style={{ maxHeight: "65vh", overflow: "auto" }}
+                          >
+                            <table className="table table-sm table-hover align-middle mb-0">
+                              <thead className="table-light">
+                                <tr>
+                                  <th style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                                    Option
+                                  </th>
+                                  <th style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                                    Hotels
+                                  </th>
+                                  <th
+                                    className="text-end"
+                                    style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                  >
+                                    Seasons
+                                  </th>
+                                  <th
+                                    className="text-end"
+                                    style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                  >
+                                    Hotels / Person
+                                  </th>
+                                  <th
+                                    className="text-end"
+                                    style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                  >
+                                    Shared / Person
+                                  </th>
+                                  <th
+                                    className="text-end"
+                                    style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                  >
+                                    Cost / Person
+                                  </th>
+                                  <th
+                                    className="text-end"
+                                    style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                  >
+                                    Profit
+                                  </th>
+                                  <th
+                                    className="text-end"
+                                    style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                  >
+                                    Final Total
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {filteredOptionSummaries.length === 0 ? (
+                                  <tr>
+                                    <td className="text-center text-muted py-4" colSpan="8">
+                                      No matching options.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  filteredOptionSummaries.map(option => (
+                                    <tr key={option.optionKey || option.optionName}>
+                                      <td style={{ minWidth: 220 }}>
+                                        <div className="d-flex flex-column gap-1">
+                                          <div className="fw-semibold">
+                                            {option.optionName}
+                                          </div>
+                                          <div>
+                                            <Badge color="primary" pill>
+                                              Option {option.optionIndex + 1}
+                                            </Badge>{" "}
+                                            <Badge
+                                              color="light"
+                                              className="text-dark border"
+                                              pill
+                                            >
+                                              {formatStars(option.optionStars)}
+                                            </Badge>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td style={{ minWidth: 260 }}>
+                                        <div className="d-flex flex-column gap-1">
+                                          {option.hotelStayRows.slice(0, 3).map(row => (
+                                            <div
+                                              key={`${option.optionKey}-${row.cityName}-${row.hotelName}`}
+                                              className="small"
+                                            >
+                                              <span className="fw-semibold">
+                                                {row.cityName}
+                                              </span>
+                                              : {row.hotelName} ({row.nights}N)
+                                            </div>
+                                          ))}
+                                          {option.hotelStayRows.length > 3 ? (
+                                            <div className="text-muted small">
+                                              +{option.hotelStayRows.length - 3} more hotels
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      </td>
+                                      <td className="text-end">{option.rows.length}</td>
+                                      <td className="text-end fw-semibold">
+                                        {formatCurrency(option.hotelsPerPerson)}
+                                      </td>
+                                      <td className="text-end">
+                                        {formatCurrency(option.sharedPerPersonTotal)}
+                                      </td>
+                                      <td className="text-end fw-semibold">
+                                        {formatCurrency(option.basePerPerson)}
+                                      </td>
+                                      <td className="text-end">
+                                        {formatCurrency(option.profitPerPerson)}
+                                      </td>
+                                      <td className="text-end fw-bold text-primary">
+                                        {formatCurrency(option.finalTotal)}
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {selectedOptionDetail ? (
+                            <div className="border rounded bg-white mt-4 overflow-hidden">
+                              <div className="bg-light border-bottom p-3">
                                 <div className="d-flex flex-wrap justify-content-between align-items-start gap-3">
                                   <div>
-                                    <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                    <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
                                       <Badge color="primary" pill>
-                                        Option {index + 1}
+                                        Option {selectedOptionDetail.optionIndex + 1}
                                       </Badge>
-                                      <h5 className="mb-0">{option.optionName}</h5>
+                                      <h5 className="mb-0">
+                                        {selectedOptionDetail.optionName}
+                                      </h5>
                                       <Badge color="light" className="text-dark border" pill>
-                                        {formatStars(option.optionStars)}
+                                        {formatStars(selectedOptionDetail.optionStars)}
                                       </Badge>
                                     </div>
                                     <div className="text-muted small">
-                                      Hotels, seasons, supplements, and final person price in
-                                      one clear view.
+                                      Full price source: hotel seasons, board basis,
+                                      shared daily costs, profit, and final person total.
                                     </div>
                                   </div>
 
-                                  <div className="text-end">
-                                    <div className="text-muted small">Final Total</div>
+                                    <div className="text-end">
+                                    <div className="text-muted small">Final Total / Person</div>
                                     <div className="fw-bold font-size-24 text-primary">
-                                      {formatCurrency(option.finalTotal)}
+                                      {formatCurrency(selectedCalculatedTotals.finalTotal)}
                                     </div>
                                   </div>
                                 </div>
                               </div>
 
                               <div className="p-3">
-                                <div className="mb-4">
-                                  <div className="fw-semibold mb-2">Hotels In Option</div>
-                                  <div className="table-responsive">
-                                    <table className="table table-sm table-nowrap align-middle mb-0">
-                                      <thead className="table-light">
-                                        <tr>
-                                          <th>City</th>
-                                          <th>Hotel</th>
-                                          <th className="text-end">Nights</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {option.hotelStayRows.map((row, rowIndex) => (
-                                          <tr key={`${row.hotelName}-stay-${rowIndex}`}>
-                                            <td>{row.cityName}</td>
-                                            <td className="fw-semibold">{row.hotelName}</td>
-                                            <td className="text-end">{row.nights}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
+                                <Row className="g-3 mb-3">
+                                  <Col md="3">
+                                    <PriceCard
+                                      title="Hotels / Person"
+                                      value={selectedSupplementTotal.total}
+                                      subtitle="Selected supplements and seasons only"
+                                    />
+                                  </Col>
+                                  <Col md="3">
+                                    <PriceCard
+                                      title="Shared / Person"
+                                      value={selectedOptionDetail.sharedPerPersonTotal}
+                                      subtitle="Transport, meals, fees, guide, services"
+                                    />
+                                  </Col>
+                                  <Col md="3">
+                                    <PriceCard
+                                      title="Cost / Person"
+                                      value={selectedCalculatedTotals.basePerPerson}
+                                      subtitle="Hotels + shared costs"
+                                    />
+                                  </Col>
+                                  <Col md="3">
+                                    <PriceCard
+                                      title="Profit / Person"
+                                      value={selectedCalculatedTotals.profitPerPerson}
+                                      subtitle={
+                                        selectedOptionDetail.profitType === "PERCENT"
+                                          ? `${formatCurrency(
+                                              selectedOptionDetail.profitValue
+                                            )}%`
+                                          : "Fixed amount"
+                                      }
+                                    />
+                                  </Col>
+                                </Row>
+
+                                <div className="border rounded mb-3">
+                                  <div className="px-3 py-2 bg-light border-bottom">
+                                    <div className="fw-semibold">
+                                      Hotel Season Price Selection
+                                    </div>
+                                    <div className="text-muted small">
+                                      Choose one or more supplements, then choose one season
+                                      for each hotel. Hotels / Person is the sum of those
+                                      selected prices only.
+                                    </div>
                                   </div>
-                                </div>
-
-                                <div className="border rounded p-3">
-                                  <div className="fw-semibold mb-2">Season Pricing</div>
-                                  <div className="table-responsive">
-                                    <table className="table table-sm align-middle mb-0">
+                                  <div className="p-3 border-bottom">
+                                    <div className="fw-semibold mb-2">Supplements</div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {SUPPLEMENT_PRICE_FIELDS.map(field => (
+                                        <Button
+                                          key={field.key}
+                                          color={
+                                            field.key === "bb" ||
+                                            selectedSupplements.includes(field.key)
+                                              ? "primary"
+                                              : "light"
+                                          }
+                                          outline={
+                                            field.key !== "bb" &&
+                                            !selectedSupplements.includes(field.key)
+                                          }
+                                          className={
+                                            field.key === "bb"
+                                              ? "fw-semibold opacity-75"
+                                              : "fw-semibold"
+                                          }
+                                          type="button"
+                                          size="sm"
+                                          disabled={field.key === "bb"}
+                                          onClick={() => toggleSupplement(field.key)}
+                                        >
+                                          <i
+                                            className={`bx ${
+                                              field.key === "bb" ||
+                                              selectedSupplements.includes(field.key)
+                                                ? "bx-check"
+                                                : "bx-plus"
+                                            } me-1`}
+                                          />
+                                          {field.label}
+                                        </Button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div
+                                    className="table-responsive"
+                                    style={{ maxHeight: "52vh", overflow: "auto" }}
+                                  >
+                                    <table className="table table-sm table-hover align-middle mb-0">
                                       <thead className="table-light">
                                         <tr>
-                                          <th>Hotel</th>
-                                          <th>Season</th>
-                                          <th>Duration</th>
-                                          <th className="text-end">Price / Person</th>
+                                          <th
+                                            style={{
+                                              position: "sticky",
+                                              top: 0,
+                                              zIndex: 2,
+                                              minWidth: 280,
+                                            }}
+                                          >
+                                            Price Source
+                                          </th>
+                                          <th
+                                            style={{
+                                              position: "sticky",
+                                              top: 0,
+                                              zIndex: 2,
+                                              minWidth: 220,
+                                            }}
+                                          >
+                                            Details
+                                          </th>
+                                          <th
+                                            className="text-end"
+                                            style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                          >
+                                            Nights
+                                          </th>
+                                          <th
+                                            className="text-end"
+                                            style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                          >
+                                            Used Rate
+                                          </th>
+                                          <th
+                                            className="text-end"
+                                            style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                          >
+                                            Formula
+                                          </th>
+                                          <th
+                                            className="text-end"
+                                            style={{ position: "sticky", top: 0, zIndex: 2 }}
+                                          >
+                                            Price
+                                          </th>
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {option.rows.map((row, rowIndex) => {
-                                          const seasonPrice =
-                                            option.seasonPriceRows[rowIndex]?.pricePerPerson ||
-                                            row.stayPerPerson;
-
-                                          return (
-                                            <tr key={`${row.hotelName}-season-price-${rowIndex}`}>
-                                              <td className="fw-semibold">{row.hotelName}</td>
-                                              <td>{row.seasonName}</td>
-                                              <td>
-                                                <div>{row.seasonDuration}</div>
-                                                {row.seasonDays ? (
-                                                  <div className="text-muted small">
-                                                    {row.seasonDays} day
-                                                    {row.seasonDays === 1 ? "" : "s"}
-                                                  </div>
-                                                ) : null}
+                                        {selectedOptionPriceTree.map(city => (
+                                          <React.Fragment key={city.key}>
+                                            <tr>
+                                              <td
+                                                style={{
+                                                  backgroundColor: "#e9f2ff",
+                                                  color: "#2f5bea",
+                                                }}
+                                              >
+                                                <Button
+                                                  color="link"
+                                                  className="p-0 fw-semibold text-start text-decoration-none"
+                                                  type="button"
+                                                  onClick={() => {
+                                                    const isOpen =
+                                                      expandedPriceCity === city.key;
+                                                    setExpandedPriceCity(
+                                                      isOpen ? "" : city.key
+                                                    );
+                                                    setExpandedPriceHotel("");
+                                                    setExpandedPriceSeason("");
+                                                  }}
+                                                >
+                                                  <i
+                                                    className={`bx ${
+                                                      expandedPriceCity === city.key
+                                                        ? "bx-chevron-down"
+                                                        : "bx-chevron-right"
+                                                    } me-1`}
+                                                  />
+                                                  {city.name}
+                                                </Button>
                                               </td>
-                                              <td className="text-end fw-semibold text-primary">
-                                                {formatCurrency(seasonPrice)}
+                                              <td
+                                                className="small"
+                                                style={{
+                                                  backgroundColor: "#e9f2ff",
+                                                  color: "#4f6b95",
+                                                }}
+                                              >
+                                                {city.hotels.length} hotel
+                                                {city.hotels.length === 1 ? "" : "s"}
+                                              </td>
+                                              <td
+                                                className="text-end"
+                                                style={{ backgroundColor: "#e9f2ff" }}
+                                              >
+                                                -
+                                              </td>
+                                              <td
+                                                className="text-end"
+                                                style={{ backgroundColor: "#e9f2ff" }}
+                                              >
+                                                -
+                                              </td>
+                                              <td
+                                                className="text-end"
+                                                style={{ backgroundColor: "#e9f2ff" }}
+                                              >
+                                                -
+                                              </td>
+                                              <td
+                                                className="text-end"
+                                                style={{ backgroundColor: "#e9f2ff" }}
+                                              >
+                                                -
                                               </td>
                                             </tr>
-                                          );
-                                        })}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
 
-                                <div className="border rounded p-3 mt-3">
-                                  <div className="fw-semibold mb-2">
-                                    Other Per Person Prices
-                                  </div>
-                                  <div className="table-responsive">
-                                    <table className="table table-sm align-middle mb-0">
-                                      <thead className="table-light">
-                                        <tr>
-                                          <th>Item</th>
-                                          <th className="text-end">Price / Person</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {option.otherPerPersonRows.map(row => (
-                                          <tr key={`${option.optionKey}-${row.name}`}>
-                                            <td>{row.name}</td>
-                                            <td className="text-end fw-semibold text-primary">
-                                              {formatCurrency(row.pricePerPerson)}
-                                            </td>
-                                          </tr>
+                                            {expandedPriceCity === city.key
+                                              ? city.hotels.map(hotel => (
+                                                  <React.Fragment key={hotel.key}>
+                                                    <tr>
+                                                      <td className="ps-4">
+                                                        <Button
+                                                          color="link"
+                                                          className="p-0 fw-semibold text-start text-decoration-none"
+                                                          type="button"
+                                                          onClick={() => {
+                                                            const isOpen =
+                                                              expandedPriceHotel ===
+                                                              hotel.key;
+                                                            setExpandedPriceHotel(
+                                                              isOpen ? "" : hotel.key
+                                                            );
+                                                            setExpandedPriceSeason("");
+                                                          }}
+                                                        >
+                                                          <i
+                                                            className={`bx ${
+                                                              expandedPriceHotel ===
+                                                              hotel.key
+                                                                ? "bx-chevron-down"
+                                                                : "bx-chevron-right"
+                                                            } me-1`}
+                                                          />
+                                                          {hotel.name}
+                                                        </Button>
+                                                      </td>
+                                                      <td className="text-muted small">
+                                                        {hotel.seasons.length} season
+                                                        {hotel.seasons.length === 1
+                                                          ? ""
+                                                          : "s"}
+                                                      </td>
+                                                      <td className="text-end">-</td>
+                                                      <td className="text-end">-</td>
+                                                      <td className="text-end">-</td>
+                                                      <td className="text-end">-</td>
+                                                    </tr>
+
+                                                    {expandedPriceHotel === hotel.key
+                                                      ? hotel.seasons.map(season => (
+                                                          <React.Fragment key={season.key}>
+                                                            <tr>
+                                                              <td className="ps-5">
+                                                                <Button
+                                                                  color="link"
+                                                                  className="p-0 fw-semibold text-start text-decoration-none"
+                                                                  type="button"
+                                                                  onClick={() => {
+                                                                    setSelectedHotelSeasonKeys(
+                                                                      prev => ({
+                                                                        ...prev,
+                                                                        [hotel.key]:
+                                                                          season.key,
+                                                                      })
+                                                                    );
+                                                                    setExpandedPriceSeason(
+                                                                      expandedPriceSeason ===
+                                                                        season.key
+                                                                        ? ""
+                                                                        : season.key
+                                                                    );
+                                                                  }}
+                                                                >
+                                                                  <i
+                                                                    className={`bx ${
+                                                                      expandedPriceSeason ===
+                                                                      season.key
+                                                                        ? "bx-chevron-down"
+                                                                        : "bx-chevron-right"
+                                                                    } me-1`}
+                                                                  />
+                                                                  {season.name}
+                                                                </Button>
+                                                                {(selectedHotelSeasonKeys[
+                                                                  hotel.key
+                                                                ] ||
+                                                                  hotel.seasons[0]?.key) ===
+                                                                season.key ? (
+                                                                  <Badge
+                                                                    color="success"
+                                                                    className="ms-2"
+                                                                    pill
+                                                                  >
+                                                                    Selected
+                                                                  </Badge>
+                                                                ) : null}
+                                                              </td>
+                                                              <td>
+                                                                <div>{season.duration}</div>
+                                                                <div className="text-muted small">
+                                                                  Click season to use it for
+                                                                  this hotel
+                                                                </div>
+                                                              </td>
+                                                              <td className="text-end">
+                                                                {season.nights}
+                                                              </td>
+                                                              <td className="text-end">
+                                                                {formatCurrency(
+                                                                  season.rows.reduce(
+                                                                    (sum, row) =>
+                                                                      sum +
+                                                                      selectedSupplements.reduce(
+                                                                        (fieldSum, field) =>
+                                                                          fieldSum +
+                                                                          Number(
+                                                                            row[field] || 0
+                                                                          ),
+                                                                        0
+                                                                      ),
+                                                                    0
+                                                                  )
+                                                                )}
+                                                              </td>
+                                                              <td className="text-end text-muted small">
+                                                                {selectedSupplements
+                                                                  .map(field =>
+                                                                    field.toUpperCase()
+                                                                  )
+                                                                  .join(" + ")}{" "}
+                                                                x {season.nights}
+                                                              </td>
+                                                              <td className="text-end fw-semibold text-primary">
+                                                                {formatCurrency(
+                                                                  season.rows.reduce(
+                                                                    (sum, row) => {
+                                                                      const perNight =
+                                                                        selectedSupplements.reduce(
+                                                                          (
+                                                                            fieldSum,
+                                                                            field
+                                                                          ) =>
+                                                                            fieldSum +
+                                                                            Number(
+                                                                              row[field] ||
+                                                                                0
+                                                                            ),
+                                                                          0
+                                                                        );
+
+                                                                      return (
+                                                                        sum +
+                                                                        perNight *
+                                                                          Number(
+                                                                            row.nights || 0
+                                                                          )
+                                                                      );
+                                                                    },
+                                                                    0
+                                                                  )
+                                                                )}
+                                                              </td>
+                                                            </tr>
+
+                                                            {expandedPriceSeason ===
+                                                            season.key
+                                                              ? season.rows.map(row => (
+                                                                  <tr
+                                                                    key={`${season.key}-${row.rowIndex}`}
+                                                                  >
+                                                                    <td className="ps-5">
+                                                                      <div className="ms-4">
+                                                                        <div className="fw-semibold">
+                                                                          Price row
+                                                                        </div>
+                                                                        <div className="text-muted small">
+                                                                          Overnight:{" "}
+                                                                          {formatDate(
+                                                                            row.overnightDate
+                                                                          )}
+                                                                        </div>
+                                                                      </div>
+                                                                    </td>
+                                                                    <td>
+                                                                      <div className="d-flex flex-wrap gap-2">
+                                                                        <Badge
+                                                                          color="light"
+                                                                          className="text-dark border"
+                                                                        >
+                                                                          BB{" "}
+                                                                          {formatCurrency(
+                                                                            row.bb
+                                                                          )}
+                                                                        </Badge>
+                                                                        <Badge
+                                                                          color="light"
+                                                                          className="text-dark border"
+                                                                        >
+                                                                          HB{" "}
+                                                                          {formatCurrency(
+                                                                            row.hb
+                                                                          )}
+                                                                        </Badge>
+                                                                        <Badge
+                                                                          color="light"
+                                                                          className="text-dark border"
+                                                                        >
+                                                                          FB{" "}
+                                                                          {formatCurrency(
+                                                                            row.fb
+                                                                          )}
+                                                                        </Badge>
+                                                                        <Badge
+                                                                          color="light"
+                                                                          className="text-dark border"
+                                                                        >
+                                                                          SS{" "}
+                                                                          {formatCurrency(
+                                                                            row.ss
+                                                                          )}
+                                                                        </Badge>
+                                                                      </div>
+                                                                    </td>
+                                                                    <td className="text-end">
+                                                                      {row.nights}
+                                                                    </td>
+                                                                    <td className="text-end fw-semibold">
+                                                                      {formatCurrency(
+                                                                        selectedSupplements.reduce(
+                                                                          (sum, field) =>
+                                                                            sum +
+                                                                            Number(
+                                                                              row[field] || 0
+                                                                            ),
+                                                                          0
+                                                                        )
+                                                                      )}
+                                                                    </td>
+                                                                    <td className="text-end text-muted small">
+                                                                      {formatCurrency(
+                                                                        selectedSupplements.reduce(
+                                                                          (sum, field) =>
+                                                                            sum +
+                                                                            Number(
+                                                                              row[field] || 0
+                                                                            ),
+                                                                          0
+                                                                        )
+                                                                      )}{" "}
+                                                                      x {row.nights}
+                                                                    </td>
+                                                                    <td className="text-end fw-bold text-primary">
+                                                                      {formatCurrency(
+                                                                        selectedSupplements.reduce(
+                                                                          (sum, field) =>
+                                                                            sum +
+                                                                            Number(
+                                                                              row[field] || 0
+                                                                            ),
+                                                                          0
+                                                                        ) *
+                                                                          Number(
+                                                                            row.nights || 0
+                                                                          )
+                                                                      )}
+                                                                    </td>
+                                                                  </tr>
+                                                                ))
+                                                              : null}
+                                                          </React.Fragment>
+                                                        ))
+                                                      : null}
+                                                  </React.Fragment>
+                                                ))
+                                              : null}
+                                          </React.Fragment>
                                         ))}
                                       </tbody>
                                     </table>
                                   </div>
                                 </div>
 
-                                <Row className="g-3 mt-1">
-                                  <Col xl="7">
-                                    <div className="border rounded p-3 h-100 bg-white">
-                                      <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
-                                        <div>
-                                          <div className="fw-semibold mb-1">
-                                            Supplements By Duration
-                                          </div>
-                                          <div className="text-muted small">
-                                            BB, HB, FB, and SS are summed for the hotels active in
-                                            each date range.
-                                          </div>
+                                <Row className="g-3">
+                                  <Col xl="6">
+                                    <div className="border rounded h-100">
+                                      <div className="px-3 py-2 bg-light border-bottom">
+                                        <div className="fw-semibold">
+                                          Shared Prices Added To This Option
                                         </div>
-                                        <Badge color="light" className="text-dark border">
-                                          {option.supplementGroups.length} period
-                                          {option.supplementGroups.length === 1 ? "" : "s"}
-                                        </Badge>
                                       </div>
-
-                                      <div className="d-flex flex-column gap-3">
-                                        {option.supplementGroups.map(group => (
-                                          <div
-                                            className="border rounded overflow-hidden"
-                                            key={`${option.optionKey}-${group.duration}-${group.seasons}`}
-                                          >
-                                            <div className="bg-light px-3 py-2 border-bottom">
-                                              <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                                                <div className="fw-semibold">{group.duration}</div>
-                                                <Badge
-                                                  color="primary"
-                                                  className="rounded-pill px-3"
-                                                >
-                                                  {group.seasons}
-                                                </Badge>
-                                              </div>
-                                            </div>
-
-                                            <Row className="g-0">
-                                              {group.rows.map(row => (
-                                                <Col
-                                                  xs="6"
-                                                  md="3"
-                                                  key={`${group.duration}-${row.name}`}
-                                                >
-                                                  <div className="p-3 h-100 border-end border-bottom">
-                                                    <div className="text-muted small mb-1">
-                                                      {row.name}
-                                                    </div>
-                                                    <div className="fw-bold text-primary font-size-16">
-                                                      {formatCurrency(row.price)}
-                                                    </div>
-                                                  </div>
-                                                </Col>
-                                              ))}
-                                            </Row>
-                                          </div>
-                                        ))}
+                                      <div className="table-responsive">
+                                        <table className="table table-sm align-middle mb-0">
+                                          <thead className="table-light">
+                                            <tr>
+                                              <th>Item</th>
+                                              <th className="text-end">Price / Person</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {selectedOptionDetail.otherPerPersonRows.map(row => (
+                                              <tr
+                                                key={`${selectedOptionDetail.optionKey}-${row.name}`}
+                                              >
+                                                <td>{row.name}</td>
+                                                <td className="text-end fw-semibold">
+                                                  {formatCurrency(row.pricePerPerson)}
+                                                </td>
+                                              </tr>
+                                            ))}
+                                            <tr className="table-light">
+                                              <td className="fw-semibold">Shared Total</td>
+                                              <td className="text-end fw-bold">
+                                                {formatCurrency(
+                                                  selectedOptionDetail.sharedPerPersonTotal
+                                                )}
+                                              </td>
+                                            </tr>
+                                          </tbody>
+                                        </table>
                                       </div>
                                     </div>
                                   </Col>
 
-                                  <Col xl="5">
-                                    <div className="h-100 rounded bg-primary text-white p-3">
-                                      <div className="d-flex justify-content-between gap-3 mb-2">
-                                        <span className="text-white text-opacity-75">
-                                          Cost / Person
-                                        </span>
-                                        <span className="fw-semibold">
-                                          {formatCurrency(option.basePerPerson)}
-                                        </span>
-                                      </div>
-                                      <div className="d-flex justify-content-between gap-3 mb-2">
-                                        <span className="text-white text-opacity-75">
-                                          Profit Amount
-                                        </span>
-                                        <span className="fw-semibold">
-                                          {formatCurrency(option.profitPerPerson)}
-                                        </span>
-                                      </div>
-                                      <div className="border-top border-white border-opacity-25 mt-3 pt-3 d-flex justify-content-between align-items-end gap-3">
-                                        <div>
-                                          <div className="small text-white text-opacity-75">
-                                            Final Total
-                                          </div>
-                                          <div className="fw-bold font-size-24">
-                                            {formatCurrency(option.finalTotal)}
-                                          </div>
+                                  <Col xl="6">
+                                    <div className="border rounded h-100">
+                                      <div className="px-3 py-2 bg-light border-bottom">
+                                        <div className="fw-semibold">
+                                          Final Sum For This Option
                                         </div>
-                                        <Badge color="light" className="text-primary">
-                                          {option.profitType === "PERCENT"
-                                            ? `${formatCurrency(option.profitValue)}%`
-                                            : "Fixed"}
-                                        </Badge>
+                                      </div>
+                                      <div className="table-responsive">
+                                        <table className="table table-sm align-middle mb-0">
+                                          <tbody>
+                                            <tr>
+                                              <td>Hotels / Person</td>
+                                              <td className="text-end fw-semibold">
+                                                {formatCurrency(
+                                                  selectedSupplementTotal.total
+                                                )}
+                                              </td>
+                                            </tr>
+                                            <tr>
+                                              <td>Shared Prices / Person</td>
+                                              <td className="text-end fw-semibold">
+                                                {formatCurrency(
+                                                  selectedOptionDetail.sharedPerPersonTotal
+                                                )}
+                                              </td>
+                                            </tr>
+                                            <tr>
+                                              <td>Cost / Person</td>
+                                              <td className="text-end fw-semibold">
+                                                {formatCurrency(
+                                                  selectedCalculatedTotals.basePerPerson
+                                                )}
+                                              </td>
+                                            </tr>
+                                            <tr>
+                                              <td>
+                                                Profit{" "}
+                                                {selectedOptionDetail.profitType === "PERCENT"
+                                                  ? `(${formatCurrency(
+                                                      selectedOptionDetail.profitValue
+                                                    )}%)`
+                                                  : "(Fixed)"}
+                                              </td>
+                                              <td className="text-end fw-semibold">
+                                                {formatCurrency(
+                                                  selectedCalculatedTotals.profitPerPerson
+                                                )}
+                                              </td>
+                                            </tr>
+                                            <tr className="table-primary">
+                                              <td className="fw-bold">Final Total / Person</td>
+                                              <td className="text-end fw-bold">
+                                                {formatCurrency(
+                                                  selectedCalculatedTotals.finalTotal
+                                                )}
+                                              </td>
+                                            </tr>
+                                          </tbody>
+                                        </table>
                                       </div>
                                     </div>
                                   </Col>
                                 </Row>
                               </div>
                             </div>
-                          ))}
-                        </div>
+                          ) : null}
+                        </>
                       )}
                     </CardBody>
                   </Card>
@@ -1839,7 +2716,7 @@ const QuotationPricingDetails = () => {
                       <SectionHeader
                         icon="bx bx-hotel"
                         title="Accommodation"
-                        subtitle="Easy hotel view with person price only, separated by option."
+                        subtitle="Searchable hotel and season pricing built for very large option lists."
                       />
 
                       {pricingView.accommodationOptionsList.length === 0 ? (
@@ -1847,98 +2724,110 @@ const QuotationPricingDetails = () => {
                           No accommodation pricing data found.
                         </Alert>
                       ) : (
-                        <div className="d-flex flex-column gap-4">
-                          {pricingView.accommodationOptionsList.map((option, optionIndex) => (
-                            <div key={`${option.optionName}-${optionIndex}`}>
-                              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-                                <div>
-                                  <h5 className="mb-1">{option.optionName}</h5>
-                                  <div className="text-muted small">
-                                    {option.rows.length} hotel
-                                    {option.rows.length > 1 ? "s" : ""}
-                                  </div>
-                                </div>
+                        <div>
+                          <div className="d-flex flex-wrap gap-2 mb-3">
+                            <Badge color="light" className="text-dark border">
+                              {accommodationTableRows.length} visible rows
+                            </Badge>
+                            <Badge color="light" className="text-dark border">
+                              {pricingView.accommodationRows.length} total season rows
+                            </Badge>
+                            <Badge color="light" className="text-dark border">
+                              Board basis: {boardBasis || "-"}
+                            </Badge>
+                          </div>
 
-                                <Badge color="primary" pill>
-                                  Option {optionIndex + 1}
-                                </Badge>
-                              </div>
-
-                              <Row className="g-3">
-                                {option.rows.map((row, index) => (
-                                  <Col xl="6" key={`${row.hotelName}-${index}`}>
-                                    <div className="border rounded p-3 h-100">
-                                      <div className="d-flex justify-content-between align-items-start gap-2 mb-3">
-                                        <div>
-                                          <h5 className="mb-1">{row.hotelName}</h5>
+                          <div
+                            className="table-responsive border rounded"
+                            style={{ maxHeight: "72vh", overflow: "auto" }}
+                          >
+                            <table className="table table-sm table-hover align-middle mb-0">
+                              <thead className="table-light">
+                                <tr>
+                                  {[
+                                    "Option",
+                                    "City",
+                                    "Hotel",
+                                    "Stars",
+                                    "Season",
+                                    "Date / Nights",
+                                    "BB",
+                                    "HB Add",
+                                    "FB Add",
+                                    "SS",
+                                    "Person Price",
+                                  ].map((heading, index) => (
+                                    <th
+                                      key={heading}
+                                      className={index >= 6 ? "text-end" : ""}
+                                      style={{
+                                        position: "sticky",
+                                        top: 0,
+                                        zIndex: 2,
+                                        minWidth:
+                                          heading === "Hotel"
+                                            ? 220
+                                            : heading === "Date / Nights"
+                                            ? 190
+                                            : undefined,
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {heading}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {accommodationTableRows.length === 0 ? (
+                                  <tr>
+                                    <td className="text-center text-muted py-4" colSpan="11">
+                                      No matching accommodation rows.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  accommodationTableRows.map(row => (
+                                    <tr
+                                      key={`${row.optionKey}-${row.hotelName}-${row.seasonName}-${row.rowIndex}`}
+                                    >
+                                      <td style={{ minWidth: 190 }}>
+                                        <div className="fw-semibold">{row.optionName}</div>
+                                        <Badge color="primary" pill>
+                                          Option {row.optionIndex + 1}
+                                        </Badge>
+                                      </td>
+                                      <td>{row.cityName}</td>
+                                      <td className="fw-semibold">{row.hotelName}</td>
+                                      <td>{formatStars(row.hotelStars)}</td>
+                                      <td style={{ minWidth: 180 }}>
+                                        <div>{row.seasonName}</div>
+                                        {row.seasonDays ? (
                                           <div className="text-muted small">
-                                            {row.cityName} • {formatDate(row.overnightDate)}
+                                            {row.seasonDays} days
                                           </div>
+                                        ) : null}
+                                      </td>
+                                      <td style={{ minWidth: 190 }}>
+                                        <div>{row.seasonDuration}</div>
+                                        <div className="text-muted small">
+                                          Overnight: {formatDate(row.overnightDate)} |{" "}
+                                          {row.nights} night
+                                          {Number(row.nights) === 1 ? "" : "s"}
                                         </div>
-                                      </div>
-
-                                      <div className="small text-muted mb-2">
-                                        {row.seasonName}
-                                      </div>
-
-                                      <Row className="g-2">
-                                        <Col sm="6">
-                                          <div className="bg-light rounded p-2">
-                                            <div className="text-muted small">BB</div>
-                                            <div className="fw-semibold">
-                                              {formatCurrency(row.bb)}
-                                            </div>
-                                          </div>
-                                        </Col>
-                                        <Col sm="6">
-                                          <div className="bg-light rounded p-2">
-                                            <div className="text-muted small">HB Add</div>
-                                            <div className="fw-semibold">
-                                              {formatCurrency(row.hb)}
-                                            </div>
-                                          </div>
-                                        </Col>
-                                        <Col sm="6">
-                                          <div className="bg-light rounded p-2">
-                                            <div className="text-muted small">FB Add</div>
-                                            <div className="fw-semibold">
-                                              {formatCurrency(row.fb)}
-                                            </div>
-                                          </div>
-                                        </Col>
-                                        <Col sm="6">
-                                          <div className="bg-light rounded p-2">
-                                            <div className="text-muted small">
-                                              Single Supplement
-                                            </div>
-                                            <div className="fw-semibold">
-                                              {formatCurrency(row.ss)}
-                                            </div>
-                                          </div>
-                                        </Col>
-                                        <Col sm="6">
-                                          <div className="bg-light rounded p-2">
-                                            <div className="text-muted small">Nights</div>
-                                            <div className="fw-semibold">{row.nights}</div>
-                                          </div>
-                                        </Col>
-                                        <Col sm="6">
-                                          <div className="bg-primary-subtle rounded p-2">
-                                            <div className="text-muted small">
-                                              Person Price (BB*Nights)
-                                            </div>
-                                            <div className="fw-bold text-primary">
-                                              {formatCurrency(row.stayPerPerson)}
-                                            </div>
-                                          </div>
-                                        </Col>
-                                      </Row>
-                                    </div>
-                                  </Col>
-                                ))}
-                              </Row>
-                            </div>
-                          ))}
+                                      </td>
+                                      <td className="text-end">{formatCurrency(row.bb)}</td>
+                                      <td className="text-end">{formatCurrency(row.hb)}</td>
+                                      <td className="text-end">{formatCurrency(row.fb)}</td>
+                                      <td className="text-end">{formatCurrency(row.ss)}</td>
+                                      <td className="text-end fw-bold text-primary">
+                                        {formatCurrency(row.stayPerPerson)}
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       )}
                     </CardBody>

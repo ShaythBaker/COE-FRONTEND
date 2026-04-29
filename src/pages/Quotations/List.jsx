@@ -58,6 +58,8 @@ const emptyForm = {
   QUOTATION_START_DATE: "",
   QUOTATION_END_DATE: "",
   QUOTATION_DURATION_DAYS: "",
+  NUMBER_OF_DAYS: "",
+  NUMBER_OF_NIGHTS: "",
   NUMBER_OF_PAX: "",
 };
 
@@ -124,7 +126,27 @@ const calculateDurationDays = (startDate, endDate) => {
   const diffMs = endOnly.getTime() - startOnly.getTime();
   const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
-  return diffDays >= 1 ? String(diffDays) : "";
+  return diffDays >= 0 ? String(diffDays + 1) : "";
+};
+
+const calculateNightsFromDays = days => {
+  const value = Number(days);
+  return Number.isFinite(value) && value > 0 ? String(Math.max(0, value - 1)) : "";
+};
+
+const addDaysToDate = (startDate, daysToAdd) => {
+  if (!startDate || !Number.isFinite(Number(daysToAdd))) return "";
+  const [year, month, day] = String(startDate).split("-").map(Number);
+  if (!year || !month || !day) return "";
+
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return "";
+
+  date.setDate(date.getDate() + Number(daysToAdd));
+  const nextYear = date.getFullYear();
+  const nextMonth = String(date.getMonth() + 1).padStart(2, "0");
+  const nextDay = String(date.getDate()).padStart(2, "0");
+  return `${nextYear}-${nextMonth}-${nextDay}`;
 };
 
 const QuotationsList = () => {
@@ -340,6 +362,23 @@ const QuotationsList = () => {
         "Duration must match start date and end date";
     }
 
+    if (!String(form.NUMBER_OF_DAYS || "").trim()) {
+      next.NUMBER_OF_DAYS = "Required";
+    } else if (Number(form.NUMBER_OF_DAYS) <= 0) {
+      next.NUMBER_OF_DAYS = "Trip days must be greater than 0";
+    }
+
+    if (!String(form.NUMBER_OF_NIGHTS || "").trim()) {
+      next.NUMBER_OF_NIGHTS = "Required";
+    } else if (Number(form.NUMBER_OF_NIGHTS) < 0) {
+      next.NUMBER_OF_NIGHTS = "Nights cannot be negative";
+    } else if (
+      String(form.NUMBER_OF_DAYS || "").trim() &&
+      Number(form.NUMBER_OF_NIGHTS) !== Number(form.NUMBER_OF_DAYS) - 1
+    ) {
+      next.NUMBER_OF_NIGHTS = "Nights must be trip days minus 1";
+    }
+
     if (!String(form.NUMBER_OF_PAX || "").trim()) {
       next.NUMBER_OF_PAX = "Required";
     } else if (Number(form.NUMBER_OF_PAX) <= 0) {
@@ -399,6 +438,15 @@ const QuotationsList = () => {
       QUOTATION_DURATION_DAYS: String(
         row?.DURATION_IN_DAYS ?? row?.QUOTATION_DURATION_DAYS ?? ""
       ),
+      NUMBER_OF_DAYS: String(
+        row?.NUMBER_OF_DAYS ?? row?.TRIP_DAYS ?? row?.DURATION_IN_DAYS ?? ""
+      ),
+      NUMBER_OF_NIGHTS: String(
+        row?.NUMBER_OF_NIGHTS ??
+          calculateNightsFromDays(
+            row?.NUMBER_OF_DAYS ?? row?.TRIP_DAYS ?? row?.DURATION_IN_DAYS
+          )
+      ),
       NUMBER_OF_PAX: String(row?.NUMBER_OF_PAX ?? ""),
     });
     setTouched({});
@@ -450,6 +498,10 @@ const QuotationsList = () => {
         );
       }
 
+      if (name === "NUMBER_OF_DAYS") {
+        next.NUMBER_OF_NIGHTS = calculateNightsFromDays(value);
+      }
+
       return next;
     });
 
@@ -459,6 +511,7 @@ const QuotationsList = () => {
       ...(name === "QUOTATION_START_DATE" || name === "QUOTATION_END_DATE"
         ? { QUOTATION_DURATION_DAYS: true }
         : {}),
+      ...(name === "NUMBER_OF_DAYS" ? { NUMBER_OF_NIGHTS: true } : {}),
     }));
   };
 
@@ -470,6 +523,8 @@ const QuotationsList = () => {
       QUOTATION_START_DATE: true,
       QUOTATION_END_DATE: true,
       QUOTATION_DURATION_DAYS: true,
+      NUMBER_OF_DAYS: true,
+      NUMBER_OF_NIGHTS: true,
       NUMBER_OF_PAX: true,
     });
   };
@@ -481,6 +536,8 @@ const QuotationsList = () => {
     QUOTATION_START_DATE: form.QUOTATION_START_DATE,
     QUOTATION_END_DATE: form.QUOTATION_END_DATE,
     DURATION_IN_DAYS: Number(form.QUOTATION_DURATION_DAYS),
+    NUMBER_OF_DAYS: Number(form.NUMBER_OF_DAYS),
+    NUMBER_OF_NIGHTS: Number(form.NUMBER_OF_NIGHTS),
     NUMBER_OF_PAX: Number(form.NUMBER_OF_PAX),
   });
 
@@ -876,14 +933,14 @@ const QuotationsList = () => {
 
               <Col md="6">
                 <div className="mb-3">
-                  <Label className="form-label">Quotation Duration on Days</Label>
+                  <Label className="form-label">Quotation Validity in Days</Label>
                   <Input
                     type="number"
                     min="1"
                     step="1"
                     name="QUOTATION_DURATION_DAYS"
                     value={form.QUOTATION_DURATION_DAYS}
-                    onChange={handleChange}
+                    readOnly
                     invalid={!!(touched.QUOTATION_DURATION_DAYS && errors.QUOTATION_DURATION_DAYS)}
                   />
                   <FormFeedback>{errors.QUOTATION_DURATION_DAYS}</FormFeedback>
@@ -892,6 +949,38 @@ const QuotationsList = () => {
             </Row>
 
             <Row>
+              <Col md="6">
+                <div className="mb-3">
+                  <Label className="form-label">Trip Days</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="NUMBER_OF_DAYS"
+                    value={form.NUMBER_OF_DAYS}
+                    onChange={handleChange}
+                    invalid={!!(touched.NUMBER_OF_DAYS && errors.NUMBER_OF_DAYS)}
+                  />
+                  <FormFeedback>{errors.NUMBER_OF_DAYS}</FormFeedback>
+                </div>
+              </Col>
+
+              <Col md="6">
+                <div className="mb-3">
+                  <Label className="form-label">Nights</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    name="NUMBER_OF_NIGHTS"
+                    value={form.NUMBER_OF_NIGHTS}
+                    readOnly
+                    invalid={!!(touched.NUMBER_OF_NIGHTS && errors.NUMBER_OF_NIGHTS)}
+                  />
+                  <FormFeedback>{errors.NUMBER_OF_NIGHTS}</FormFeedback>
+                </div>
+              </Col>
+
               <Col md="6">
                 <div className="mb-0">
                   <Label className="form-label">Number of Pax</Label>
@@ -1032,14 +1121,14 @@ const QuotationsList = () => {
 
               <Col md="6">
                 <div className="mb-3">
-                  <Label className="form-label">Quotation Duration on Days</Label>
+                  <Label className="form-label">Quotation Validity in Days</Label>
                   <Input
                     type="number"
                     min="1"
                     step="1"
                     name="QUOTATION_DURATION_DAYS"
                     value={form.QUOTATION_DURATION_DAYS}
-                    onChange={handleChange}
+                    readOnly
                     invalid={!!(touched.QUOTATION_DURATION_DAYS && errors.QUOTATION_DURATION_DAYS)}
                   />
                   <FormFeedback>{errors.QUOTATION_DURATION_DAYS}</FormFeedback>
@@ -1048,6 +1137,38 @@ const QuotationsList = () => {
             </Row>
 
             <Row>
+              <Col md="6">
+                <div className="mb-3">
+                  <Label className="form-label">Trip Days</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="NUMBER_OF_DAYS"
+                    value={form.NUMBER_OF_DAYS}
+                    onChange={handleChange}
+                    invalid={!!(touched.NUMBER_OF_DAYS && errors.NUMBER_OF_DAYS)}
+                  />
+                  <FormFeedback>{errors.NUMBER_OF_DAYS}</FormFeedback>
+                </div>
+              </Col>
+
+              <Col md="6">
+                <div className="mb-3">
+                  <Label className="form-label">Nights</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    name="NUMBER_OF_NIGHTS"
+                    value={form.NUMBER_OF_NIGHTS}
+                    readOnly
+                    invalid={!!(touched.NUMBER_OF_NIGHTS && errors.NUMBER_OF_NIGHTS)}
+                  />
+                  <FormFeedback>{errors.NUMBER_OF_NIGHTS}</FormFeedback>
+                </div>
+              </Col>
+
               <Col md="6">
                 <div className="mb-0">
                   <Label className="form-label">Number of Pax</Label>
