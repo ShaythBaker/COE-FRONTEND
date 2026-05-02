@@ -2214,7 +2214,7 @@ const QuotationPricingDetails = () => {
                                     <PriceCard
                                       title="Hotels / Person"
                                       value={selectedSupplementTotal.total}
-                                      subtitle="Selected supplements and seasons only"
+                                      subtitle="Approved supplements and seasons only"
                                     />
                                   </Col>
                                   <Col md="3">
@@ -2249,12 +2249,11 @@ const QuotationPricingDetails = () => {
                                 <div className="border rounded mb-3">
                                   <div className="px-3 py-2 bg-light border-bottom">
                                     <div className="fw-semibold">
-                                      Hotel Season Price Selection
+                                      Hotel Season Price Summary
                                     </div>
                                     <div className="text-muted small">
-                                      Choose one or more supplements, then choose one season
-                                      for each hotel. Hotels / Person is the sum of those
-                                      selected prices only.
+                                      View the approved supplements and hotel seasons used for
+                                      this option.
                                     </div>
                                   </div>
                                   <div className="p-3 border-bottom">
@@ -2280,15 +2279,14 @@ const QuotationPricingDetails = () => {
                                           }
                                           type="button"
                                           size="sm"
-                                          disabled={field.key === "bb"}
-                                          onClick={() => toggleSupplement(field.key)}
+                                          disabled
                                         >
                                           <i
                                             className={`bx ${
                                               field.key === "bb" ||
                                               selectedSupplements.includes(field.key)
                                                 ? "bx-check"
-                                                : "bx-plus"
+                                                : "bx-lock-alt"
                                             } me-1`}
                                           />
                                           {field.label}
@@ -2471,13 +2469,6 @@ const QuotationPricingDetails = () => {
                                                                   className="p-0 fw-semibold text-start text-decoration-none"
                                                                   type="button"
                                                                   onClick={() => {
-                                                                    setSelectedHotelSeasonKeys(
-                                                                      prev => ({
-                                                                        ...prev,
-                                                                        [hotel.key]:
-                                                                          season.key,
-                                                                      })
-                                                                    );
                                                                     setExpandedPriceSeason(
                                                                       expandedPriceSeason ===
                                                                         season.key
@@ -2506,16 +2497,12 @@ const QuotationPricingDetails = () => {
                                                                     className="ms-2"
                                                                     pill
                                                                   >
-                                                                    Selected
+                                                                    Used
                                                                   </Badge>
                                                                 ) : null}
                                                               </td>
                                                               <td>
                                                                 <div>{season.duration}</div>
-                                                                <div className="text-muted small">
-                                                                  Click season to use it for
-                                                                  this hotel
-                                                                </div>
                                                               </td>
                                                               <td className="text-end">
                                                                 {season.nights}
