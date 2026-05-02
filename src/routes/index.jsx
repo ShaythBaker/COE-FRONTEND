@@ -14,6 +14,7 @@ import Dashboard from "../pages/Dashboard/index";
 // System Settings
 import CompanyUsers from "../pages/Settings/CompanyUsers";
 import DynamicListsPage from "../pages/Settings/DynamicLists/index";
+import SystemInformation from "../pages/Settings/SystemInformation";
 import RoleProtected from "../components/Common/RoleProtected";
 
 // Hotels
@@ -62,10 +63,32 @@ const authProtectedRoutes = [
     roles: ["COMPANY_ADMIN"],
   },
   {
+    path: "/settings/system-information",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN"]}>
+        <SystemInformation />
+      </RoleProtected>
+    ),
+  },
+  {
     path: "/settings/lists",
     component: (
       <RoleProtected allowedRoles={["COMPANY_ADMIN", "CONTRACTING"]}>
         <DynamicListsPage />
+      </RoleProtected>
+    ),
+  },
+  {
+    path: "/guides",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN", "CONTRACTING"]}>
+        <DynamicListsPage
+          defaultListKey="GUIDE_TYPE"
+          lockListKey
+          title="Guides"
+          breadcrumbTitle="Operations"
+          breadcrumbItem="Guides"
+        />
       </RoleProtected>
     ),
   },

@@ -84,6 +84,15 @@ const formatDateLabel = value => {
   });
 };
 
+const formatDateRangeLabel = (from, to) => {
+  const start = formatDateLabel(from);
+  const end = formatDateLabel(to);
+  if (start !== "-" && end !== "-") return `${start} - ${end}`;
+  if (start !== "-") return start;
+  if (end !== "-") return end;
+  return "-";
+};
+
 const asArray = value => (Array.isArray(value) ? value : []);
 
 const getErrorMessage = (error, fallback) =>
@@ -194,6 +203,7 @@ const getOptionHotelRows = (option, boardBasis, pax) => {
         rows.push({
           cityName: cityGroup?.CITY_NAME || stay?.HOTEL_CITY_VALUE || "-",
           hotelName: stay?.HOTEL_NAME || "-",
+          hotelStars: stay?.HOTEL_STARS || option?.SELECTED_HOTEL_STARS || "",
           seasonName:
             season?.SEASON_NAME ||
             season?.HOTEL_SEASON_VALUE ||
@@ -297,6 +307,7 @@ const buildSeasonSummaryRows = (rows, boardBasis, pax, priceFactor = 1) => {
       key: `${row?.cityName || row?.CITY_NAME || "city"}-${row?.hotelName || row?.HOTEL_NAME || "hotel"}-${row?.seasonName || row?.SEASON_NAME || "season"}-${index}`,
       cityName: row?.cityName || row?.CITY_NAME || "-",
       hotelName: row?.hotelName || row?.HOTEL_NAME || "-",
+      hotelStars: row?.hotelStars || row?.HOTEL_STARS || row?.selectedStars || "",
       seasonName: row?.seasonName || row?.SEASON_NAME || "-",
       seasonDuration:
         row?.seasonDuration ||
@@ -1001,7 +1012,27 @@ const QuotationsDetails = () => {
         const hotelRows = asArray(option?.rows).map(row => ({
           cityName: row?.cityName || row?.CITY_NAME || "-",
           hotelName: row?.hotelName || row?.HOTEL_NAME || "-",
+          hotelStars:
+            row?.hotelStars ||
+            row?.HOTEL_STARS ||
+            row?.selectedStars ||
+            option?.optionStars ||
+            option?.selectedStars ||
+            option?.hotelStars ||
+            "",
           seasonName: row?.seasonName || row?.SEASON_NAME || "-",
+          seasonStartDate:
+            row?.seasonStartDate ||
+            row?.FROM_DATE ||
+            row?.START_DATE ||
+            row?.DATE_FROM ||
+            "",
+          seasonEndDate:
+            row?.seasonEndDate ||
+            row?.TO_DATE ||
+            row?.END_DATE ||
+            row?.DATE_TO ||
+            "",
           nights: toNumber(row?.costNights ?? row?.nights),
           rateAfterProfit: toNumber(row?.perPerson ?? row?.rate),
           afterProfit: toNumber(row?.costStayPerPerson ?? row?.stayPerPerson ?? row?.total),
@@ -1040,8 +1071,7 @@ const QuotationsDetails = () => {
         const seasonSummaryRows = buildSeasonSummaryRows(
           option?.rows,
           finalPricing?.BOARD_BASIS || option?.boardBasis || "BB",
-          selected?.NUMBER_OF_PAX || 1,
-          priceFactor
+          selected?.NUMBER_OF_PAX || 1
         );
 
         return {
@@ -1147,7 +1177,7 @@ const QuotationsDetails = () => {
         finalPerPerson,
         detailRows,
         hotelRows: hotelRowsAfterProfit,
-        seasonSummaryRows: buildSeasonSummaryRows(hotelRows, boardBasis, pax, priceFactor),
+        seasonSummaryRows: buildSeasonSummaryRows(hotelRows, boardBasis, pax),
       };
     });
   }, [finalPricing, isApprovedFinalPricing, selected?.NUMBER_OF_PAX]);
@@ -1579,28 +1609,27 @@ const QuotationsDetails = () => {
                                             <th>City</th>
                                             <th>Hotel</th>
                                             <th>Season</th>
-                                            <th className="text-end">Nights</th>
-                                            <th className="text-end">Used Rate</th>
-                                            <th className="text-end">Hotel Price</th>
+                                            <th>Season Dates</th>
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {option.hotelRows.map((row, rowIndex) => (
-                                            <tr
-                                              key={`${row.hotelName}-${row.seasonName}-${rowIndex}`}
-                                            >
-                                              <td>{row.cityName}</td>
-                                              <td className="fw-semibold">{row.hotelName}</td>
-                                              <td>{row.seasonName}</td>
-                                              <td className="text-end">{row.nights}</td>
-                                              <td className="text-end">
-                                                {formatMoney(row.rateAfterProfit)}
-                                              </td>
-                                              <td className="text-end fw-semibold">
-                                                {formatMoney(row.afterProfit)}
-                                              </td>
-                                            </tr>
-                                          ))}
+                                          {option.hotelRows
+                                            .filter(row => Number(row?.nights) > 0)
+                                            .map((row, rowIndex) => (
+                                              <tr
+                                                key={`${row.hotelName}-${row.seasonName}-${rowIndex}`}
+                                              >
+                                                <td>{row.cityName}</td>
+                                                <td className="fw-semibold">{row.hotelName}</td>
+                                                <td>{row.seasonName}</td>
+                                                <td>
+                                                  {formatDateRangeLabel(
+                                                    row.seasonStartDate,
+                                                    row.seasonEndDate
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            ))}
                                         </tbody>
                                       </table>
                                     </div>
