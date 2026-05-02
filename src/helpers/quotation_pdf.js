@@ -30,6 +30,8 @@ const DEFAULT_BRAND_COLORS = {
   paleAccent: [...COLORS.paleAccent],
 };
 
+const SYSTEM_INFORMATION_STORAGE_KEY = "coeSystemInformation";
+
 const asArray = value => (Array.isArray(value) ? value : []);
 
 const normalizeKey = value =>
@@ -42,6 +44,30 @@ const safeText = value => {
   if (value === null || value === undefined) return "-";
   const text = String(value).trim();
   return text || "-";
+};
+
+const readSystemInformation = () => {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(SYSTEM_INFORMATION_STORAGE_KEY) || "{}"
+    );
+
+    return {
+      systemName: saved?.systemName || "",
+      systemLogo: saved?.systemLogo || "",
+      systemEmail: saved?.systemEmail || "",
+      systemCountry: saved?.systemCountry || "",
+      phoneNumber: saved?.phoneNumber || "",
+    };
+  } catch {
+    return {
+      systemName: "",
+      systemLogo: "",
+      systemEmail: "",
+      systemCountry: "",
+      phoneNumber: "",
+    };
+  }
 };
 
 const plainText = value =>
@@ -63,10 +89,25 @@ const formatDate = value => {
   });
 };
 
+const formatDateRange = (from, to) => {
+  const start = formatDate(from);
+  const end = formatDate(to);
+  if (start !== "-" && end !== "-") return `${start} - ${end}`;
+  if (start !== "-") return start;
+  if (end !== "-") return end;
+  return "-";
+};
+
 const formatMoney = value => {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "-";
   return amount.toFixed(2);
+};
+
+const formatStars = value => {
+  const stars = Number(value);
+  if (!Number.isFinite(stars) || stars <= 0) return "-";
+  return `${stars} Star${stars === 1 ? "" : "s"}`;
 };
 
 const unwrapId = value => {
@@ -284,7 +325,13 @@ const addImageContain = (doc, imageDataUrl, x, y, width, height) => {
   }
 };
 
-const addCoverPage = (doc, quotationInfo, places, agentLogoDataUrl = "") => {
+const addCoverPage = (
+  doc,
+  quotationInfo,
+  places,
+  agentLogoDataUrl = "",
+  systemInformation = {}
+) => {
   const heroImage = places.find(place => place.imageDataUrl)?.imageDataUrl || "";
   const secondaryImages = places
     .flatMap(place => place.imageDataUrls || [])
@@ -305,12 +352,21 @@ const addCoverPage = (doc, quotationInfo, places, agentLogoDataUrl = "") => {
   const logoY = 16;
   const logoW = 44;
   const logoH = 28;
+  const systemLogoDataUrl = systemInformation.systemLogo || agentLogoDataUrl;
+  const systemName =
+    systemInformation.systemName || quotationInfo.travelAgentName || "Travel Quotation";
+  const systemDetails = [
+    systemInformation.systemEmail,
+    systemInformation.phoneNumber,
+    systemInformation.systemCountry,
+  ].filter(Boolean);
+
   setColor(doc, COLORS.white, true);
   doc.roundedRect(logoX, logoY, logoW, logoH, 3, 3, "F");
   doc.setDrawColor(...COLORS.line);
   doc.roundedRect(logoX, logoY, logoW, logoH, 3, 3);
-  if (agentLogoDataUrl) {
-    addImageContain(doc, agentLogoDataUrl, logoX + 3, logoY + 3, logoW - 6, logoH - 6);
+  if (systemLogoDataUrl) {
+    addImageContain(doc, systemLogoDataUrl, logoX + 3, logoY + 3, logoW - 6, logoH - 6);
   } else {
     setColor(doc, COLORS.primaryDark);
     doc.setFont("helvetica", "bold");
@@ -324,8 +380,16 @@ const addCoverPage = (doc, quotationInfo, places, agentLogoDataUrl = "") => {
   doc.text("Travel Quotation", logoX + logoW + 8, 26);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text(safeText(quotationInfo.travelAgentName), logoX + logoW + 8, 34);
+  doc.text(safeText(systemName), logoX + logoW + 8, 34);
   doc.text(`Reference ${safeText(quotationInfo.referenceNumber)}`, logoX + logoW + 8, 42);
+  if (systemDetails.length) {
+    doc.setFontSize(7.5);
+    doc.text(
+      doc.splitTextToSize(systemDetails.join("  |  "), 100).slice(0, 1),
+      logoX + logoW + 8,
+      50
+    );
+  }
 
   doc.setFontSize(8);
   doc.text(`Prepared ${formatDate(new Date())}`, PAGE.width - PAGE.margin, 26, {
@@ -352,39 +416,97 @@ const addCoverPage = (doc, quotationInfo, places, agentLogoDataUrl = "") => {
   doc.setFontSize(10);
   doc.text("Approved customer-facing quotation", PAGE.margin, 135);
 
-  const detailY = 176;
+  const detailY = 160;
+  const detailH = 80;
+  const detailW = PAGE.width - PAGE.margin * 2;
   setColor(doc, COLORS.white, true);
-  doc.roundedRect(PAGE.margin, detailY, PAGE.width - PAGE.margin * 2, 54, 4, 4, "F");
+  doc.roundedRect(PAGE.margin, detailY, detailW, detailH, 7, 7, "F");
   doc.setDrawColor(...COLORS.line);
-  doc.roundedRect(PAGE.margin, detailY, PAGE.width - PAGE.margin * 2, 54, 4, 4);
-  setColor(doc, COLORS.primary, true);
-  doc.rect(PAGE.margin, detailY, 3, 54, "F");
+  doc.roundedRect(PAGE.margin, detailY, detailW, detailH, 7, 7);
 
-  const contactLogoX = PAGE.margin + 10;
-  const contactLogoY = detailY + 13;
+  setColor(doc, COLORS.primary, true);
+  doc.rect(PAGE.margin, detailY, 4, detailH, "F");
+  doc.roundedRect(PAGE.margin + 9, detailY + 11, 49, 58, 6, 6, "F");
+  setColor(doc, COLORS.accent, true);
+  doc.roundedRect(PAGE.margin + 9, detailY + 11, 49, 9, 6, 6, "F");
+  doc.rect(PAGE.margin + 9, detailY + 16, 49, 5, "F");
+
+  setColor(doc, COLORS.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.text("TRAVEL AGENT COMPANY", PAGE.margin + 13, detailY + 17);
+
+  const contactLogoX = PAGE.margin + 15;
+  const contactLogoY = detailY + 27;
+  const contactLogoW = 37;
+  const contactLogoH = 26;
   setColor(doc, COLORS.white, true);
-  doc.roundedRect(contactLogoX, contactLogoY, 34, 24, 3, 3, "F");
+  doc.roundedRect(contactLogoX, contactLogoY, contactLogoW, contactLogoH, 4, 4, "F");
   doc.setDrawColor(...COLORS.line);
-  doc.roundedRect(contactLogoX, contactLogoY, 34, 24, 3, 3);
+  doc.roundedRect(contactLogoX, contactLogoY, contactLogoW, contactLogoH, 4, 4);
   if (agentLogoDataUrl) {
-    addImageContain(doc, agentLogoDataUrl, contactLogoX + 3, contactLogoY + 3, 28, 18);
+    addImageContain(
+      doc,
+      agentLogoDataUrl,
+      contactLogoX + 4,
+      contactLogoY + 4,
+      contactLogoW - 8,
+      contactLogoH - 8
+    );
   }
 
-  const agentInfoX = PAGE.margin + 54;
+  setColor(doc, COLORS.white);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6.2);
+  doc.text("Dedicated partner details", PAGE.margin + 17, detailY + 62, {
+    align: "left",
+  });
+
+  const agentInfoX = PAGE.margin + 68;
+  const agentInfoW = detailW - 78;
+  setColor(doc, COLORS.soft, true);
+  doc.roundedRect(agentInfoX, detailY + 10, agentInfoW, 60, 6, 6, "F");
+  setColor(doc, COLORS.white, true);
+  doc.roundedRect(agentInfoX + 3, detailY + 13, agentInfoW - 6, 54, 5, 5, "F");
+
+  setColor(doc, COLORS.accent, true);
+  doc.roundedRect(agentInfoX + 7, detailY + 18, 22, 5, 2.5, 2.5, "F");
+  setColor(doc, COLORS.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(5.8);
+  doc.text("PARTNER", agentInfoX + 18, detailY + 21.5, { align: "center" });
+
   setColor(doc, COLORS.primaryDark);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.text(safeText(quotationInfo.travelAgentName), agentInfoX, detailY + 16);
+  doc.setFontSize(15.5);
+  doc.text(
+    doc.splitTextToSize(safeText(quotationInfo.travelAgentName), 83).slice(0, 1),
+    agentInfoX + 7,
+    detailY + 33
+  );
+  setColor(doc, COLORS.primary, true);
+  doc.roundedRect(agentInfoX + 7, detailY + 38, 30, 1.2, 0.6, 0.6, "F");
 
-  setColor(doc, COLORS.ink);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
   const agentDetails = [
-    quotationInfo.travelAgentEmail,
-    quotationInfo.travelAgentPhone,
-    quotationInfo.travelAgentCountry,
-  ].filter(Boolean);
-  doc.text(doc.splitTextToSize(agentDetails.join("  |  "), 86).slice(0, 2), agentInfoX, detailY + 26);
+    ["Email", quotationInfo.travelAgentEmail],
+    ["Phone", quotationInfo.travelAgentPhone],
+    ["Country", quotationInfo.travelAgentCountry],
+  ].filter(([, value]) => Boolean(value));
+
+  agentDetails.forEach(([label, value], index) => {
+    const chipX = agentInfoX + 7 + index * 32.5;
+    const chipY = detailY + 44;
+    setColor(doc, COLORS.soft, true);
+    doc.roundedRect(chipX, chipY, 29, 14, 3, 3, "F");
+    setColor(doc, COLORS.muted);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(5.7);
+    doc.text(label.toUpperCase(), chipX + 2.5, chipY + 4.4);
+    setColor(doc, COLORS.ink);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.2);
+    doc.text(doc.splitTextToSize(safeText(value), 24).slice(0, 1), chipX + 2.5, chipY + 10);
+  });
 
   const summaryItems = [
     ["Duration", `${safeText(quotationInfo.tripDays)} days / ${safeText(quotationInfo.tripNights)} nights`],
@@ -393,18 +515,18 @@ const addCoverPage = (doc, quotationInfo, places, agentLogoDataUrl = "") => {
   ];
 
   summaryItems.forEach(([label, value], index) => {
-    const x = PAGE.margin + 54 + index * 38;
-    const y = detailY + 38;
+    const x = agentInfoX + 7 + index * 32.5;
+    const y = detailY + 61;
     setColor(doc, COLORS.paleAccent, true);
-    doc.roundedRect(x, y, 32, 10, 2, 2, "F");
+    doc.roundedRect(x, y, 29, 12, 3, 3, "F");
     setColor(doc, COLORS.primaryDark);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.text(label, x + 2.5, y + 4);
+    doc.setFontSize(6.2);
+    doc.text(label, x + 2.5, y + 4.5);
     setColor(doc, COLORS.ink);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.7);
-    doc.text(doc.splitTextToSize(safeText(value), 27).slice(0, 1), x + 2.5, y + 8);
+    doc.setFontSize(6);
+    doc.text(doc.splitTextToSize(safeText(value), 24).slice(0, 1), x + 2.5, y + 9);
   });
 
   if (secondaryImages.length) {
@@ -499,7 +621,9 @@ const addGeneralNotesTitle = (doc, y) => {
   return y + 18;
 };
 
-const getGeneralNoteLines = (doc, text, width) => {
+const getGeneralNoteLines = (doc, text, width, fontSize = 9.2) => {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(fontSize);
   const paragraphs = plainText(text)
     .split(/\r?\n/)
     .map(line => line.trim())
@@ -520,87 +644,96 @@ const addGeneralNotesPanel = (doc, text, y) => {
   const cardWidth = PAGE.width - PAGE.margin * 2;
   const paddingX = 9;
   const paddingY = 9;
-  const lineHeight = 5.4;
   const textWidth = cardWidth - paddingX * 2 - 8;
-  const lines = getGeneralNoteLines(doc, text, textWidth);
-  let index = 0;
+  const maxCardHeight = PAGE.height - PAGE.margin - y - 14;
+  let fontSize = 9.2;
+  let lineHeight = 5.4;
+  let lines = getGeneralNoteLines(doc, text, textWidth, fontSize);
+  let cardHeight = paddingY * 2 + lines.length * lineHeight + 2;
 
-  while (index < lines.length) {
-    y = addPageIfNeeded(doc, y, 34);
-    const availableHeight = PAGE.height - PAGE.margin - y - 14;
-    const maxLines = Math.max(1, Math.floor((availableHeight - paddingY * 2) / lineHeight));
-    const chunk = lines.slice(index, index + maxLines);
-    const cardHeight = paddingY * 2 + chunk.length * lineHeight + 2;
-
-    setColor(doc, COLORS.white, true);
-    doc.roundedRect(cardX, y, cardWidth, cardHeight, 4, 4, "F");
-    doc.setDrawColor(...COLORS.line);
-    doc.roundedRect(cardX, y, cardWidth, cardHeight, 4, 4);
-    setColor(doc, COLORS.primary, true);
-    doc.roundedRect(cardX, y, 3, cardHeight, 1.5, 1.5, "F");
-
-    let lineY = y + paddingY + 4;
-    chunk.forEach(item => {
-      if (item.hasBullet) {
-        setColor(doc, COLORS.primary, true);
-        doc.circle(cardX + paddingX - 1, lineY - 1.4, 1.1, "F");
-      }
-
-      const textX = cardX + paddingX + 6;
-      const colonIndex = String(item.text).indexOf(":");
-      if (colonIndex > 0 && colonIndex < 28) {
-        const label = item.text.slice(0, colonIndex + 1);
-        const value = item.text.slice(colonIndex + 1).trim();
-        setColor(doc, COLORS.primaryDark);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9.2);
-        doc.text(label, textX, lineY);
-
-        setColor(doc, COLORS.ink);
-        doc.setFont("helvetica", "normal");
-        doc.text(value, textX + doc.getTextWidth(label) + 1.5, lineY);
-      } else {
-        setColor(doc, COLORS.ink);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9.2);
-        doc.text(item.text, textX, lineY);
-      }
-
-      lineY += lineHeight;
-    });
-
-    index += chunk.length;
-    y += cardHeight + 8;
-    if (index < lines.length) {
-      doc.addPage();
-      y = PAGE.margin;
-    }
+  while (cardHeight > maxCardHeight && fontSize > 6.2) {
+    fontSize -= 0.4;
+    lineHeight = Math.max(3.8, fontSize * 0.6);
+    lines = getGeneralNoteLines(doc, text, textWidth, fontSize);
+    cardHeight = paddingY * 2 + lines.length * lineHeight + 2;
   }
 
-  return y;
+  setColor(doc, COLORS.white, true);
+  doc.roundedRect(cardX, y, cardWidth, Math.min(cardHeight, maxCardHeight), 4, 4, "F");
+  doc.setDrawColor(...COLORS.line);
+  doc.roundedRect(cardX, y, cardWidth, Math.min(cardHeight, maxCardHeight), 4, 4);
+  setColor(doc, COLORS.primary, true);
+  doc.roundedRect(cardX, y, 3, Math.min(cardHeight, maxCardHeight), 1.5, 1.5, "F");
+
+  let lineY = y + paddingY + 4;
+  const lastVisibleY = y + Math.min(cardHeight, maxCardHeight) - paddingY;
+  lines.forEach(item => {
+    if (lineY > lastVisibleY) return;
+
+    if (item.hasBullet) {
+      setColor(doc, COLORS.primary, true);
+      doc.circle(cardX + paddingX - 1, lineY - 1.4, 1.1, "F");
+    }
+
+    const textX = cardX + paddingX + 6;
+    const colonIndex = String(item.text).indexOf(":");
+    if (colonIndex > 0 && colonIndex < 28) {
+      const label = item.text.slice(0, colonIndex + 1);
+      const value = item.text.slice(colonIndex + 1).trim();
+      setColor(doc, COLORS.primaryDark);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(fontSize);
+      doc.text(label, textX, lineY);
+
+      setColor(doc, COLORS.ink);
+      doc.setFont("helvetica", "normal");
+      doc.text(value, textX + doc.getTextWidth(label) + 1.5, lineY);
+    } else {
+      setColor(doc, COLORS.ink);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(fontSize);
+      doc.text(item.text, textX, lineY);
+    }
+
+    lineY += lineHeight;
+  });
+
+  return y + Math.min(cardHeight, maxCardHeight) + 8;
 };
 
-const addTable = (doc, headers, rows, y, widths) => {
-  const headerHeight = 10;
+const addTable = (doc, headers, rows, y, widths, options = {}) => {
+  const variant = options.variant || "brand";
+  const headerLines = headers.map((header, index) =>
+    doc.splitTextToSize(safeText(header), widths[index] - 4)
+  );
+  const headerHeight = Math.max(
+    10,
+    Math.max(...headerLines.map(lines => lines.length)) * 4 + 4
+  );
   y = addPageIfNeeded(doc, y, headerHeight * 2);
 
-  setColor(doc, COLORS.primaryDark, true);
-  doc.roundedRect(
-    PAGE.margin,
-    y,
-    PAGE.width - PAGE.margin * 2,
-    headerHeight,
-    2,
-    2,
-    "F"
-  );
+  if (variant === "light") {
+    setColor(doc, [239, 243, 248], true);
+    doc.rect(PAGE.margin, y, PAGE.width - PAGE.margin * 2, headerHeight, "F");
+  } else {
+    setColor(doc, COLORS.primaryDark, true);
+    doc.roundedRect(
+      PAGE.margin,
+      y,
+      PAGE.width - PAGE.margin * 2,
+      headerHeight,
+      2,
+      2,
+      "F"
+    );
+  }
 
   let x = PAGE.margin + 3;
-  setColor(doc, [255, 255, 255]);
+  setColor(doc, variant === "light" ? COLORS.ink : [255, 255, 255]);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
-  headers.forEach((header, index) => {
-    doc.text(header, x, y + 6.3);
+  headerLines.forEach((lines, index) => {
+    doc.text(lines, x, y + 5);
     x += widths[index];
   });
 
@@ -626,6 +759,7 @@ const addTable = (doc, headers, rows, y, widths) => {
     x = PAGE.margin + 3;
     setColor(doc, COLORS.ink);
     cellLines.forEach((lines, index) => {
+      doc.setFont("helvetica", variant === "light" && index === 1 ? "bold" : "normal");
       doc.text(lines, x, y + 5);
       x += widths[index];
     });
@@ -635,72 +769,7 @@ const addTable = (doc, headers, rows, y, widths) => {
   return y + 4;
 };
 
-const addOptionPricingSummary = (doc, option, y) => {
-  y = addPageIfNeeded(doc, y, 58);
-  setColor(doc, COLORS.paleAccent, true);
-  doc.roundedRect(PAGE.margin, y, PAGE.width - PAGE.margin * 2, 46, 4, 4, "F");
-
-  setColor(doc, COLORS.primaryDark);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("Clear Price Summary", PAGE.margin + 5, y + 8);
-
-  setColor(doc, COLORS.muted);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text(
-    "Customer-facing per-person totals for the selected option.",
-    PAGE.margin + 5,
-    y + 14
-  );
-
-  const items = [
-    {
-      label: "Hotels / Person",
-      value: formatMoney(option.hotelsDisplayPrice),
-      subtitle: "Selected seasons",
-    },
-    {
-      label: "Shared / Person",
-      value: formatMoney(option.sharedDisplayPrice),
-      subtitle: "Transport, meals, fees",
-    },
-    {
-      label: "Final Total",
-      value: formatMoney(option.finalPerPerson),
-      subtitle: "Per person",
-    },
-  ];
-
-  const gap = 3;
-  const cardWidth = (PAGE.width - PAGE.margin * 2 - 10 - gap * 2) / 3;
-  const top = y + 20;
-
-  items.forEach((item, index) => {
-    const x = PAGE.margin + 5 + index * (cardWidth + gap);
-    setColor(doc, [255, 255, 255], true);
-    doc.roundedRect(x, top, cardWidth, 22, 2, 2, "F");
-
-    setColor(doc, COLORS.muted);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.text(item.label, x + 2.5, top + 5);
-
-    setColor(doc, index === items.length - 1 ? COLORS.primary : COLORS.ink);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(index === items.length - 1 ? 11 : 10);
-    doc.text(item.value, x + 2.5, top + 12);
-
-    setColor(doc, COLORS.muted);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.5);
-    doc.text(doc.splitTextToSize(item.subtitle, cardWidth - 5), x + 2.5, top + 18);
-  });
-
-  return y + 52;
-};
-
-const buildSupplementTotalRows = (rows = [], optionName = "Option") => {
+const buildSupplementTotalRows = (rows = [], optionName = "Option", optionStars = "") => {
   const applicableRows = asArray(rows).filter(row => Number(row?.nights) > 0);
   if (!applicableRows.length) return [];
 
@@ -714,6 +783,7 @@ const buildSupplementTotalRows = (rows = [], optionName = "Option") => {
 
       return {
         optionName,
+        optionStars: formatStars(optionStars),
         supplement,
         price,
       };
@@ -721,27 +791,34 @@ const buildSupplementTotalRows = (rows = [], optionName = "Option") => {
     .filter(row => row.price > 0);
 };
 
-const addSeasonSummaryTable = (doc, rows = [], y, optionName = "Option") => {
-  const supplementRows = buildSupplementTotalRows(rows, optionName);
+const addSeasonSummaryTable = (
+  doc,
+  rows = [],
+  y,
+  optionName = "Option",
+  optionStars = ""
+) => {
+  const supplementRows = buildSupplementTotalRows(rows, optionName, optionStars);
   if (!supplementRows.length) return y;
 
   y = addSectionTitle(
     doc,
-    "Hotel Season Price Summary",
-    "Supplement totals calculated from all hotels used in this option.",
+    "supplements",
+    "",
     y + 2
   );
 
   return addTable(
     doc,
-    ["Option Name", "Supplement", "Price"],
+    ["Option Name", "Stars", "Supplement", "Price"],
     supplementRows.map(row => [
       row.optionName,
+      row.optionStars,
       row.supplement,
       formatMoney(row.price),
     ]),
     y,
-    [84, 44, 42]
+    [62, 26, 42, 40]
   );
 };
 
@@ -806,7 +883,7 @@ const addPlaceChapterPage = (doc, place, index) => {
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
-  doc.text("CHAPTER", PAGE.margin, 169);
+  doc.text("description", PAGE.margin, 169);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
@@ -975,17 +1052,11 @@ const addMetricCard = (doc, item, x, y, width, options = {}) => {
 
 const addApprovedQuotationDesign = (doc, quotation, quotationInfo, options, daysRoutes, places) => {
   const approvedOptions = asArray(options);
-  const primaryOption = approvedOptions[0] || {};
   let y = 76;
 
   const cardGap = 4;
-  const cardWidth = (PAGE.width - PAGE.margin * 2 - cardGap * 2) / 3;
+  const cardWidth = (PAGE.width - PAGE.margin * 2 - cardGap) / 2;
   const metrics = [
-    {
-      label: "Price / Person",
-      value: formatMoney(primaryOption.finalPerPerson),
-      subtext: safeText(primaryOption.optionName),
-    },
     {
       label: "Pax",
       value: safeText(quotationInfo.paxCount),
@@ -1000,9 +1071,9 @@ const addApprovedQuotationDesign = (doc, quotation, quotationInfo, options, days
 
   metrics.forEach((item, index) => {
     addMetricCard(doc, item, PAGE.margin + index * (cardWidth + cardGap), y, cardWidth, {
-      fill: index === 0 ? COLORS.paleAccent : COLORS.white,
-      valueColor: index === 0 ? COLORS.primaryDark : COLORS.ink,
-      valueSize: index === 0 ? 12 : 11,
+      fill: COLORS.white,
+      valueColor: COLORS.ink,
+      valueSize: 11,
     });
   });
 
@@ -1071,10 +1142,19 @@ export const generateQuotationPdf = async ({
   const agentLogoDataUrl = await getImageDataUrl(
     quotationInfo.travelAgentLogoAttachmentId
   );
-  const brandColors = await getLogoPalette(agentLogoDataUrl);
+  const systemInformation = readSystemInformation();
+  const brandLogoDataUrl = systemInformation.systemLogo || agentLogoDataUrl;
+  const brandColors = await getLogoPalette(brandLogoDataUrl);
   applyBrandColors(brandColors);
 
-  addCoverPage(doc, quotationInfo, places, agentLogoDataUrl);
+  addCoverPage(doc, quotationInfo, places, agentLogoDataUrl, systemInformation);
+  if (places.length) {
+    places.forEach((place, index) => {
+      doc.addPage();
+      addPlaceChapterPage(doc, place, index);
+    });
+  }
+
   doc.addPage();
   addHeader(doc, quotationInfo, places[0]?.imageDataUrl || "");
   let y = addApprovedQuotationDesign(
@@ -1089,7 +1169,7 @@ export const generateQuotationPdf = async ({
   y = addSectionTitle(
     doc,
     "Quotation Information",
-    "Main trip details, validity, guests, and travel profile.",
+    "",
     y
   );
   y = addInfoGrid(
@@ -1111,9 +1191,9 @@ export const generateQuotationPdf = async ({
   y += 6;
   asArray(approvedFinalOptions).forEach((option, index) => {
     y = addPageIfNeeded(doc, y, 36);
-    setColor(doc, index === 0 ? COLORS.primaryDark : COLORS.soft, true);
+    setColor(doc, index <= 1 ? COLORS.primaryDark : COLORS.soft, true);
     doc.roundedRect(PAGE.margin, y, PAGE.width - PAGE.margin * 2, 20, 3, 3, "F");
-    setColor(doc, index === 0 ? [255, 255, 255] : COLORS.ink);
+    setColor(doc, index <= 1 ? [255, 255, 255] : COLORS.ink);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.text(safeText(option.optionName), PAGE.margin + 5, y + 8);
@@ -1124,39 +1204,47 @@ export const generateQuotationPdf = async ({
     });
     y += 25;
 
-    y = addOptionPricingSummary(doc, option, y);
-    y = addSeasonSummaryTable(
-      doc,
-      option.seasonSummaryRows || [],
-      y,
-      safeText(option.optionName)
-    );
-
     const visibleHotelRows = asArray(option.hotelRows).filter(
       row => Number(row?.nights) > 0
     );
 
     if (visibleHotelRows.length) {
+      y = addSectionTitle(
+        doc,
+        "Hotels Seasons",
+        "",
+        y + 2
+      );
+
       y = addTable(
         doc,
-        ["City", "Hotel", "Season", "Nights", "Hotel Price"],
+        ["City", "Hotel", "Stars", "Season", "Season Dates"],
         visibleHotelRows.map(row => [
           row.cityName,
           row.hotelName,
+          formatStars(row.hotelStars || option.optionStars),
           row.seasonName,
-          row.nights,
-          formatMoney(row.afterProfit),
+          formatDateRange(row.seasonStartDate, row.seasonEndDate),
         ]),
         y,
-        [28, 47, 48, 22, 35]
+        [30, 50, 24, 36, 40],
+        { variant: "light" }
       );
     }
+
+    y = addSeasonSummaryTable(
+      doc,
+      option.seasonSummaryRows || [],
+      y,
+      safeText(option.optionName),
+      option.optionStars
+    );
   });
 
   y = addSectionTitle(
     doc,
     "Trip Schedule",
-    "The trip follows these routes day by day, including visits and meals.",
+    "",
     y + 3
   );
   asArray(daysRoutes).forEach(day => {
@@ -1188,18 +1276,8 @@ export const generateQuotationPdf = async ({
     );
   });
 
-  if (places.length) {
-    places.forEach((place, index) => {
-      doc.addPage();
-      addPlaceChapterPage(doc, place, index);
-    });
-
-    doc.addPage();
-    addHeader(doc, quotationInfo, places[0]?.imageDataUrl || "");
-    y = 76;
-  }
-
-  y = addGeneralNotesTitle(doc, y + 3);
+  doc.addPage();
+  y = addGeneralNotesTitle(doc, PAGE.margin + 5);
   addGeneralNotesPanel(doc, quotation?.GENERAL_NOTES || "No general notes were added.", y);
 
   addFooter(doc);

@@ -220,6 +220,20 @@ const SidebarContent = (props) => {
               <>
                 <li className="menu-title">System Settings</li>
 
+                <li
+                  className={
+                    isActive("/settings/system-information") ? "mm-active" : ""
+                  }
+                >
+                  <Link
+                    to="/settings/system-information"
+                    className="waves-effect"
+                  >
+                    <i className="bx bx-info-circle" />
+                    <span>System Information</span>
+                  </Link>
+                </li>
+
                 <li className={isActive("/settings/users") ? "mm-active" : ""}>
                   <Link to="/settings/users" className="waves-effect">
                     <i className="bx bx-user" />
@@ -283,6 +297,15 @@ const SidebarContent = (props) => {
                 <Link to="/hotels" className="waves-effect">
                   <i className="bx bx-hotel" />
                   <span>Hotels</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canManageDynamicLists ? (
+              <li className={isActive("/guides") ? "mm-active" : ""}>
+                <Link to="/guides" className="waves-effect">
+                  <i className="bx bx-map-pin" />
+                  <span>Guides</span>
                 </Link>
               </li>
             ) : null}
