@@ -755,6 +755,65 @@ const QuotationPricingDetails = () => {
       return periodRows;
     };
 
+    const getSelectedHotelPriceTotal = rows => {
+      const cityMap = new Map();
+
+      rows.forEach((row, rowIndex) => {
+        const cityName = row.cityName || "-";
+        const hotelName = row.hotelName || "-";
+        const seasonName = row.seasonName || "-";
+        const cityKey = normalizeKey(cityName) || `city-${rowIndex}`;
+        const hotelKey = `${cityKey}|${normalizeKey(hotelName) || `hotel-${rowIndex}`}`;
+        const seasonKey = [
+          hotelKey,
+          normalizeKey(seasonName),
+          getDateKey(row.seasonStartDate),
+          getDateKey(row.seasonEndDate),
+        ].join("|");
+
+        if (!cityMap.has(cityKey)) {
+          cityMap.set(cityKey, new Map());
+        }
+
+        const hotelMap = cityMap.get(cityKey);
+        if (!hotelMap.has(hotelKey)) {
+          hotelMap.set(hotelKey, new Map());
+        }
+
+        const seasonMap = hotelMap.get(hotelKey);
+        if (!seasonMap.has(seasonKey)) {
+          seasonMap.set(seasonKey, []);
+        }
+
+        seasonMap.get(seasonKey).push(row);
+      });
+
+      return Array.from(cityMap.values()).reduce(
+        (cityTotal, hotelMap) =>
+          cityTotal +
+          Array.from(hotelMap.entries()).reduce((hotelTotal, [hotelKey, seasonMap]) => {
+            const seasons = Array.from(seasonMap.entries());
+            const selectedSeasonKey =
+              selectedHotelSeasonKeys[hotelKey] || seasons[0]?.[0] || "";
+            const selectedSeasonRows =
+              seasonMap.get(selectedSeasonKey) || seasons[0]?.[1] || [];
+
+            return (
+              hotelTotal +
+              selectedSeasonRows.reduce((seasonTotal, row) => {
+                const perNight = selectedSupplements.reduce(
+                  (sum, field) => sum + Number(row[field] || 0),
+                  0
+                );
+
+                return seasonTotal + perNight * Number(row.nights || 0);
+              }, 0)
+            );
+          }, 0),
+        0
+      );
+    };
+
     const accommodationOptions = Array.isArray(accommodation?.OPTIONS)
       ? accommodation.OPTIONS
       : [];
@@ -783,10 +842,45 @@ const QuotationPricingDetails = () => {
             savedSeasonEntries,
             financeSeasonEntries
           );
+          const matchingSeasonEntries = mergedSeasonEntries.filter(season => {
+            if (!stayStartDate || !nights) return true;
+
+            const seasonRates = {
+              ...(stay?.SEASON_RATES || {}),
+              ...(season || {}),
+            };
+            const seasonStartDate = getDateValue(
+              seasonRates?.FROM_DATE,
+              seasonRates?.START_DATE,
+              seasonRates?.DATE_FROM,
+              stay?.FROM_DATE,
+              stay?.START_DATE,
+              stay?.DATE_FROM
+            );
+            const seasonEndDate = getDateValue(
+              seasonRates?.TO_DATE,
+              seasonRates?.END_DATE,
+              seasonRates?.DATE_TO,
+              stay?.TO_DATE,
+              stay?.END_DATE,
+              stay?.DATE_TO
+            );
+
+            if (!seasonStartDate || !seasonEndDate) return true;
+
+            return getOverlapNights(
+              stayStartDate,
+              nights,
+              seasonStartDate,
+              seasonEndDate
+            ) > 0;
+          });
           const seasonEntries =
-            mergedSeasonEntries.length > 0
-              ? mergedSeasonEntries
-              : [stay?.SEASON_RATES || {}];
+            matchingSeasonEntries.length > 0
+              ? matchingSeasonEntries
+              : mergedSeasonEntries.length > 0
+                ? []
+                : [stay?.SEASON_RATES || {}];
 
           seasonEntries.forEach((season, seasonIndex) => {
             const seasonRates = {
@@ -811,12 +905,19 @@ const QuotationPricingDetails = () => {
               stay?.DATE_TO
             );
             const seasonNights =
-              seasonEntries.length > 1
+              mergedSeasonEntries.length > 1
                 ? getOverlapNights(stayStartDate, nights, seasonStartDate, seasonEndDate)
                 : nights;
 
             const costNights = seasonNights > 0 ? seasonNights : 0;
-            const displayNights = seasonNights > 0 ? seasonNights : nights;
+            const displayNights =
+              mergedSeasonEntries.length > 1
+                ? costNights
+                : seasonNights > 0
+                  ? seasonNights
+                  : nights;
+
+            if (mergedSeasonEntries.length > 1 && costNights === 0) return;
 
             const stayPerPerson = perPerson * displayNights;
             const costStayPerPerson = perPerson * costNights;
@@ -946,10 +1047,7 @@ const QuotationPricingDetails = () => {
         optionStars: option?.SELECTED_HOTEL_STARS || rows[0]?.hotelStars || "",
         rows,
         hotelStayRows,
-        hotelsPerPerson: rows.reduce(
-          (sum, row) => sum + (row.costStayPerPerson ?? row.stayPerPerson),
-          0
-        ),
+        hotelsPerPerson: getSelectedHotelPriceTotal(rows),
         supplementRows,
         supplementGroups,
       };
@@ -1177,6 +1275,8 @@ const QuotationPricingDetails = () => {
     savedAccommodationData,
     hotelSeasonRatesById,
     hotelSeasonNameById,
+    selectedHotelSeasonKeys,
+    selectedSupplements,
   ]);
 
   const accommodationOptionChoices = useMemo(
