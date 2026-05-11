@@ -69,6 +69,12 @@ const SidebarContent = (props) => {
     "CONTRACTING",
   ]);
 
+  const canManageGuides = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "TOUR_OPERATION",
+    "OPERATION",
+  ]);
+
   const canSeePlaces = roles.length > 0;
 
   const isActive = (path) =>
@@ -301,7 +307,7 @@ const SidebarContent = (props) => {
               </li>
             ) : null}
 
-            {canManageDynamicLists ? (
+            {canManageGuides ? (
               <li className={isActive("/guides") ? "mm-active" : ""}>
                 <Link to="/guides" className="waves-effect">
                   <i className="bx bx-map-pin" />
