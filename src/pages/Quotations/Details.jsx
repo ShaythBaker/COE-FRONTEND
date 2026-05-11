@@ -715,6 +715,92 @@ const FinalSeasonSummaryTable = ({ rows }) => {
   );
 };
 
+const buildFinalSupplementRows = (rows, optionName, optionStars) =>
+  ["BB", "HB", "FB", "SS"]
+    .map(label => {
+      const key = label.toLowerCase();
+      const price = asArray(rows)
+        .filter(row => Number(row?.nights) > 0)
+        .reduce((sum, row) => sum + toNumber(row?.[key]), 0);
+
+      return {
+        key: `${optionName}-${label}`,
+        optionName,
+        optionStars,
+        supplement: label,
+        price,
+      };
+    })
+    .filter(row => row.price > 0);
+
+const FinalSupplementPriceTable = ({ option }) => {
+  const rows = buildFinalSupplementRows(
+    option.seasonSummaryRows,
+    option.optionName,
+    option.optionStars
+  );
+
+  if (!rows.length) return null;
+
+  return (
+    <div className="table-responsive bg-white border rounded mb-3">
+      <table className="table table-sm align-middle mb-0">
+        <thead className="table-light">
+          <tr>
+            <th>Option Name</th>
+            <th>Stars</th>
+            <th>Supplement</th>
+            <th className="text-end">Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.key}>
+              <td>{row.optionName}</td>
+              <td>{row.optionStars ? `${row.optionStars} Stars` : "-"}</td>
+              <td className="fw-semibold">{row.supplement}</td>
+              <td className="text-end fw-semibold">{formatMoney(row.price)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const FinalHotelSeasonTable = ({ rows }) => {
+  const visibleRows = asArray(rows).filter(row => Number(row?.nights) > 0);
+
+  if (!visibleRows.length) return null;
+
+  return (
+    <div className="table-responsive bg-white border rounded mb-3">
+      <table className="table table-sm align-middle mb-0">
+        <thead className="table-light">
+          <tr>
+            <th>City</th>
+            <th>Hotel</th>
+            <th>Season</th>
+            <th>Season Dates</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visibleRows.map((row, rowIndex) => (
+            <tr key={`${row.hotelName}-${row.seasonName}-${rowIndex}`}>
+              <td>{row.cityName}</td>
+              <td className="fw-semibold">{row.hotelName}</td>
+              <td>{row.seasonName}</td>
+              <td>
+                {formatDateRangeLabel(row.seasonStartDate, row.seasonEndDate)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 const QuotationsDetails = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
@@ -1545,95 +1631,8 @@ const QuotationsDetails = () => {
 
                               {isOpen ? (
                                 <div className="bg-light border-top p-3">
-                                  <FinalOptionPriceSummary option={option} />
-                                  <FinalSeasonSummaryTable
-                                    rows={option.seasonSummaryRows}
-                                  />
-
-                                  <Row className="g-3 mb-3">
-                                    <Col md="4">
-                                      <SummaryField
-                                        icon="bx bx-hotel"
-                                        label="Hotels / Person"
-                                        value={formatMoney(option.hotelsDisplayPrice)}
-                                      />
-                                    </Col>
-                                    <Col md="4">
-                                      <SummaryField
-                                        icon="bx bx-plus-circle"
-                                        label="Other Services / Person"
-                                        value={formatMoney(option.sharedDisplayPrice)}
-                                      />
-                                    </Col>
-                                    <Col md="4">
-                                      <SummaryField
-                                        icon="bx bx-purchase-tag"
-                                        label="Final Total / Person"
-                                        value={formatMoney(option.finalPerPerson)}
-                                      />
-                                    </Col>
-                                  </Row>
-
-                                  <div className="table-responsive bg-white border rounded mb-3">
-                                    <table className="table table-sm align-middle mb-0">
-                                      <thead className="table-light">
-                                        <tr>
-                                          <th>Price Source</th>
-                                          <th className="text-end">Price</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {option.detailRows.map(row => (
-                                          <tr key={row.name}>
-                                            <td>{row.name}</td>
-                                            <td className="text-end fw-semibold">
-                                              {formatMoney(row.afterProfit)}
-                                            </td>
-                                          </tr>
-                                        ))}
-                                        <tr className="table-primary">
-                                          <td className="fw-bold">Final Price / Person</td>
-                                          <td className="text-end fw-bold">
-                                            {formatMoney(option.finalPerPerson)}
-                                          </td>
-                                        </tr>
-                                      </tbody>
-                                    </table>
-                                  </div>
-
-                                  {option.hotelRows.length ? (
-                                    <div className="table-responsive bg-white border rounded">
-                                      <table className="table table-sm align-middle mb-0">
-                                        <thead className="table-light">
-                                          <tr>
-                                            <th>City</th>
-                                            <th>Hotel</th>
-                                            <th>Season</th>
-                                            <th>Season Dates</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {option.hotelRows
-                                            .filter(row => Number(row?.nights) > 0)
-                                            .map((row, rowIndex) => (
-                                              <tr
-                                                key={`${row.hotelName}-${row.seasonName}-${rowIndex}`}
-                                              >
-                                                <td>{row.cityName}</td>
-                                                <td className="fw-semibold">{row.hotelName}</td>
-                                                <td>{row.seasonName}</td>
-                                                <td>
-                                                  {formatDateRangeLabel(
-                                                    row.seasonStartDate,
-                                                    row.seasonEndDate
-                                                  )}
-                                                </td>
-                                              </tr>
-                                            ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  ) : null}
+                                  <FinalHotelSeasonTable rows={option.hotelRows} />
+                                  <FinalSupplementPriceTable option={option} />
                                 </div>
                               ) : null}
                             </div>
