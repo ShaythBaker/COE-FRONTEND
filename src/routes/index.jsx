@@ -54,6 +54,10 @@ import ExtraServicesQuotation from "../pages/Quotations/ExtraServices";
 import QuotationPricingList from "../pages/QuotationPricing/List";
 import QuotationPricingDetails from "../pages/QuotationPricing/Details";
 
+// Reservation Files
+import ReservationFilesList from "../pages/ReservationFiles/List";
+import ReservationFileDetails from "../pages/ReservationFiles/Details";
+
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
 
@@ -132,6 +136,9 @@ const authProtectedRoutes = [
   { path: "/quotations/:id/plan", component: <PlanQuotation /> },
   { path: "/quotations/:id/accommodation", component: <Accommodation /> },
   { path: "/quotations/:id/extra-services", component: <ExtraServicesQuotation /> },
+
+  { path: "/reservation-files", component: <ReservationFilesList /> },
+  { path: "/reservation-files/:id", component: <ReservationFileDetails /> },
 
   {
     path: "/quotation-pricing",

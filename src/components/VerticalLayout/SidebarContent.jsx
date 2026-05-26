@@ -64,6 +64,16 @@ const SidebarContent = (props) => {
     "TOUR_OPERATION",
   ]);
 
+  const canSeeReservationFiles = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "CONTRACTING",
+    "TOUR_OPERATION",
+    "OPERATION",
+    "USER",
+    "USER_COMPANY",
+    "ACCOUNTING",
+  ]);
+
   const canManageExtraServices = hasAnyRole(roles, [
     "COMPANY_ADMIN",
     "CONTRACTING",
@@ -364,6 +374,15 @@ const SidebarContent = (props) => {
                 <Link to="/quotations" className="waves-effect">
                   <i className="bx bx-file" />
                   <span>Quotations</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeReservationFiles ? (
+              <li className={isActive("/reservation-files") ? "mm-active" : ""}>
+                <Link to="/reservation-files" className="waves-effect">
+                  <i className="bx bx-folder-open" />
+                  <span>Reservations File</span>
                 </Link>
               </li>
             ) : null}

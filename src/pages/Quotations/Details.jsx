@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -25,6 +25,7 @@ import {
   fetchQuotationsLookups,
 } from "../../store/Quotations/actions";
 import { sendQuotationForPricing } from "../../store/QuotationPricing/actions";
+import { convertQuotationToReservationFile } from "../../store/ReservationFiles/actions";
 import { get, patch } from "../../helpers/api_helper";
 import { notifyError, notifySuccess } from "../../helpers/notify";
 import { hasAnyRole } from "../../helpers/coe_roles";
@@ -804,9 +805,11 @@ const FinalHotelSeasonTable = ({ rows }) => {
 const QuotationsDetails = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
+  const navigate = useNavigate();
 
   const { selected, loading, lookups } = useSelector(s => s.Quotations || {});
   const pricingSaving = useSelector(s => s.QuotationPricing?.saving || false);
+  const reservationSaving = useSelector(s => s.ReservationFiles?.saving || false);
   const roles = useSelector(s => s.Login?.roles || []);
   const canViewPrices = hasAnyRole(roles, PRICE_VIEW_ROLES);
 
@@ -1054,6 +1057,28 @@ const QuotationsDetails = () => {
     }
 
     dispatch(sendQuotationForPricing(selected?._id || id, {}));
+  };
+
+  const handleConvertToReservationFile = () => {
+    const quotationId = selected?._id || id;
+
+    if (!quotationId) {
+      notifyError("Quotation id is missing.");
+      return;
+    }
+
+    if (!isApprovedQuotation) {
+      notifyError("Only approved quotations can be converted to reservation files.");
+      return;
+    }
+
+    dispatch(
+      convertQuotationToReservationFile(quotationId, reservationFile => {
+        if (reservationFile?._id) {
+          navigate(`/reservation-files/${reservationFile._id}`);
+        }
+      })
+    );
   };
 
   const isApprovedFinalPricing =
@@ -1378,6 +1403,22 @@ const QuotationsDetails = () => {
                                   <i className="bx bx-send me-1" />
                                 )}
                                 Send for Pricing
+                              </Button>
+                            ) : null}
+
+                            {isApprovedQuotation ? (
+                              <Button
+                                color="success"
+                                type="button"
+                                onClick={handleConvertToReservationFile}
+                                disabled={reservationSaving}
+                              >
+                                {reservationSaving ? (
+                                  <Spinner size="sm" className="me-2" />
+                                ) : (
+                                  <i className="bx bx-transfer me-1" />
+                                )}
+                                Convert to Reservation File
                               </Button>
                             ) : null}
 

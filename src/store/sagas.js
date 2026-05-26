@@ -21,6 +21,7 @@ import quotationAccumidationSaga from "./QuotationAccumidation/saga";
 import ExtraServicesSaga from "./ExtraServices/saga";
 import QuotationExtraServicesSaga from "./QuotationExtraServices/saga";
 import quotationPricingSaga from "./QuotationPricing/saga";
+import reservationFilesSaga from "./ReservationFiles/saga";
 
 export default function* rootSaga() {
   yield all([
@@ -41,5 +42,6 @@ export default function* rootSaga() {
     fork(ExtraServicesSaga),
     fork(QuotationExtraServicesSaga),
     fork(quotationPricingSaga),
+    fork(reservationFilesSaga),
   ]);
 }

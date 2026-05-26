@@ -29,6 +29,7 @@ import QuotationAccumidation from "./QuotationAccumidation/reducer";
 import ExtraServices from "./ExtraServices/reducer";
 import QuotationExtraServices from "./QuotationExtraServices/reducer";
 import QuotationPricing from "./QuotationPricing/reducer";
+import ReservationFiles from "./ReservationFiles/reducer";
 
 const rootReducer = combineReducers({
   Layout,
@@ -51,6 +52,7 @@ const rootReducer = combineReducers({
   ExtraServices,
   QuotationExtraServices,
   QuotationPricing,
+  ReservationFiles,
 });
 
 export default rootReducer;
