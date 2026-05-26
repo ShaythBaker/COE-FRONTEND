@@ -1,16 +1,16 @@
 // path: src/helpers/url_helper.jsx
 
-//REGISTER
+// REGISTER
 export const POST_FAKE_REGISTER = "/post-fake-register";
 
-//LOGIN
+// LOGIN
 export const POST_FAKE_LOGIN = "/post-fake-login";
 export const POST_FAKE_JWT_LOGIN = "/post-jwt-login";
 export const POST_FAKE_PASSWORD_FORGET = "/fake-forget-pwd";
 export const POST_FAKE_JWT_PASSWORD_FORGET = "/jwt-forget-pwd";
 export const SOCIAL_LOGIN = "/social-login";
 
-// REAL BACKEND LOGIN (kept for compatibility with your saga)
+// REAL BACKEND LOGIN
 export const POST_JWT_LOGIN = "/auth/login";
 
 // REQUIRED COE AUTH ENDPOINT CONSTANTS
@@ -18,7 +18,7 @@ export const LOGIN = "/auth/login";
 export const REFRESH = "/auth/refresh";
 export const LOGOUT = "/auth/logout";
 
-//PROFILE
+// PROFILE
 export const POST_EDIT_JWT_PROFILE = "/post-jwt-profile";
 export const POST_EDIT_PROFILE = "/post-fake-profile";
 
@@ -26,7 +26,7 @@ export const POST_EDIT_PROFILE = "/post-fake-profile";
 // Company Users (REAL API)
 // ===========================
 export const USERS = "/users";
-export const USER_BY_ID = (id) => `/users/${id}`;
+export const USER_BY_ID = id => `/users/${id}`;
 
 // =====================
 // COE Modules List Items
@@ -37,24 +37,24 @@ export const LIST_ITEMS = "/list-items";
 // Transportation Sizes
 // =====================
 export const TRANSPORTATION_SIZES = "/transportation-sizes";
-export const TRANSPORTATION_SIZE_BY_ID = (id) => `/transportation-sizes/${id}`;
+export const TRANSPORTATION_SIZE_BY_ID = id => `/transportation-sizes/${id}`;
 
 // =====================
 // Transportation Types
 // =====================
 export const TRANSPORTATION_TYPES = "/transportation-types";
-export const TRANSPORTATION_TYPE_BY_ID = (id) => `/transportation-types/${id}`;
+export const TRANSPORTATION_TYPE_BY_ID = id => `/transportation-types/${id}`;
 export const TRANSPORTATION_COMPANIES_BEST_RATE = (
   pax,
   typeId,
-  transportationCompanyId,
+  transportationCompanyId
 ) =>
   `/transportation-companies/best-rate?PAX=${encodeURIComponent(
-    pax,
+    pax
   )}&TYPE=${encodeURIComponent(typeId)}${
     transportationCompanyId
       ? `&TRANSPORTATION_COMPANY_ID=${encodeURIComponent(
-          transportationCompanyId,
+          transportationCompanyId
         )}`
       : ""
   }`;
@@ -63,9 +63,9 @@ export const TRANSPORTATION_COMPANIES_BEST_RATE = (
 // Transportation Companies
 // =====================
 export const TRANSPORTATION_COMPANIES = "/transportation-companies";
-export const TRANSPORTATION_COMPANY_BY_ID = (id) =>
+export const TRANSPORTATION_COMPANY_BY_ID = id =>
   `/transportation-companies/${id}`;
-export const TRANSPORTATION_COMPANY_RATES = (id) =>
+export const TRANSPORTATION_COMPANY_RATES = id =>
   `/transportation-companies/${id}/rates`;
 export const TRANSPORTATION_COMPANY_RATE_BY_ID = (companyId, rateId) =>
   `/transportation-companies/${companyId}/rates/${rateId}`;
@@ -74,60 +74,82 @@ export const TRANSPORTATION_COMPANY_RATE_BY_ID = (companyId, rateId) =>
 // COE Attachments
 // =====================
 export const ATTACHMENTS = "/attachments";
-export const ATTACHMENT_BY_ID = (id) => `/attachments/${id}`;
+export const ATTACHMENT_BY_ID = id => `/attachments/${id}`;
 
-// ✅ HOTELS
+// =====================
+// Guides
+// =====================
+export const GUIDES = "/guides";
+export const GUIDE_BY_ID = id => `/guides/${id}`;
+export const GUIDE_LANGUAGES = "/guides/languages";
+
+// =====================
+// Hotels
+// =====================
 export const HOTELS = "/hotels";
-export const HOTEL_BY_ID = (id) => `/hotels/${id}`;
+export const HOTEL_BY_ID = id => `/hotels/${id}`;
 
-// ✅ HOTEL SEASON RATES
-export const HOTEL_SEASON_RATES = (hotelId) =>
+// =====================
+// Hotel Season Rates
+// =====================
+export const HOTEL_SEASON_RATES = hotelId =>
   `/hotels/${hotelId}/season-rates`;
 export const HOTEL_SEASON_RATE_BY_ID = (hotelId, rateId) =>
   `/hotels/${hotelId}/season-rates/${rateId}`;
 
-// RESTAURANTS
+// =====================
+// Restaurants
+// =====================
 export const RESTAURANTS = "/restaurants";
-export const RESTAURANT_BY_ID = (id) => `/restaurants/${id}`;
-export const RESTAURANT_MEALS = (restaurantId) =>
+export const RESTAURANT_BY_ID = id => `/restaurants/${id}`;
+export const RESTAURANT_MEALS = restaurantId =>
   `/restaurants/${restaurantId}/meals`;
 export const RESTAURANT_MEAL_BY_ID = (restaurantId, mealId) =>
   `/restaurants/${restaurantId}/meals/${mealId}`;
 
-// TRAVEL AGENTS
+// =====================
+// Travel Agents
+// =====================
 export const TRAVEL_AGENTS = "/agent";
-export const TRAVEL_AGENT_BY_ID = (id) => `/agent/${id}`;
-export const TRAVEL_AGENT_QUOTATIONS = (id) => `/agent/${id}/quotations`;
+export const TRAVEL_AGENT_BY_ID = id => `/agent/${id}`;
+export const TRAVEL_AGENT_QUOTATIONS = id => `/agent/${id}/quotations`;
 
-// ✅ PLACES
+// =====================
+// Places
+// =====================
 export const PLACES = "/place";
-export const PLACE_BY_ID = (id) => `/place/${id}`;
+export const PLACE_BY_ID = id => `/place/${id}`;
 
-// EXTRA SERVICES
+// =====================
+// Extra Services
+// =====================
 export const EXTRA_SERVICES = "/extra_services";
-export const EXTRA_SERVICE_BY_ID = (id) => `/extra_services/${id}`;
+export const EXTRA_SERVICE_BY_ID = id => `/extra_services/${id}`;
 
-// QUOTATIONS
+// =====================
+// Quotations
+// =====================
 export const QUOTATIONS = "/quotations";
-export const QUOTATION_BY_ID = (id) => `/quotations/${id}`;
+export const QUOTATION_BY_ID = id => `/quotations/${id}`;
 export const QUOTATION_ACCUMIDATION = "/quotation-accumidation";
-export const QUOTATION_ACCUMIDATION_BY_ID = (id) =>
+export const QUOTATION_ACCUMIDATION_BY_ID = id =>
   `/quotation-accumidation/${id}`;
 
 // =====================
-// QUOTATION PRICING
+// Quotation Pricing
 // =====================
 export const QUOTATION_PRICING = "/quotation-pricing";
-export const QUOTATION_PRICING_BY_QUOTATION_ID = (quotationId) =>
+export const QUOTATION_PRICING_BY_QUOTATION_ID = quotationId =>
   `/quotation-pricing/quotation/${quotationId}`;
-export const QUOTATION_SEND_FOR_PRICING = (quotationId) =>
+export const QUOTATION_SEND_FOR_PRICING = quotationId =>
   `/quotation-pricing/quotation/${quotationId}/send`;
-export const QUOTATION_PRICING_PROFIT = (quotationId) =>
+export const QUOTATION_PRICING_PROFIT = quotationId =>
   `/quotation-pricing/quotation/${quotationId}/profit`;
-export const QUOTATION_PRICING_DECISION = (quotationId) =>
+export const QUOTATION_PRICING_DECISION = quotationId =>
   `/quotation-pricing/quotation/${quotationId}/decision`;
-export const QUOTATION_PRICING_CANCEL = (quotationId) =>
+export const QUOTATION_PRICING_CANCEL = quotationId =>
   `/quotation-pricing/quotation/${quotationId}/cancel`;
+<<<<<<< HEAD
 export const QUOTATION_FINAL_PRICING = (quotationId) =>
   `/quotation-pricing/quotation/${quotationId}/final`;
 
@@ -136,3 +158,7 @@ export const RESERVATION_FILES = "/reservation-files";
 export const RESERVATION_FILE_BY_ID = (id) => `/reservation-files/${id}`;
 export const RESERVATION_FILE_FROM_QUOTATION = (quotationId) =>
   `/reservation-files/from-quotation/${quotationId}`;
+=======
+export const QUOTATION_FINAL_PRICING = quotationId =>
+  `/quotation-pricing/quotation/${quotationId}/final`;
+>>>>>>> DEV-FE

@@ -17,6 +17,10 @@ import DynamicListsPage from "../pages/Settings/DynamicLists/index";
 import SystemInformation from "../pages/Settings/SystemInformation";
 import RoleProtected from "../components/Common/RoleProtected";
 
+// Guides
+import GuidesPage from "../pages/Guides/index.jsx";
+import GuideDetails from "../pages/Guides/GuideDetails.jsx";
+
 // Hotels
 import Hotels from "../pages/Hotels/index";
 import HotelDetails from "../pages/Hotels/HotelDetails";
@@ -33,7 +37,7 @@ import TravelAgentDetails from "../pages/TravelAgents/TravelAgentDetails";
 import Places from "../pages/Places";
 import PlaceDetails from "../pages/Places/PlaceDetails";
 
-//Extra Services
+// Extra Services
 import ExtraServicesPage from "../pages/ExtraServices/index";
 
 import TransportationSizes from "../pages/Settings/TransportationSizes";
@@ -82,27 +86,32 @@ const authProtectedRoutes = [
       </RoleProtected>
     ),
   },
+
   {
     path: "/guides",
     component: (
-      <RoleProtected allowedRoles={["COMPANY_ADMIN", "CONTRACTING"]}>
-        <DynamicListsPage
-          defaultListKey="GUIDE_TYPE"
-          lockListKey
-          title="Guides"
-          breadcrumbTitle="Operations"
-          breadcrumbItem="Guides"
-        />
+      <RoleProtected
+        allowedRoles={["COMPANY_ADMIN", "TOUR_OPERATION", "OPERATION"]}
+      >
+        <GuidesPage />
+      </RoleProtected>
+    ),
+  },
+  {
+    path: "/guides/:id",
+    component: (
+      <RoleProtected
+        allowedRoles={["COMPANY_ADMIN", "TOUR_OPERATION", "OPERATION"]}
+      >
+        <GuideDetails />
       </RoleProtected>
     ),
   },
 
-  // Settings
   {
     path: "/settings/transportation-sizes",
     component: <TransportationSizes />,
   },
-
   {
     path: "/settings/transportation-types",
     component: <TransportationTypes />,

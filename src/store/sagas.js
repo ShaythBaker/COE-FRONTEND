@@ -21,7 +21,11 @@ import quotationAccumidationSaga from "./QuotationAccumidation/saga";
 import ExtraServicesSaga from "./ExtraServices/saga";
 import QuotationExtraServicesSaga from "./QuotationExtraServices/saga";
 import quotationPricingSaga from "./QuotationPricing/saga";
+<<<<<<< HEAD
 import reservationFilesSaga from "./ReservationFiles/saga";
+=======
+import GuidesSaga from "./Guides/saga";
+>>>>>>> DEV-FE
 
 export default function* rootSaga() {
   yield all([
@@ -29,6 +33,7 @@ export default function* rootSaga() {
     fork(LayoutSaga),
     fork(CompanyUsersSaga),
     fork(ListItemsSaga),
+    fork(GuidesSaga),
     fork(HotelsSaga),
     fork(RestaurantsSaga),
     fork(TravelAgentsSaga),

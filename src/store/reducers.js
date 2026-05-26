@@ -29,7 +29,11 @@ import QuotationAccumidation from "./QuotationAccumidation/reducer";
 import ExtraServices from "./ExtraServices/reducer";
 import QuotationExtraServices from "./QuotationExtraServices/reducer";
 import QuotationPricing from "./QuotationPricing/reducer";
+<<<<<<< HEAD
 import ReservationFiles from "./ReservationFiles/reducer";
+=======
+import Guides from "./Guides/reducer";
+>>>>>>> DEV-FE
 
 const rootReducer = combineReducers({
   Layout,
@@ -39,6 +43,7 @@ const rootReducer = combineReducers({
   Profile,
   CompanyUsers,
   ListItems,
+  Guides,
   Hotels,
   Restaurants,
   TravelAgents,
