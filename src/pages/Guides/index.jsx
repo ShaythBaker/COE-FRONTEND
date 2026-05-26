@@ -28,6 +28,7 @@ import {
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
+import { buildGuideReservationUsageMap } from "../../helpers/reservation_options";
 import {
   deleteGuide,
   fetchGuideLanguages,
@@ -35,6 +36,7 @@ import {
   createGuide,
   updateGuide,
 } from "../../store/Guides/actions";
+import { fetchReservationFiles } from "../../store/ReservationFiles/actions";
 import {
   ATTACHMENT_TYPES,
   getAttachmentDownloadUrl,
@@ -171,6 +173,9 @@ const GuidesPage = () => {
 
   const roles = useSelector(state => state.Login?.roles || []);
   const authUser = useSelector(state => state.Login || {});
+  const reservationFiles = useSelector(
+    state => state.ReservationFiles?.items || []
+  );
 
   const canManageGuides = hasAnyRole(roles, ALLOWED_ROLES);
 
@@ -276,6 +281,11 @@ const GuidesPage = () => {
     );
   }, [languageOptions, languageSearch]);
 
+  const guideReservationUsage = useMemo(
+    () => buildGuideReservationUsageMap(reservationFiles),
+    [reservationFiles]
+  );
+
   useEffect(() => {
     document.title = "Guides | Skote";
   }, []);
@@ -287,6 +297,10 @@ const GuidesPage = () => {
   useEffect(() => {
     dispatch(fetchGuides(appliedParams));
   }, [dispatch, appliedParams]);
+
+  useEffect(() => {
+    dispatch(fetchReservationFiles());
+  }, [dispatch]);
 
   useEffect(() => {
     if (error) {
@@ -824,12 +838,36 @@ const GuidesPage = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {items.map(guide => (
+                          {items.map(guide => {
+                            const usageRefs =
+                              guideReservationUsage.get(
+                                String(guide?.GUIDE_NAME || "").trim().toLowerCase()
+                              ) || [];
+
+                            return (
                             <tr key={guide?._id}>
                               <td>
                                 <div className="fw-semibold">
                                   {guide?.GUIDE_NAME || "-"}
                                 </div>
+                                {usageRefs.length ? (
+                                  <div className="d-flex flex-wrap gap-1 mt-1">
+                                    {usageRefs.slice(0, 3).map(reference => (
+                                      <Badge
+                                        key={`${guide?._id}-${reference}`}
+                                        color="info"
+                                        className="fw-normal"
+                                      >
+                                        Chosen in reservation file {reference}
+                                      </Badge>
+                                    ))}
+                                    {usageRefs.length > 3 ? (
+                                      <Badge color="secondary">
+                                        +{usageRefs.length - 3}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                                 <div className="text-muted small">
                                   {guide?._id || "-"}
                                 </div>
@@ -918,7 +956,8 @@ const GuidesPage = () => {
                                 </div>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </Table>
                     </div>

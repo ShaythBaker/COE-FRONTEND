@@ -18,8 +18,23 @@ import {
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { patch } from "../../helpers/api_helper";
 import { notifyError, notifySuccess } from "../../helpers/notify";
+import {
+  RESERVATION_STATUS_OPTIONS,
+  buildGuideLanguageOptions,
+  buildGuideNameOptions,
+  buildHotelNameOptions,
+  buildRouteOptions,
+  buildVehicleSizeOptions,
+  getFirstGuideLanguage,
+  withCurrentOption,
+} from "../../helpers/reservation_options";
 import { RESERVATION_FILE_BY_ID } from "../../helpers/url_helper";
+import { fetchGuideLanguages, fetchGuides } from "../../store/Guides/actions";
 import { fetchReservationFile } from "../../store/ReservationFiles/actions";
+import {
+  fetchTransportationCompanies,
+  fetchTransportationLookups,
+} from "../../store/TransportationCompanies/actions";
 
 const RESERVATION_SECTIONS = [
   "RES Details",
@@ -331,8 +346,6 @@ const buildDraftDefaults = file => {
       status: "",
       bookedBy: "",
       pax: pax || "",
-      pickup: "",
-      dropoff: "",
       confirmationNo: "",
       invoiceReceived: false,
     }))
@@ -649,8 +662,6 @@ const emptyRow = {
     status: "",
     bookedBy: "",
     pax: "",
-    pickup: "",
-    dropoff: "",
     confirmationNo: "",
     invoiceReceived: false,
   }),
@@ -739,22 +750,14 @@ const Field = ({
 );
 
 const CheckButton = ({ checked, onChange, disabled = false }) => (
-  <button
-    type="button"
-    className={`btn btn-sm d-inline-flex align-items-center justify-content-center p-0 ${
-      checked ? "btn-primary" : "btn-light border"
-    }`}
-    style={{ width: 22, height: 22, lineHeight: 1 }}
-    aria-pressed={!!checked}
+  <Input
+    type="checkbox"
+    className="m-0"
+    style={{ width: 18, height: 18, borderColor: "#556ee6", cursor: disabled ? "not-allowed" : "pointer" }}
+    checked={!!checked}
     disabled={disabled}
-    onClick={event => {
-      event.preventDefault();
-      event.stopPropagation();
-      onChange?.(!checked);
-    }}
-  >
-    {checked ? <i className="bx bx-check font-size-16" /> : null}
-  </button>
+    onChange={event => onChange?.(event.target.checked)}
+  />
 );
 
 const SourceBadge = ({ row }) =>
@@ -841,6 +844,16 @@ const ReservationFileDetails = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { selected, loading } = useSelector(s => s.ReservationFiles || {});
+  const guideDirectory = useSelector(s => s.Guides?.items || []);
+  const guideLanguageDirectory = useSelector(
+    s => s.Guides?.guideLanguages || s.Guides?.languages || []
+  );
+  const transportationCompanies = useSelector(
+    s => s.TransportationCompanies?.items || []
+  );
+  const transportationLookups = useSelector(
+    s => s.TransportationCompanies?.lookups || {}
+  );
   const [activeSection, setActiveSection] = useState("RES Details");
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -855,6 +868,21 @@ const ReservationFileDetails = () => {
   }, [dispatch, id]);
 
   useEffect(() => {
+    dispatch(
+      fetchGuides({
+        page: 1,
+        limit: 100,
+        ACTIVE_STATUS: true,
+        sortBy: "GUIDE_NAME",
+        sortDir: "asc",
+      })
+    );
+    dispatch(fetchGuideLanguages());
+    dispatch(fetchTransportationCompanies());
+    dispatch(fetchTransportationLookups());
+  }, [dispatch]);
+
+  useEffect(() => {
     if (!defaults) {
       setDraft(null);
       return;
@@ -865,6 +893,15 @@ const ReservationFileDetails = () => {
   const quotation = selected?.QUOTATION || {};
   const referenceTitle = selected?.FILE_REFERENCE || "-";
   const pax = getQuotationPax(quotation);
+  const hotelNameOptions = useMemo(
+    () => buildHotelNameOptions(selected),
+    [selected]
+  );
+  const routeOptions = useMemo(() => buildRouteOptions(selected), [selected]);
+  const guideNameOptions = useMemo(
+    () => buildGuideNameOptions(guideDirectory),
+    [guideDirectory]
+  );
 
   document.title = "Reservation File Details | Skote";
 
@@ -890,6 +927,37 @@ const ReservationFileDetails = () => {
       [section]: asArray(prev?.[section]).map((row, rowIndex) =>
         rowIndex === index ? { ...row, ...patchValues } : row
       ),
+    }));
+  };
+
+  const handleGuideNameChange = (index, guideName) => {
+    const firstLanguage = getFirstGuideLanguage(guideDirectory, guideName);
+
+    setDraft(prev => ({
+      ...prev,
+      guides: asArray(prev?.guides).map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+
+        const languageOptions = buildGuideLanguageOptions(
+          guideDirectory,
+          guideName,
+          guideLanguageDirectory
+        );
+        const currentLanguageExists = languageOptions.some(
+          option =>
+            text(option.value).toLowerCase() ===
+            text(row?.language).toLowerCase()
+        );
+
+        return {
+          ...row,
+          guideName,
+          language:
+            currentLanguageExists && row?.language
+              ? row.language
+              : firstLanguage,
+        };
+      }),
     }));
   };
 
@@ -926,19 +994,6 @@ const ReservationFileDetails = () => {
     } finally {
       setSaving(false);
     }
-  };
-
-  const downloadReservation = () => {
-    const blob = new Blob(
-      [JSON.stringify({ reservation: selected, draft }, null, 2)],
-      { type: "application/json" }
-    );
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${referenceTitle || "reservation"}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   const renderResDetails = () => (
@@ -990,9 +1045,6 @@ const ReservationFileDetails = () => {
                 <Button color="info" size="sm" type="button" disabled={!selected?.OFFER_ID}>
                   Open Offer
                 </Button>
-                <Button color="secondary" size="sm" type="button" onClick={downloadReservation}>
-                  Download JSON
-                </Button>
               </div>
             </div>
             <details>
@@ -1033,9 +1085,6 @@ const ReservationFileDetails = () => {
                   type="button"
                 >
                   Open Quotation
-                </Button>
-                <Button color="secondary" size="sm" type="button" onClick={downloadReservation}>
-                  Download JSON
                 </Button>
               </div>
             </div>
@@ -1164,7 +1213,7 @@ const ReservationFileDetails = () => {
       {asArray(draft?.hotels).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Hotel" onRemove={() => removeRow("hotels", index)}>
           <Row>
-            <Col md="2"><Field label="Hotel Name" value={row.hotelName} onChange={v => updateRow("hotels", index, "hotelName", v)} /></Col>
+            <Col md="2"><Field label="Hotel Name" value={row.hotelName} options={withCurrentOption(hotelNameOptions, row.hotelName)} onChange={v => updateRow("hotels", index, "hotelName", v)} /></Col>
             <Col md="2"><Field label="Check In" type="date" value={row.checkIn} onChange={v => updateRow("hotels", index, "checkIn", v)} /></Col>
             <Col md="2"><Field label="Check Out" type="date" value={row.checkOut} onChange={v => updateRow("hotels", index, "checkOut", v)} /></Col>
             <Col md="2"><Field label="Invoice Received" type="checkbox" value={row.invoiceReceived} onChange={v => updateRow("hotels", index, "invoiceReceived", v)} /></Col>
@@ -1204,17 +1253,17 @@ const ReservationFileDetails = () => {
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Transportation" onRemove={() => removeRow("transportation", index)}>
           <Row>
             <Col md="3"><Field label="Transport Co. Name" value={row.companyName} onChange={v => updateRow("transportation", index, "companyName", v)} /></Col>
-            <Col md="3"><Field label="Type of Vehicle" value={row.vehicleType} onChange={v => updateRow("transportation", index, "vehicleType", v)} /></Col>
+            <Col md="3"><Field label="Type of Vehicle" value={row.vehicleType} options={withCurrentOption(buildVehicleSizeOptions(transportationCompanies, transportationLookups, row.companyName), row.vehicleType)} onChange={v => updateRow("transportation", index, "vehicleType", v)} /></Col>
             <Col md="3"><Field label="Driver Name" value={row.driverName} onChange={v => updateRow("transportation", index, "driverName", v)} /></Col>
             <Col md="3"><Field label="Notes" value={row.notes} onChange={v => updateRow("transportation", index, "notes", v)} /></Col>
             <Col md="3"><Field label="Special Rates" value={row.specialRates} onChange={v => updateRow("transportation", index, "specialRates", v)} /></Col>
             <Col md="3"><Field label="From Date" type="date" value={row.fromDate} onChange={v => updateRow("transportation", index, "fromDate", v)} /></Col>
             <Col md="3"><Field label="To Date" type="date" value={row.toDate} onChange={v => updateRow("transportation", index, "toDate", v)} /></Col>
-            <Col md="3"><Field label="Status" value={row.status} onChange={v => updateRow("transportation", index, "status", v)} /></Col>
+            <Col md="3"><Field label="Status" value={row.status} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("transportation", index, "status", v)} /></Col>
             <Col md="2"><Field label="Pax" type="number" value={row.pax} onChange={v => updateRow("transportation", index, "pax", v)} /></Col>
             <Col md="2"><Field label="Conf. No." value={row.confirmationNo} onChange={v => updateRow("transportation", index, "confirmationNo", v)} /></Col>
-            <Col md="2"><Field label="Pickup" value={row.pickup} onChange={v => updateRow("transportation", index, "pickup", v)} /></Col>
-            <Col md="2"><Field label="Drop Off" value={row.dropOff} onChange={v => updateRow("transportation", index, "dropOff", v)} /></Col>
+            <Col md="2"><Field label="Pickup" value={row.pickup} options={withCurrentOption(routeOptions, row.pickup)} onChange={v => updateRow("transportation", index, "pickup", v)} /></Col>
+            <Col md="2"><Field label="Drop Off" value={row.dropOff} options={withCurrentOption(routeOptions, row.dropOff)} onChange={v => updateRow("transportation", index, "dropOff", v)} /></Col>
             <Col md="2"><Field label="Invoice Received" type="checkbox" value={row.invoiceReceived} onChange={v => updateRow("transportation", index, "invoiceReceived", v)} /></Col>
             <Col md="2"><Field label="Resv. No." value={row.reservationNo} onChange={v => updateRow("transportation", index, "reservationNo", v)} /></Col>
           </Row>
@@ -1231,13 +1280,13 @@ const ReservationFileDetails = () => {
       {asArray(draft?.guides).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Guide" onRemove={() => removeRow("guides", index)}>
           <Row>
-            <Col md="3"><Field label="Guide Name" value={row.guideName} onChange={v => updateRow("guides", index, "guideName", v)} /></Col>
-            <Col md="3"><Field label="Language" value={row.language} onChange={v => updateRow("guides", index, "language", v)} /></Col>
+            <Col md="3"><Field label="Guide Name" value={row.guideName} options={withCurrentOption(guideNameOptions, row.guideName)} onChange={v => handleGuideNameChange(index, v)} /></Col>
+            <Col md="3"><Field label="Language" value={row.language} options={withCurrentOption(buildGuideLanguageOptions(guideDirectory, row.guideName, guideLanguageDirectory), row.language)} onChange={v => updateRow("guides", index, "language", v)} /></Col>
             <Col md="3"><Field label="Notes" value={row.notes} onChange={v => updateRow("guides", index, "notes", v)} /></Col>
             <Col md="3"><Field label="Special Rates" value={row.specialRates} onChange={v => updateRow("guides", index, "specialRates", v)} /></Col>
             <Col md="2"><Field label="From Date" type="date" value={row.fromDate} onChange={v => updateRow("guides", index, "fromDate", v)} /></Col>
             <Col md="2"><Field label="To Date" type="date" value={row.toDate} onChange={v => updateRow("guides", index, "toDate", v)} /></Col>
-            <Col md="2"><Field label="Status" value={row.status} onChange={v => updateRow("guides", index, "status", v)} /></Col>
+            <Col md="2"><Field label="Status" value={row.status} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("guides", index, "status", v)} /></Col>
             <Col md="2"><Field label="Days" type="number" value={row.days} onChange={v => updateRow("guides", index, "days", v)} /></Col>
             <Col md="2"><Field label="Overnight" value={row.overnight} onChange={v => updateRow("guides", index, "overnight", v)} /></Col>
             <Col md="2"><Field label="Invoice Received" type="checkbox" value={row.invoiceReceived} onChange={v => updateRow("guides", index, "invoiceReceived", v)} /></Col>
@@ -1294,8 +1343,6 @@ const ReservationFileDetails = () => {
             <Col md="2"><Field label="Status" value={row.status} onChange={v => updateRow("restaurants", index, "status", v)} /></Col>
             <Col md="2"><Field label="Booked By" value={row.bookedBy} onChange={v => updateRow("restaurants", index, "bookedBy", v)} /></Col>
             <Col md="2"><Field label="Pax" type="number" value={row.pax} onChange={v => updateRow("restaurants", index, "pax", v)} /></Col>
-            <Col md="2"><Field label="Pickup" value={row.pickup} onChange={v => updateRow("restaurants", index, "pickup", v)} /></Col>
-            <Col md="2"><Field label="Dropoff" value={row.dropoff} onChange={v => updateRow("restaurants", index, "dropoff", v)} /></Col>
             <Col md="2"><Field label="Conf. No." value={row.confirmationNo} onChange={v => updateRow("restaurants", index, "confirmationNo", v)} /></Col>
             <Col md="2"><Field label="Invoice Received" type="checkbox" value={row.invoiceReceived} onChange={v => updateRow("restaurants", index, "invoiceReceived", v)} /></Col>
           </Row>
@@ -1321,10 +1368,10 @@ const ReservationFileDetails = () => {
             <Col md="2"><Field label="Date" type="date" value={row.date} onChange={v => updateRow("extras", index, "date", v)} /></Col>
             <Col md="2"><Field label="Day" value={row.day} onChange={v => updateRow("extras", index, "day", v)} /></Col>
             <Col md="2"><Field label="Time" type="time" value={row.time} onChange={v => updateRow("extras", index, "time", v)} /></Col>
-            <Col md="2"><Field label="Status" value={row.status} onChange={v => updateRow("extras", index, "status", v)} /></Col>
+            <Col md="2"><Field label="Status" value={row.status} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("extras", index, "status", v)} /></Col>
             <Col md="2"><Field label="Pax" type="number" value={row.pax} onChange={v => updateRow("extras", index, "pax", v)} /></Col>
-            <Col md="2"><Field label="Pickup" value={row.pickup} onChange={v => updateRow("extras", index, "pickup", v)} /></Col>
-            <Col md="2"><Field label="Drop Off" value={row.dropOff} onChange={v => updateRow("extras", index, "dropOff", v)} /></Col>
+            <Col md="2"><Field label="Pickup" value={row.pickup} options={withCurrentOption(routeOptions, row.pickup)} onChange={v => updateRow("extras", index, "pickup", v)} /></Col>
+            <Col md="2"><Field label="Drop Off" value={row.dropOff} options={withCurrentOption(routeOptions, row.dropOff)} onChange={v => updateRow("extras", index, "dropOff", v)} /></Col>
             <Col md="2"><Field label="Invoice Received" type="checkbox" value={row.invoiceReceived} onChange={v => updateRow("extras", index, "invoiceReceived", v)} /></Col>
           </Row>
         </RowPanel>
@@ -1557,9 +1604,6 @@ const ReservationFileDetails = () => {
               <Button color="success" onClick={handleSave} disabled={saving || loading || !draft}>
                 {saving ? <Spinner size="sm" className="me-2" /> : null}
                 Save Full Reservation
-              </Button>
-              <Button color="primary" onClick={downloadReservation} disabled={!draft}>
-                Download Reservation
               </Button>
               <Button tag={Link} to="/reservation-files" color="danger">
                 Cancel Reservation
