@@ -158,7 +158,3 @@ export const RESERVATION_FILES = "/reservation-files";
 export const RESERVATION_FILE_BY_ID = (id) => `/reservation-files/${id}`;
 export const RESERVATION_FILE_FROM_QUOTATION = (quotationId) =>
   `/reservation-files/from-quotation/${quotationId}`;
-=======
-export const QUOTATION_FINAL_PRICING = quotationId =>
-  `/quotation-pricing/quotation/${quotationId}/final`;
->>>>>>> DEV-FE
