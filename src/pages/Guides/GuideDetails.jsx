@@ -1,7 +1,7 @@
 // path: src/pages/Guides/GuideDetails.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Card,
   CardBody,
@@ -10,9 +10,11 @@ import {
   Row,
   Badge,
   Spinner,
+  Table,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { fetchGuide } from "../../store/Guides/actions";
+import { fetchReservationFiles } from "../../store/ReservationFiles/actions";
 import { getAttachmentDownloadUrl } from "../../helpers/attachments_helper";
 
 const ViewField = ({ label, value }) => (
@@ -36,17 +38,27 @@ const normalizeDateOnly = value => {
   return d.toLocaleDateString("en-GB");
 };
 
+const asArray = value => (Array.isArray(value) ? value : []);
+
+const normalizeText = value => String(value || "").trim().toLowerCase();
+
 const GuideDetails = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { id } = useParams();
 
   const { selected, loading, error } = useSelector(state => state.Guides || {});
+  const {
+    items: reservationFiles = [],
+    loading: reservationFilesLoading,
+    error: reservationFilesError,
+  } = useSelector(state => state.ReservationFiles || {});
   const [imageUrl, setImageUrl] = useState("");
 
   useEffect(() => {
     if (id) {
       dispatch(fetchGuide(id));
+      dispatch(fetchReservationFiles());
     }
   }, [dispatch, id]);
 
@@ -141,6 +153,60 @@ const GuideDetails = () => {
 
   const createdAt = normalizeDateTime(guide?.CREATED_ON || guide?.createdAt);
   const updatedAt = normalizeDateTime(guide?.UPDATED_ON || guide?.updatedAt);
+
+  const assignmentHistory = useMemo(() => {
+    const candidateNames = [
+      guide?.GUIDE_NAME,
+      guide?.FULL_NAME,
+      guide?.NAME,
+      guide?.name,
+      fullName,
+    ]
+      .map(normalizeText)
+      .filter(Boolean);
+
+    if (!candidateNames.length) return [];
+
+    return reservationFiles
+      .flatMap(file => {
+        const savedGuides = asArray(file?.RESERVATION_DATA?.guides);
+        const matches = savedGuides.filter(row =>
+          candidateNames.includes(normalizeText(row?.guideName))
+        );
+
+        if (!matches.length) return [];
+
+        const dates = matches
+          .flatMap(row => [row?.fromDate, row?.toDate])
+          .filter(Boolean)
+          .map(normalizeDateOnly)
+          .filter(value => value && value !== "-");
+
+        const uniqueDates = Array.from(new Set(dates));
+
+        return [
+          {
+            id: file?._id || file?.FILE_REFERENCE,
+            reservationId: file?._id,
+            fileReference: file?.FILE_REFERENCE || "-",
+            groupName:
+              file?.RESERVATION_DATA?.general?.groupName ||
+              file?.QUOTATION?.GROUP_NAME ||
+              file?.GROUP_NAME ||
+              "-",
+            agentName:
+              file?.RESERVATION_DATA?.general?.agentName ||
+              file?.TRAVEL_AGENT_NAME ||
+              file?.QUOTATION?.TRAVEL_AGENT_NAME ||
+              "-",
+            assignedRows: matches.length,
+            datesLabel: uniqueDates.join(", ") || "-",
+            updatedOn: file?.UPDATED_ON || file?.CREATED_ON || "",
+          },
+        ];
+      })
+      .sort((a, b) => new Date(b.updatedOn || 0) - new Date(a.updatedOn || 0));
+  }, [reservationFiles, guide, fullName]);
 
   return (
     <div className="page-content">
@@ -277,6 +343,57 @@ const GuideDetails = () => {
               <Col xl="12">
                 <Card>
                   <CardBody>
+                    <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
+                      <h4 className="card-title mb-0">Reservation Assignment History</h4>
+                      <Badge color="info" pill>
+                        {assignmentHistory.length} file{assignmentHistory.length === 1 ? "" : "s"}
+                      </Badge>
+                    </div>
+
+                    {reservationFilesLoading ? (
+                      <div className="text-center py-4">
+                        <Spinner size="sm" className="me-2" />
+                        Loading assigned reservation files...
+                      </div>
+                    ) : assignmentHistory.length ? (
+                      <div className="table-responsive mb-4">
+                        <Table bordered hover className="align-middle mb-0">
+                          <thead>
+                            <tr>
+                              <th>Reservation File</th>
+                              <th>Group</th>
+                              <th>Agent</th>
+                              <th>Assigned Rows</th>
+                              <th>Guide Dates</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {assignmentHistory.map(item => (
+                              <tr key={item.id}>
+                                <td>
+                                  {item.reservationId ? (
+                                    <Link to={`/reservation-files/${item.reservationId}`}>
+                                      {item.fileReference}
+                                    </Link>
+                                  ) : (
+                                    item.fileReference
+                                  )}
+                                </td>
+                                <td>{item.groupName}</td>
+                                <td>{item.agentName}</td>
+                                <td>{item.assignedRows}</td>
+                                <td>{item.datesLabel}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <div className="rounded border bg-light p-3 text-muted mb-4">
+                        No reservation files currently assign this guide.
+                      </div>
+                    )}
+
                     <h4 className="card-title mb-4">Additional Information</h4>
                     <Row>
                       <Col md="6">
@@ -290,6 +407,11 @@ const GuideDetails = () => {
 
                     {error ? (
                       <div className="alert alert-danger mt-2 mb-0">{error}</div>
+                    ) : null}
+                    {!error && reservationFilesError ? (
+                      <div className="alert alert-warning mt-2 mb-0">
+                        {reservationFilesError}
+                      </div>
                     ) : null}
                   </CardBody>
                 </Card>

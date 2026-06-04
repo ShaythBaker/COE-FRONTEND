@@ -32,11 +32,30 @@ function extractErrorMessage(error, fallback = "Request failed") {
 }
 
 function setLegacyAuthUser(decoded, tokens) {
+  const roles = Array.isArray(decoded?.ROLES) ? decoded.ROLES : [];
+  const primaryRole =
+    decoded?.PRIMARY_ROLE || decoded?.primaryRole || roles.find(Boolean) || null;
+
   const legacyUser = {
     id: decoded?.sub || null,
     email: decoded?.EMAIL || null,
+    firstName:
+      decoded?.FIRST_NAME || decoded?.firstName || decoded?.given_name || null,
+    lastName:
+      decoded?.LAST_NAME || decoded?.lastName || decoded?.family_name || null,
+    fullName:
+      decoded?.FULL_NAME ||
+      decoded?.fullName ||
+      decoded?.name ||
+      `${decoded?.FIRST_NAME || decoded?.firstName || decoded?.given_name || ""} ${
+        decoded?.LAST_NAME || decoded?.lastName || decoded?.family_name || ""
+      }`.trim() ||
+      null,
+    username:
+      decoded?.USERNAME || decoded?.username || primaryRole || null,
+    primaryRole,
     COMPANY_ID: decoded?.COMPANY_ID || null,
-    ROLES: Array.isArray(decoded?.ROLES) ? decoded.ROLES : [],
+    ROLES: roles,
     accessToken: tokens?.accessToken || null,
     refreshToken: tokens?.refreshToken || null,
   };

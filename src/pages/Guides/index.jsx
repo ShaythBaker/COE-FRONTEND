@@ -839,35 +839,12 @@ const GuidesPage = () => {
                         </thead>
                         <tbody>
                           {items.map(guide => {
-                            const usageRefs =
-                              guideReservationUsage.get(
-                                String(guide?.GUIDE_NAME || "").trim().toLowerCase()
-                              ) || [];
-
                             return (
                             <tr key={guide?._id}>
                               <td>
                                 <div className="fw-semibold">
                                   {guide?.GUIDE_NAME || "-"}
                                 </div>
-                                {usageRefs.length ? (
-                                  <div className="d-flex flex-wrap gap-1 mt-1">
-                                    {usageRefs.slice(0, 3).map(reference => (
-                                      <Badge
-                                        key={`${guide?._id}-${reference}`}
-                                        color="info"
-                                        className="fw-normal"
-                                      >
-                                        Chosen in reservation file {reference}
-                                      </Badge>
-                                    ))}
-                                    {usageRefs.length > 3 ? (
-                                      <Badge color="secondary">
-                                        +{usageRefs.length - 3}
-                                      </Badge>
-                                    ) : null}
-                                  </div>
-                                ) : null}
                                 <div className="text-muted small">
                                   {guide?._id || "-"}
                                 </div>
