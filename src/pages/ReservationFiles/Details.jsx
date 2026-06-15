@@ -1006,6 +1006,21 @@ const getArrDepLabel = (row, index) => {
   return index === 0 ? "Arrival" : index === 1 ? "Departure" : `Row ${index + 1}`;
 };
 
+const getArrDepTripDates = arrDepRows => {
+  const rows = asArray(arrDepRows);
+  const arrivalRow = rows.find(
+    (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
+  );
+  const departureRow = rows.find(
+    (row, index) => getArrDepLabel(row, index).toLowerCase() === "departure"
+  );
+
+  return {
+    arrivalDate: toDateInput(arrivalRow?.date),
+    departureDate: toDateInput(departureRow?.date),
+  };
+};
+
 const formatDateForInput = value => {
   const dateStr = toDateInput(value);
   return dateStr || "";
@@ -1386,13 +1401,6 @@ const normalizeYesNoValue = value => {
 
 const MANIFEST_SEX_OPTIONS = ["Male", "Female"];
 
-const FileButton = ({ label, accept, onChange }) => (
-  <Button tag="label" color="secondary" size="sm" className="mb-0">
-    {label}
-    <Input type="file" accept={accept} className="d-none" onChange={onChange} />
-  </Button>
-);
-
 const DropZone = ({ children, onDrop }) => (
   <div
     className="border rounded bg-white p-4 text-center text-muted"
@@ -1434,25 +1442,17 @@ const DocumentGenerationPanel = ({
   </div>
 );
 
-const TripTimeline = ({ arrivalDate, departureDate }) => {
-  const startDate = toDateInput(arrivalDate);
-  const endDate = toDateInput(departureDate);
-  const tripDayCount = diffInCalendarDays(startDate, endDate);
+const TripTimeline = ({ arrDepRows }) => {
+  const { arrivalDate, departureDate } = getArrDepTripDates(arrDepRows);
 
-  if (!startDate || !endDate || tripDayCount === null || tripDayCount < 0) {
-    return (
-      <div className="reservation-trip-timeline mt-3">
-        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <h5 className="mb-0">Trip Timeline</h5>
-          <span className="text-muted small">Arrival and departure dates are not ready.</span>
-        </div>
-      </div>
-    );
-  }
+  if (!arrivalDate || !departureDate) return null;
 
-  const days = Array.from({ length: tripDayCount + 1 }, (_, index) => ({
+  const tripDayCount = diffDaysInclusive(arrivalDate, departureDate);
+  if (!tripDayCount || tripDayCount < 1) return null;
+
+  const days = Array.from({ length: tripDayCount }, (_, index) => ({
     number: index + 1,
-    date: addDays(startDate, index),
+    date: addDays(arrivalDate, index),
   }));
   const today = toDateInput(new Date());
   const activeIndex = days.findIndex(day => day.date === today);
@@ -1470,7 +1470,7 @@ const TripTimeline = ({ arrivalDate, departureDate }) => {
         <div>
           <h5 className="mb-1">Trip Timeline</h5>
           <div className="text-muted small">
-            {formatDateLabel(startDate)} to {formatDateLabel(endDate)}
+            {formatDateLabel(arrivalDate)} to {formatDateLabel(departureDate)}
           </div>
         </div>
         <Badge color={isTripActive ? "primary" : "secondary"} pill>
@@ -2150,10 +2150,7 @@ const ReservationFileDetails = () => {
           </Button>
         </div>
       </div>
-      <TripTimeline
-        arrivalDate={quotation?.QUOTATION_START_DATE}
-        departureDate={quotation?.QUOTATION_END_DATE}
-      />
+      <TripTimeline arrDepRows={draft?.arrDep} />
     </>
   );
 
