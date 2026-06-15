@@ -157,3 +157,9 @@ export const RESERVATION_FILES = "/reservation-files";
 export const RESERVATION_FILE_BY_ID = id => `/reservation-files/${id}`;
 export const RESERVATION_FILE_FROM_QUOTATION = quotationId =>
   `/reservation-files/from-quotation/${quotationId}`;
+
+// EVALUATIONS
+export const EVALUATION_FILES = "/evaluations/files";
+export const EVALUATION_DRAFT = reservationFileId =>
+  `/evaluations/draft/${reservationFileId}`;
+export const EVALUATIONS = "/evaluations";

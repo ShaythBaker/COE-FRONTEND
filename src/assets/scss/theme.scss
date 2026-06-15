@@ -921,3 +921,116 @@ aside.EmojiPickerReact.epr-main {
 [data-bs-theme=dark] .btn-close-white {
   filter: invert(1) grayscale(100%) brightness(0);
 }
+
+.reservation-trip-timeline {
+  max-width: 980px;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  background: var(--bs-light);
+  padding: 1.25rem;
+}
+
+.reservation-trip-timeline__track {
+  --trip-progress: 0%;
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(86px, 1fr);
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding: 1rem 0.25rem 0.25rem;
+}
+
+.reservation-trip-timeline__track::before,
+.reservation-trip-timeline__track::after {
+  content: "";
+  position: absolute;
+  top: 31px;
+  left: 28px;
+  right: 28px;
+  height: 3px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.reservation-trip-timeline__track::before {
+  background: #d9deef;
+}
+
+.reservation-trip-timeline__track::after {
+  right: auto;
+  width: calc(var(--trip-progress) * 1);
+  max-width: calc(100% - 56px);
+  background: linear-gradient(90deg, #0ab39c, #556ee6);
+  transition: width 420ms ease;
+}
+
+.reservation-trip-timeline__day {
+  position: relative;
+  z-index: 1;
+  min-width: 86px;
+  text-align: center;
+}
+
+.reservation-trip-timeline__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 3px solid #d9deef;
+  border-radius: 50%;
+  background: var(--bs-card-bg);
+  color: var(--bs-secondary-color);
+  font-weight: 700;
+  line-height: 1;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.reservation-trip-timeline__day.is-completed .reservation-trip-timeline__marker {
+  border-color: #0ab39c;
+  background: #0ab39c;
+  color: #fff;
+}
+
+.reservation-trip-timeline__day.is-active .reservation-trip-timeline__marker {
+  border-color: #556ee6;
+  background: #556ee6;
+  color: #fff;
+  animation: reservation-current-day-pulse 1.4s ease-in-out infinite;
+}
+
+.reservation-trip-timeline__label {
+  margin-top: 0.55rem;
+  font-weight: 700;
+  color: var(--bs-body-color);
+}
+
+.reservation-trip-timeline__date {
+  color: var(--bs-secondary-color);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+@keyframes reservation-current-day-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(85, 110, 230, 0.35);
+    transform: scale(1);
+  }
+
+  55% {
+    box-shadow: 0 0 0 10px rgba(85, 110, 230, 0);
+    transform: scale(1.08);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(85, 110, 230, 0);
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reservation-trip-timeline__day.is-active .reservation-trip-timeline__marker {
+    animation: none;
+  }
+}

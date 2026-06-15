@@ -103,6 +103,29 @@ const addDays = (dateValue, daysToAdd) => {
   return `${nextYear}-${nextMonth}-${nextDay}`;
 };
 
+const parseLocalDate = value => {
+  const dateStr = toDateInput(value);
+  if (!dateStr) return null;
+
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const diffInCalendarDays = (startValue, endValue) => {
+  const start = parseLocalDate(startValue);
+  const end = parseLocalDate(endValue);
+  if (!start || !end) return null;
+
+  const startUtc = Date.UTC(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate()
+  );
+  const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+  return Math.round((endUtc - startUtc) / 86400000);
+};
+
 const formatDateLabel = value => {
   const dateStr = toDateInput(value);
   if (!dateStr) return "-";
@@ -114,6 +137,19 @@ const formatDateLabel = value => {
     day: "2-digit",
     month: "short",
     year: "numeric",
+  });
+};
+
+const formatShortDateLabel = value => {
+  const dateStr = toDateInput(value);
+  if (!dateStr) return "-";
+
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
   });
 };
 
@@ -840,6 +876,88 @@ const DocumentGenerationPanel = ({
   </div>
 );
 
+const TripTimeline = ({ arrivalDate, departureDate }) => {
+  const startDate = toDateInput(arrivalDate);
+  const endDate = toDateInput(departureDate);
+  const tripDayCount = diffInCalendarDays(startDate, endDate);
+
+  if (!startDate || !endDate || tripDayCount === null || tripDayCount < 0) {
+    return (
+      <div className="reservation-trip-timeline mt-3">
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <h5 className="mb-0">Trip Timeline</h5>
+          <span className="text-muted small">Arrival and departure dates are not ready.</span>
+        </div>
+      </div>
+    );
+  }
+
+  const days = Array.from({ length: tripDayCount + 1 }, (_, index) => ({
+    number: index + 1,
+    date: addDays(startDate, index),
+  }));
+  const today = toDateInput(new Date());
+  const activeIndex = days.findIndex(day => day.date === today);
+  const isTripActive = activeIndex >= 0;
+  const progressPercent =
+    days.length <= 1
+      ? isTripActive
+        ? 100
+        : 0
+      : Math.max(0, (activeIndex / (days.length - 1)) * 100);
+
+  return (
+    <div className="reservation-trip-timeline mt-3">
+      <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+          <h5 className="mb-1">Trip Timeline</h5>
+          <div className="text-muted small">
+            {formatDateLabel(startDate)} to {formatDateLabel(endDate)}
+          </div>
+        </div>
+        <Badge color={isTripActive ? "primary" : "secondary"} pill>
+          {isTripActive ? `Current day ${activeIndex + 1}` : "Not in trip dates"}
+        </Badge>
+      </div>
+
+      <div
+        className="reservation-trip-timeline__track"
+        style={{ "--trip-progress": `${progressPercent}%` }}
+      >
+        {days.map((day, index) => {
+          const isActive = index === activeIndex;
+          const isCompleted = isTripActive && index < activeIndex;
+          const isFuture = isTripActive && index > activeIndex;
+
+          return (
+            <div
+              className={[
+                "reservation-trip-timeline__day",
+                isActive ? "is-active" : "",
+                isCompleted ? "is-completed" : "",
+                isFuture ? "is-future" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              key={day.date}
+            >
+              <div className="reservation-trip-timeline__marker">
+                {day.number}
+              </div>
+              <div className="reservation-trip-timeline__label">
+                Day {day.number}
+              </div>
+              <div className="reservation-trip-timeline__date">
+                {formatShortDateLabel(day.date)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const ReservationFileDetails = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
@@ -1162,6 +1280,10 @@ const ReservationFileDetails = () => {
           </Button>
         </div>
       </div>
+      <TripTimeline
+        arrivalDate={quotation?.QUOTATION_START_DATE}
+        departureDate={quotation?.QUOTATION_END_DATE}
+      />
     </>
   );
 

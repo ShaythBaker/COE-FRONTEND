@@ -7,6 +7,7 @@ import Login from "../pages/Authentication/Login";
 import Logout from "../pages/Authentication/Logout";
 import Register from "../pages/Authentication/Register";
 import ForgetPwd from "../pages/Authentication/ForgetPassword";
+import NotAuthorized from "../pages/Authentication/NotAuthorized";
 
 // Dashboard
 import Dashboard from "../pages/Dashboard/index";
@@ -61,6 +62,7 @@ import QuotationPricingDetails from "../pages/QuotationPricing/Details";
 // Reservation Files
 import ReservationFilesList from "../pages/ReservationFiles/List";
 import ReservationFileDetails from "../pages/ReservationFiles/Details";
+import EvaluationsPage from "../pages/Evaluations";
 
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
@@ -148,6 +150,14 @@ const authProtectedRoutes = [
 
   { path: "/reservation-files", component: <ReservationFilesList /> },
   { path: "/reservation-files/:id", component: <ReservationFileDetails /> },
+  {
+    path: "/evaluations",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN", "QUALITY"]}>
+        <EvaluationsPage />
+      </RoleProtected>
+    ),
+  },
 
   {
     path: "/quotation-pricing",
@@ -174,6 +184,7 @@ const publicRoutes = [
   { path: "/login", component: <Login /> },
   { path: "/forgot-password", component: <ForgetPwd /> },
   { path: "/register", component: <Register /> },
+  { path: "/not-authorized", component: <NotAuthorized /> },
 ];
 
 export { authProtectedRoutes, publicRoutes };

@@ -84,6 +84,7 @@ const SidebarContent = (props) => {
     "TOUR_OPERATION",
     "OPERATION",
   ]);
+  const canSeeEvaluations = hasAnyRole(roles, ["COMPANY_ADMIN", "QUALITY"]);
 
   const canSeePlaces = roles.length > 0;
 
@@ -389,6 +390,15 @@ const SidebarContent = (props) => {
                 <Link to="/reservation-files" className="waves-effect">
                   <i className="bx bx-folder-open" />
                   <span>Reservations File</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeEvaluations ? (
+              <li className={isActive("/evaluations") ? "mm-active" : ""}>
+                <Link to="/evaluations" className="waves-effect">
+                  <i className="bx bx-star" />
+                  <span>Evaluations</span>
                 </Link>
               </li>
             ) : null}
