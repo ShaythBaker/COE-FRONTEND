@@ -98,7 +98,7 @@ function* onConvertQuotationToReservationFile({ payload }) {
     const res = yield call(
       post,
       RESERVATION_FILE_FROM_QUOTATION(payload.quotationId),
-      {}
+      payload?.options || {}
     );
     const normalized = normalizeReservationFile(res);
 

@@ -30,9 +30,18 @@ export const fetchReservationFileFail = error => ({
   payload: error,
 });
 
-export const convertQuotationToReservationFile = (quotationId, onDone) => ({
+export const convertQuotationToReservationFile = (
+  quotationId,
+  optionsOrOnDone,
+  onDone
+) => ({
   type: T.CONVERT_QUOTATION_TO_RESERVATION_FILE,
-  payload: { quotationId, onDone },
+  payload: {
+    quotationId,
+    options:
+      typeof optionsOrOnDone === "function" ? {} : optionsOrOnDone || {},
+    onDone: typeof optionsOrOnDone === "function" ? optionsOrOnDone : onDone,
+  },
 });
 
 export const convertQuotationToReservationFileSuccess = item => ({

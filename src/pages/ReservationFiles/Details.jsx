@@ -33,12 +33,16 @@ import {
 import { notifyError, notifySuccess } from "../../helpers/notify";
 import {
   RESERVATION_STATUS_OPTIONS,
+  buildAccommodationOptionChoices,
   buildGuideLanguageOptions,
   buildGuideNameOptions,
   buildHotelNameOptions,
+  buildManifestDisplayRows,
   buildRouteOptions,
   buildVehicleSizeOptions,
+  filterFileByAccommodationOption,
   getFirstGuideLanguage,
+  mergeReservationMetadata,
   withCurrentOption,
 } from "../../helpers/reservation_options";
 import { RESERVATION_FILE_BY_ID, USER_BY_ID } from "../../helpers/url_helper";
@@ -739,25 +743,29 @@ const mergeRows = (defaults, savedRows) => {
   ];
 };
 
-const mergeDraft = (defaults, saved = {}) => ({
-  general: { ...defaults.general, ...(saved?.general || {}) },
-  arrDep: mergeRows(defaults.arrDep, saved?.arrDep),
-  hotels: mergeRows(defaults.hotels, saved?.hotels),
-  transportation: mergeRows(defaults.transportation, saved?.transportation),
-  guides: mergeRows(defaults.guides, saved?.guides),
-  entrance: mergeRows(defaults.entrance, saved?.entrance),
-  restaurants: mergeRows(defaults.restaurants, saved?.restaurants),
-  extras: mergeRows(defaults.extras, saved?.extras),
-  itineraries: mergeRows(defaults.itineraries, saved?.itineraries),
-  inclusions: mergeRows(defaults.inclusions, saved?.inclusions),
-  clients: mergeRows(defaults.clients, saved?.clients),
-  reminders: mergeRows(defaults.reminders, saved?.reminders),
-  logs: mergeRows(defaults.logs, saved?.logs),
-  attach: {
-    offerFiles: asArray(saved?.attach?.offerFiles),
-    emailFiles: asArray(saved?.attach?.emailFiles),
-  },
-});
+const mergeDraft = (defaults, saved = {}) =>
+  mergeReservationMetadata(
+    {
+      general: { ...defaults.general, ...(saved?.general || {}) },
+      arrDep: mergeRows(defaults.arrDep, saved?.arrDep),
+      hotels: mergeRows(defaults.hotels, saved?.hotels),
+      transportation: mergeRows(defaults.transportation, saved?.transportation),
+      guides: mergeRows(defaults.guides, saved?.guides),
+      entrance: mergeRows(defaults.entrance, saved?.entrance),
+      restaurants: mergeRows(defaults.restaurants, saved?.restaurants),
+      extras: mergeRows(defaults.extras, saved?.extras),
+      itineraries: mergeRows(defaults.itineraries, saved?.itineraries),
+      inclusions: mergeRows(defaults.inclusions, saved?.inclusions),
+      clients: mergeRows(defaults.clients, saved?.clients),
+      reminders: mergeRows(defaults.reminders, saved?.reminders),
+      logs: mergeRows(defaults.logs, saved?.logs),
+      attach: {
+        offerFiles: asArray(saved?.attach?.offerFiles),
+        emailFiles: asArray(saved?.attach?.emailFiles),
+      },
+    },
+    saved
+  );
 
 const newKey = prefix => `${prefix}-manual-${Date.now()}-${Math.random()}`;
 
@@ -1543,10 +1551,31 @@ const ReservationFileDetails = () => {
   const [logFilterDateFrom, setLogFilterDateFrom] = useState("");
   const [logFilterDateTo, setLogFilterDateTo] = useState("");
   const [logFilterEvent, setLogFilterEvent] = useState("");
+  const [pendingAccommodationOptionKey, setPendingAccommodationOptionKey] =
+    useState("");
+
+  const accommodationOptionChoices = useMemo(
+    () => buildAccommodationOptionChoices(selected),
+    [selected]
+  );
+  const savedAccommodationOptionKey =
+    selected?.RESERVATION_DATA?.accommodationSelection?.optionKey || "";
+  const selectedAccommodationOptionKey =
+    savedAccommodationOptionKey ||
+    (accommodationOptionChoices.length === 1
+      ? accommodationOptionChoices[0].value
+      : "");
+  const selectedForDraft = useMemo(
+    () =>
+      selectedAccommodationOptionKey
+        ? filterFileByAccommodationOption(selected, selectedAccommodationOptionKey)
+        : selected,
+    [selected, selectedAccommodationOptionKey]
+  );
 
   const defaults = useMemo(
-    () => (selected ? buildDraftDefaults(selected) : null),
-    [selected]
+    () => (selectedForDraft ? buildDraftDefaults(selectedForDraft) : null),
+    [selectedForDraft]
   );
   const savedDraft = useMemo(
     () => (defaults ? mergeDraft(defaults, selected?.RESERVATION_DATA || {}) : null),
@@ -1624,6 +1653,12 @@ const ReservationFileDetails = () => {
     }
     setDraft(savedDraft);
   }, [defaults, savedDraft]);
+
+  useEffect(() => {
+    if (!pendingAccommodationOptionKey && accommodationOptionChoices.length) {
+      setPendingAccommodationOptionKey(accommodationOptionChoices[0].value);
+    }
+  }, [accommodationOptionChoices, pendingAccommodationOptionKey]);
 
   useEffect(() => {
     const preventBrowserDrop = event => {
@@ -1725,7 +1760,7 @@ const ReservationFileDetails = () => {
   };
 
   const handleSave = async () => {
-    if (!draft || !id) return;
+    if (!draft || !id) return false;
 
     const reservationDateError = validateReservationDates({
       draft,
@@ -1733,7 +1768,7 @@ const ReservationFileDetails = () => {
     });
     if (reservationDateError) {
       notifyError(reservationDateError);
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -1758,11 +1793,64 @@ const ReservationFileDetails = () => {
           : "Reservation file saved."
       );
       dispatch(fetchReservationFile(id));
+      return true;
     } catch (error) {
       notifyError(
         error?.response?.data?.message ||
           error?.message ||
           "Failed to save reservation file."
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveManifest = async () => {
+    const saved = await handleSave();
+    if (saved) {
+      setManifestOpen(false);
+    }
+  };
+
+  const handleApplyAccommodationOption = async () => {
+    if (!selected || !id || !pendingAccommodationOptionKey) {
+      notifyError("Please choose an accommodation option first.");
+      return;
+    }
+
+    const choice = accommodationOptionChoices.find(
+      option => option.value === pendingAccommodationOptionKey
+    );
+    const scopedFile = filterFileByAccommodationOption(
+      selected,
+      pendingAccommodationOptionKey
+    );
+    const optionDefaults = buildDraftDefaults(scopedFile);
+    const nextDraft = {
+      ...mergeDraft(optionDefaults, selected?.RESERVATION_DATA || {}),
+      hotels: optionDefaults.hotels,
+      inclusions: optionDefaults.inclusions,
+      accommodationSelection: {
+        optionKey: pendingAccommodationOptionKey,
+        label: choice?.label || "Selected accommodation option",
+        selectedOn: new Date().toISOString(),
+      },
+    };
+
+    setSaving(true);
+    try {
+      await patch(RESERVATION_FILE_BY_ID(id), {
+        RESERVATION_DATA: nextDraft,
+      });
+      setDraft(nextDraft);
+      notifySuccess("Accommodation option applied to reservation file.");
+      dispatch(fetchReservationFile(id));
+    } catch (error) {
+      notifyError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply accommodation option."
       );
     } finally {
       setSaving(false);
@@ -2406,15 +2494,18 @@ const ReservationFileDetails = () => {
     </>
   );
 
-  const renderClients = () => (
+  const renderClients = () => {
+    const manifestRows = buildManifestDisplayRows(draft?.clients);
+
+    return (
     <>
       <SectionHeader title="Clients" fileReference={referenceTitle} />
-      <div className="rounded border bg-light p-4">
+      <div className="rounded border bg-light p-4 mb-3">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div>
             <h5 className="mb-1">Manifest</h5>
             <div className="text-muted">
-              Enter passport information for the clients from the manifest popup.
+              Passport and identity details saved for this reservation.
             </div>
           </div>
           <div className="d-flex gap-2 align-items-center">
@@ -2427,6 +2518,75 @@ const ReservationFileDetails = () => {
           </div>
         </div>
       </div>
+      {manifestRows.length ? (
+        <div className="rounded border bg-white overflow-hidden mb-3">
+          <div className="table-responsive">
+            <Table className="align-middle mb-0">
+              <thead className="table-light">
+                <tr>
+                  <th style={{ width: 56 }}>#</th>
+                  {manifestRows[0].fields.map(field => (
+                    <th key={field.field}>{field.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {manifestRows.map(row => (
+                  <tr key={row.key}>
+                    <td className="fw-semibold">{row.index + 1}</td>
+                    {row.fields.map(field => (
+                      <td
+                        key={field.field}
+                        className={
+                          field.field === "name" || field.field === "passportNo"
+                            ? "fw-semibold text-dark"
+                            : ""
+                        }
+                      >
+                        {field.value}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded border bg-white p-4 text-muted mb-3">
+          No manifest information has been added yet.
+        </div>
+      )}
+      <Row className="g-3">
+        {manifestRows.map(row => (
+          <Col xl="4" md="6" key={`${row.key}-card`}>
+            <div className="rounded border bg-white p-3 h-100">
+              <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+                <div>
+                  <div className="text-muted small">Client {row.index + 1}</div>
+                  <h5 className="mb-1">{row.name}</h5>
+                  <div className="text-muted small">
+                    Passport: {row.passportNo || "-"}
+                  </div>
+                </div>
+                <Badge color="secondary" pill>
+                  Manifest
+                </Badge>
+              </div>
+              <Row className="g-2">
+                {row.fields.map(field => (
+                  <Col xs="6" key={field.field}>
+                    <div className="border rounded p-2 h-100">
+                      <div className="text-muted small">{field.label}</div>
+                      <div className="fw-semibold text-break">{field.value}</div>
+                    </div>
+                  </Col>
+                ))}
+              </Row>
+            </div>
+          </Col>
+        ))}
+      </Row>
       <Modal isOpen={manifestOpen} toggle={() => setManifestOpen(false)} size="xl" scrollable>
         <ModalHeader toggle={() => setManifestOpen(false)}>
           Manifest - Client Passport Information
@@ -2500,7 +2660,7 @@ const ReservationFileDetails = () => {
             <Button color="light" className="border" onClick={() => setManifestOpen(false)}>
               Close
             </Button>
-            <Button color="primary" onClick={handleSave} disabled={saving}>
+            <Button color="primary" onClick={handleSaveManifest} disabled={saving}>
               {saving ? <Spinner size="sm" className="me-2" /> : null}
               Save Manifest
             </Button>
@@ -2508,7 +2668,8 @@ const ReservationFileDetails = () => {
         </ModalFooter>
       </Modal>
     </>
-  );
+    );
+  };
 
   const renderAttach = () => (
     <>
@@ -2854,6 +3015,44 @@ const ReservationFileDetails = () => {
 
   return (
     <React.Fragment>
+      <Modal
+        isOpen={
+          accommodationOptionChoices.length > 1 &&
+          !draft?.accommodationSelection?.optionKey
+        }
+        backdrop="static"
+        keyboard={false}
+      >
+        <ModalHeader>Choose Accommodation Option</ModalHeader>
+        <ModalBody>
+          <Label className="form-label fw-semibold">Accommodation Option</Label>
+          <Input
+            type="select"
+            value={pendingAccommodationOptionKey}
+            onChange={event => setPendingAccommodationOptionKey(event.target.value)}
+          >
+            {accommodationOptionChoices.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Input>
+          <div className="text-muted mt-2">
+            Reservation hotel information will be created from the selected
+            quotation option.
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            color="primary"
+            onClick={handleApplyAccommodationOption}
+            disabled={saving || !pendingAccommodationOptionKey}
+          >
+            {saving ? <Spinner size="sm" className="me-2" /> : null}
+            Apply Option
+          </Button>
+        </ModalFooter>
+      </Modal>
       <div className="page-content">
         <Container fluid>
           <Breadcrumbs title="Reservations File" breadcrumbItem="Details" />

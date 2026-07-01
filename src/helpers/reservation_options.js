@@ -55,11 +55,77 @@ export const RESERVATION_STATUS_OPTIONS = [
   { value: "Invoiced", label: "Invoiced" },
 ];
 
-const getAccommodationEntries = file => {
+export const getAccommodationEntries = file => {
   const entries = asArray(file?.QUOTATION_ACCUMIDATIONS);
   if (entries.length) return entries;
   return file?.QUOTATION_ACCUMIDATION ? [file.QUOTATION_ACCUMIDATION] : [];
 };
+
+export const getAccommodationOptionKey = (entry, optionIndex) =>
+  `${getId(entry?._id) || "accommodation"}::${optionIndex}`;
+
+const getAccommodationOptionHotelNames = option =>
+  asArray(option?.CITY_GROUPS)
+    .flatMap(cityGroup =>
+      asArray(cityGroup?.STAYS).map(stay => cleanText(stay?.HOTEL_NAME))
+    )
+    .filter(Boolean);
+
+export const buildAccommodationOptionChoices = file => {
+  const choices = [];
+
+  getAccommodationEntries(file).forEach((entry, entryIndex) => {
+    asArray(entry?.OPTIONS).forEach((option, optionIndex) => {
+      const hotelNames = Array.from(
+        new Set(getAccommodationOptionHotelNames(option))
+      );
+      const labelHotels = hotelNames.length
+        ? ` - ${hotelNames.join(", ")}`
+        : "";
+
+      choices.push({
+        value: getAccommodationOptionKey(entry, optionIndex),
+        label: `Option ${choices.length + 1}${labelHotels}`,
+        entryIndex,
+        optionIndex,
+      });
+    });
+  });
+
+  return choices;
+};
+
+export const filterFileByAccommodationOption = (file, optionKey) => {
+  const selected = cleanText(optionKey);
+  if (!selected) return file;
+
+  const filteredEntries = getAccommodationEntries(file)
+    .map(entry => {
+      const filteredOptions = asArray(entry?.OPTIONS).filter(
+        (_, optionIndex) => getAccommodationOptionKey(entry, optionIndex) === selected
+      );
+
+      return filteredOptions.length
+        ? { ...entry, OPTIONS: filteredOptions, TOTAL_OPTIONS: filteredOptions.length }
+        : null;
+    })
+    .filter(Boolean);
+
+  if (!filteredEntries.length) return file;
+
+  return {
+    ...file,
+    QUOTATION_ACCUMIDATIONS: filteredEntries,
+    QUOTATION_ACCUMIDATION: filteredEntries[0] || null,
+  };
+};
+
+export const mergeReservationMetadata = (draft, saved = {}) => ({
+  ...draft,
+  ...(saved?.accommodationSelection
+    ? { accommodationSelection: saved.accommodationSelection }
+    : {}),
+});
 
 export const buildHotelNameOptions = file => {
   const names = getAccommodationEntries(file).flatMap(entry =>
@@ -241,6 +307,38 @@ export const getFirstGuideLanguage = (guides, guideName) => {
 
   return cleanText(asArray(guide?.GUIDE_LANGUAGES)[0]);
 };
+
+const MANIFEST_DISPLAY_FIELDS = [
+  ["type", "Type"],
+  ["countryCode", "Country Code"],
+  ["passportNo", "Passport No"],
+  ["name", "Name"],
+  ["dateOfBirth", "Date of Birth"],
+  ["sex", "Sex"],
+  ["dateOfIssue", "Date of Issue"],
+  ["dateOfExpiry", "Date of Expiry"],
+  ["nationalNo", "National No"],
+  ["placeOfBirth", "Place of Birth"],
+  ["authority", "Authority"],
+];
+
+export const buildManifestDisplayRows = clients =>
+  asArray(clients).map((client, index) => {
+    const name = cleanText(client?.name) || `Client ${index + 1}`;
+    const passportNo = cleanText(client?.passportNo);
+
+    return {
+      key: client?._sourceKey || `client-${index + 1}`,
+      index,
+      name,
+      passportNo,
+      fields: MANIFEST_DISPLAY_FIELDS.map(([field, label]) => ({
+        field,
+        label,
+        value: cleanText(client?.[field]) || "-",
+      })),
+    };
+  });
 
 const normalizeGuideName = value => cleanText(value).toLowerCase();
 

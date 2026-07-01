@@ -37,6 +37,7 @@ import {
   isQuotationReadOnly,
 } from "../../helpers/quotation_pricing_helper";
 import { generateQuotationPdf } from "../../helpers/quotation_pdf";
+import { getAccommodationOptionKey } from "../../helpers/reservation_options";
 
 const PRICE_VIEW_ROLES = ["ACCOUNTING", "COMPANY_ADMIN", "USER_COMPANY"];
 const GENERAL_NOTES_ROLES = ["TOUR_OPERATION"];
@@ -445,7 +446,7 @@ const normalizeAccommodationOptions = response => {
       );
 
       return {
-        key: `${entry?._id || "entry"}-${option?.OPTION_NAME || index}`,
+        key: getAccommodationOptionKey(entry, index),
         optionName: option?.OPTION_NAME || `Option ${index + 1}`,
         selectedStars: option?.SELECTED_HOTEL_STARS || "",
         totalNights: option?.TOTAL_NIGHTS || 0,
@@ -825,6 +826,10 @@ const QuotationsDetails = () => {
   const [generalNotesTouched, setGeneralNotesTouched] = useState(false);
   const [generalNotesSaving, setGeneralNotesSaving] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [reservationOptionModalOpen, setReservationOptionModalOpen] =
+    useState(false);
+  const [reservationAccommodationOptionKey, setReservationAccommodationOptionKey] =
+    useState("");
 
   useEffect(() => {
     if (id) {
@@ -1072,13 +1077,39 @@ const QuotationsDetails = () => {
       return;
     }
 
-    dispatch(
-      convertQuotationToReservationFile(quotationId, reservationFile => {
-        if (reservationFile?._id) {
-          navigate(`/reservation-files/${reservationFile._id}`);
-        }
-      })
+    if (accommodationOptions.length > 1 && !reservationAccommodationOptionKey) {
+      setReservationAccommodationOptionKey(accommodationOptions[0]?.key || "");
+      setReservationOptionModalOpen(true);
+      return;
+    }
+
+    const selectedOption = accommodationOptions.find(
+      option => option.key === reservationAccommodationOptionKey
     );
+
+    dispatch(
+      convertQuotationToReservationFile(
+        quotationId,
+        selectedOption
+          ? {
+              accommodationSelection: {
+                optionKey: selectedOption.key,
+                label: selectedOption.optionName || "Selected accommodation option",
+              },
+            }
+          : {},
+        reservationFile => {
+          if (reservationFile?._id) {
+            navigate(`/reservation-files/${reservationFile._id}`);
+          }
+        }
+      )
+    );
+  };
+
+  const handleCloseReservationOptionModal = () => {
+    setReservationOptionModalOpen(false);
+    setReservationAccommodationOptionKey("");
   };
 
   const isApprovedFinalPricing =
@@ -1341,6 +1372,56 @@ const QuotationsDetails = () => {
 
   return (
     <React.Fragment>
+      <Modal
+        isOpen={reservationOptionModalOpen}
+        toggle={handleCloseReservationOptionModal}
+        backdrop="static"
+      >
+        <ModalHeader toggle={handleCloseReservationOptionModal}>
+          Choose Accommodation Option
+        </ModalHeader>
+        <ModalBody>
+          <Label className="form-label fw-semibold">Accommodation Option</Label>
+          <Input
+            type="select"
+            value={reservationAccommodationOptionKey}
+            onChange={event =>
+              setReservationAccommodationOptionKey(event.target.value)
+            }
+          >
+            {accommodationOptions.map(option => (
+              <option key={option.key} value={option.key}>
+                {option.optionName}
+              </option>
+            ))}
+          </Input>
+          <div className="text-muted mt-2">
+            The reservation file will use the hotels from this option.
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            color="light"
+            className="border"
+            type="button"
+            onClick={handleCloseReservationOptionModal}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="primary"
+            type="button"
+            disabled={reservationSaving || !reservationAccommodationOptionKey}
+            onClick={() => {
+              setReservationOptionModalOpen(false);
+              handleConvertToReservationFile();
+            }}
+          >
+            {reservationSaving ? <Spinner size="sm" className="me-2" /> : null}
+            Convert
+          </Button>
+        </ModalFooter>
+      </Modal>
       <div className="page-content">
         <Container fluid>
           <Breadcrumbs title="Quotations" breadcrumbItem="Quotation Details" />
