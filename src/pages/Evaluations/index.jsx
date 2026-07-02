@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -26,6 +26,7 @@ const TABS = {
   FILES: "files",
   CREATE: "create",
   SAVED: "saved",
+  EVALUATED: "evaluated",
 };
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
@@ -251,6 +252,13 @@ const EvaluationsPage = () => {
               >
                 Saved Evaluations
               </Button>
+              <Button
+                color={activeTab === TABS.EVALUATED ? "primary" : "light"}
+                className={activeTab === TABS.EVALUATED ? "" : "border"}
+                onClick={() => setActiveTab(TABS.EVALUATED)}
+              >
+                Evaluated List
+              </Button>
             </div>
           </CardBody>
         </Card>
@@ -430,6 +438,10 @@ const EvaluationsPage = () => {
                 </Table>
               </div>
             </CardBody>
+          </Card>
+        ) : activeTab === TABS.EVALUATED ? (
+          <Card className="mb-4">
+            <CardBody />
           </Card>
         ) : (
           <Card>
