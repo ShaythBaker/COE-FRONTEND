@@ -15,6 +15,10 @@ import {
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { fetchReservationFiles } from "../../store/ReservationFiles/actions";
+import {
+  getReservationBadgeColor,
+  normalizeReservationFileStatus,
+} from "../../helpers/evaluation_workflow";
 
 const formatDateLabel = value => {
   if (!value) return "-";
@@ -44,7 +48,7 @@ const ReservationFilesList = () => {
       const fileReference = String(item?.FILE_REFERENCE || "").toLowerCase();
       const quotationReference = String(item?.QUOTATION_REFERENCE || "").toLowerCase();
       const travelAgent = String(item?.TRAVEL_AGENT_NAME || "").toLowerCase();
-      const status = String(item?.QUOTATION_STATUS || "").toLowerCase();
+      const status = String(item?.STATUS || "").toLowerCase();
 
       return (
         fileReference.includes(q) ||
@@ -114,8 +118,11 @@ const ReservationFilesList = () => {
                               <td>{item?.QUOTATION_REFERENCE || "-"}</td>
                               <td>{item?.TRAVEL_AGENT_NAME || "-"}</td>
                               <td>
-                                <Badge color="success" pill>
-                                  {item?.QUOTATION_STATUS || "-"}
+                                <Badge
+                                  color={getReservationBadgeColor(item?.STATUS)}
+                                  pill
+                                >
+                                  {normalizeReservationFileStatus(item?.STATUS)}
                                 </Badge>
                               </td>
                               <td>{formatDateLabel(item?.CREATED_ON)}</td>
