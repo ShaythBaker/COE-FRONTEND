@@ -155,6 +155,7 @@ export const QUOTATION_FINAL_PRICING = quotationId =>
 // RESERVATION FILES
 export const RESERVATION_FILES = "/reservation-files";
 export const RESERVATION_FILE_BY_ID = id => `/reservation-files/${id}`;
+export const RESERVATION_FILE_STATUS = id => `/reservation-files/${id}/status`;
 export const RESERVATION_FILE_FROM_QUOTATION = quotationId =>
   `/reservation-files/from-quotation/${quotationId}`;
 
@@ -163,3 +164,10 @@ export const EVALUATION_FILES = "/evaluations/files";
 export const EVALUATION_DRAFT = reservationFileId =>
   `/evaluations/draft/${reservationFileId}`;
 export const EVALUATIONS = "/evaluations";
+export const EVALUATION_REVIEWS = evaluationId =>
+  `/evaluations/${evaluationId}/reviews`;
+export const PUBLIC_EVALUATION = token => `/evaluations/public/${token}`;
+export const PUBLIC_EVALUATION_LOGIN = token =>
+  `/evaluations/public/${token}/login`;
+export const PUBLIC_EVALUATION_SUBMIT = token =>
+  `/evaluations/public/${token}/submit`;

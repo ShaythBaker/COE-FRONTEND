@@ -45,7 +45,16 @@ import {
   mergeReservationMetadata,
   withCurrentOption,
 } from "../../helpers/reservation_options";
-import { RESERVATION_FILE_BY_ID, USER_BY_ID } from "../../helpers/url_helper";
+import {
+  RESERVATION_FILE_BY_ID,
+  RESERVATION_FILE_STATUS as RESERVATION_FILE_STATUS_URL,
+  USER_BY_ID,
+} from "../../helpers/url_helper";
+import {
+  RESERVATION_FILE_STATUS as RESERVATION_WORKFLOW_STATUS,
+  getReservationBadgeColor,
+  normalizeReservationFileStatus,
+} from "../../helpers/evaluation_workflow";
 import { fetchGuideLanguages, fetchGuides } from "../../store/Guides/actions";
 import { fetchReservationFile } from "../../store/ReservationFiles/actions";
 import {
@@ -1541,6 +1550,7 @@ const ReservationFileDetails = () => {
   const [activeSection, setActiveSection] = useState("RES Details");
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [offerUploadFile, setOfferUploadFile] = useState(null);
   const [offerUploadSaving, setOfferUploadSaving] = useState(false);
@@ -1676,6 +1686,9 @@ const ReservationFileDetails = () => {
 
   const quotation = selected?.QUOTATION || {};
   const referenceTitle = selected?.FILE_REFERENCE || "-";
+  const reservationFileStatus = normalizeReservationFileStatus(selected?.STATUS);
+  const canApprove =
+    reservationFileStatus !== RESERVATION_WORKFLOW_STATUS.APPROVED;
   const pax = getQuotationPax(quotation);
   const hotelNameOptions = useMemo(
     () => buildHotelNameOptions(selected),
@@ -1803,6 +1816,27 @@ const ReservationFileDetails = () => {
       return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleApproveReservation = async () => {
+    if (!id) return;
+
+    setApproving(true);
+    try {
+      await patch(RESERVATION_FILE_STATUS_URL(id), {
+        status: RESERVATION_WORKFLOW_STATUS.APPROVED,
+      });
+      notifySuccess("Reservation file approved.");
+      dispatch(fetchReservationFile(id));
+    } catch (error) {
+      notifyError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to approve reservation file."
+      );
+    } finally {
+      setApproving(false);
     }
   };
 
@@ -3059,12 +3093,27 @@ const ReservationFileDetails = () => {
 
           <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
             <div>
-              <h2 className="mb-1">Reservation: {referenceTitle}</h2>
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <h2 className="mb-0">Reservation: {referenceTitle}</h2>
+                <Badge color={getReservationBadgeColor(reservationFileStatus)} pill>
+                  {reservationFileStatus}
+                </Badge>
+              </div>
               <div className="text-muted">
                 {draft?.general?.groupName || "-"} | {draft?.general?.agentName || "-"}
               </div>
             </div>
             <div className="d-flex flex-wrap gap-2">
+              {canApprove ? (
+                <Button
+                  color="primary"
+                  onClick={handleApproveReservation}
+                  disabled={approving || loading || !selected}
+                >
+                  {approving ? <Spinner size="sm" className="me-2" /> : null}
+                  Approve
+                </Button>
+              ) : null}
               <Button color="success" onClick={handleSave} disabled={saving || loading || !draft}>
                 {saving ? <Spinner size="sm" className="me-2" /> : null}
                 Save Full Reservation

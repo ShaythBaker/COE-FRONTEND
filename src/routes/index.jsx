@@ -63,6 +63,8 @@ import QuotationPricingDetails from "../pages/QuotationPricing/Details";
 import ReservationFilesList from "../pages/ReservationFiles/List";
 import ReservationFileDetails from "../pages/ReservationFiles/Details";
 import EvaluationsPage from "../pages/Evaluations";
+import EvaluationReviewsPage from "../pages/Evaluations/Reviews";
+import PublicEvaluationPage from "../pages/Evaluations/PublicEvaluation";
 
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
@@ -158,6 +160,14 @@ const authProtectedRoutes = [
       </RoleProtected>
     ),
   },
+  {
+    path: "/evaluations/:evaluationId/reviews",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN", "QUALITY"]}>
+        <EvaluationReviewsPage />
+      </RoleProtected>
+    ),
+  },
 
   {
     path: "/quotation-pricing",
@@ -185,6 +195,7 @@ const publicRoutes = [
   { path: "/forgot-password", component: <ForgetPwd /> },
   { path: "/register", component: <Register /> },
   { path: "/not-authorized", component: <NotAuthorized /> },
+  { path: "/public/evaluations/:token", component: <PublicEvaluationPage /> },
 ];
 
 export { authProtectedRoutes, publicRoutes };
