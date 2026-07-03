@@ -84,6 +84,22 @@ export const GUIDE_BY_ID = id => `/guides/${id}`;
 export const GUIDE_LANGUAGES = "/guides/languages";
 
 // =====================
+// Tasks
+// =====================
+export const TASKS = "/tasks";
+export const MY_TASKS = "/tasks/my";
+export const TASK_ASSIGNABLE_USERS = "/tasks/assignable-users";
+export const TASK_RELATED_ITEMS = relatedType =>
+  `/tasks/related-items?RELATED_TYPE=${encodeURIComponent(relatedType)}`;
+export const TASK_BY_ID = id => `/tasks/${id}`;
+export const TASK_NOTES = id => `/tasks/${id}/notes`;
+export const TASK_ATTACHMENTS = id => `/tasks/${id}/attachments`;
+export const TASK_CLAIM = id => `/tasks/${id}/claim`;
+export const TASK_RECLAIM = id => `/tasks/${id}/reclaim`;
+export const TASK_LOGS = id => `/tasks/${id}/logs`;
+export const TASK_CLOSE = id => `/tasks/${id}/close`;
+
+// =====================
 // Hotels
 // =====================
 export const HOTELS = "/hotels";

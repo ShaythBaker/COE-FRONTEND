@@ -17,6 +17,7 @@ export const ATTACHMENT_TYPES = {
   PLACE_IMAGE: "PLACE_IMAGE",
   TRAVEL_AGENT_LOGO: "TRAVEL_AGENT_LOGO",
   GUIDE_IMAGE: "GUIDE_IMAGE",
+  TASK_ATTACHMENT: "TASK_ATTACHMENT",
 };
 
 export const extractAttachmentErrorMessage = (error, fallback = "Attachment request failed") => {

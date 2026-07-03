@@ -63,6 +63,7 @@ import QuotationPricingDetails from "../pages/QuotationPricing/Details";
 import ReservationFilesList from "../pages/ReservationFiles/List";
 import ReservationFileDetails from "../pages/ReservationFiles/Details";
 import EvaluationsPage from "../pages/Evaluations";
+import TasksPage from "../pages/Tasks";
 
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
@@ -150,6 +151,16 @@ const authProtectedRoutes = [
 
   { path: "/reservation-files", component: <ReservationFilesList /> },
   { path: "/reservation-files/:id", component: <ReservationFileDetails /> },
+  {
+    path: "/tasks",
+    component: (
+      <RoleProtected
+        allowedRoles={["QUALITY", "OPERATION", "COMPANY_ADMIN"]}
+      >
+        <TasksPage />
+      </RoleProtected>
+    ),
+  },
   {
     path: "/evaluations",
     component: (
