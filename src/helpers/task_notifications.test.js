@@ -5,6 +5,7 @@ import {
   normalizeTaskNotifications,
   taskNotificationLink,
   taskNotificationMeta,
+  subscribeToNotificationRefresh,
 } from "./task_notifications.js";
 
 test("normalizes notification payload and derives unread count when absent", () => {
@@ -47,4 +48,42 @@ test("presents overdue notifications with a danger treatment", () => {
     color: "danger",
     showDate: true,
   });
+});
+
+test("refreshes notifications on an interval, window focus, and tab visibility", () => {
+  const windowListeners = {};
+  const documentListeners = {};
+  let intervalCallback;
+  let clearedInterval;
+  let refreshCount = 0;
+  const windowObject = {
+    addEventListener: (name, callback) => { windowListeners[name] = callback; },
+    removeEventListener: name => { delete windowListeners[name]; },
+  };
+  const documentObject = {
+    visibilityState: "visible",
+    addEventListener: (name, callback) => { documentListeners[name] = callback; },
+    removeEventListener: name => { delete documentListeners[name]; },
+  };
+
+  const cleanup = subscribeToNotificationRefresh(
+    () => { refreshCount += 1; },
+    {
+      windowObject,
+      documentObject,
+      setIntervalFn: callback => { intervalCallback = callback; return 77; },
+      clearIntervalFn: id => { clearedInterval = id; },
+      intervalMs: 10_000,
+    },
+  );
+
+  intervalCallback();
+  windowListeners.focus();
+  documentListeners.visibilitychange();
+  assert.equal(refreshCount, 3);
+
+  cleanup();
+  assert.equal(clearedInterval, 77);
+  assert.equal(windowListeners.focus, undefined);
+  assert.equal(documentListeners.visibilitychange, undefined);
 });

@@ -13,6 +13,7 @@ import {
   normalizeTaskNotifications,
   taskNotificationLink,
   taskNotificationMeta,
+  subscribeToNotificationRefresh,
 } from "../../../helpers/task_notifications"
 
 const NotificationDropdown = props => {
@@ -38,6 +39,7 @@ const NotificationDropdown = props => {
 
   useEffect(() => {
     loadNotifications()
+    return subscribeToNotificationRefresh(loadNotifications)
   }, [loadNotifications])
 
   const toggleMenu = () => {

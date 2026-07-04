@@ -52,3 +52,27 @@ export const taskNotificationMeta = notification => {
     showDate: true,
   };
 };
+
+export const subscribeToNotificationRefresh = (
+  refresh,
+  {
+    windowObject = typeof window === "undefined" ? null : window,
+    documentObject = typeof document === "undefined" ? null : document,
+    setIntervalFn = globalThis.setInterval,
+    clearIntervalFn = globalThis.clearInterval,
+    intervalMs = 10_000,
+  } = {},
+) => {
+  const refreshWhenVisible = () => {
+    if (!documentObject || documentObject.visibilityState === "visible") refresh();
+  };
+  const intervalId = setIntervalFn(refresh, intervalMs);
+  windowObject?.addEventListener("focus", refresh);
+  documentObject?.addEventListener("visibilitychange", refreshWhenVisible);
+
+  return () => {
+    clearIntervalFn(intervalId);
+    windowObject?.removeEventListener("focus", refresh);
+    documentObject?.removeEventListener("visibilitychange", refreshWhenVisible);
+  };
+};
