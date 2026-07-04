@@ -462,7 +462,7 @@ const EvaluationsPage = () => {
             <div className="d-flex flex-wrap gap-2">
               {renderTabButton(TABS.FILES, "Approved Files")}
               {renderTabButton(TABS.SAVED, "Saved Evaluations")}
-              {renderTabButton(TABS.REVIEWS, "Published Reviews")}
+              {renderTabButton(TABS.REVIEWS, "Published Evaluations")}
             </div>
           </CardBody>
         </Card>
@@ -512,7 +512,7 @@ const EvaluationsPage = () => {
             <CardBody>
               <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                 <div>
-                  <h4 className="card-title mb-1">Published Reviews</h4>
+                  <h4 className="card-title mb-1">Published Evaluations</h4>
                   <p className="text-muted mb-0">
                     Open published files to see customer review submissions.
                   </p>
