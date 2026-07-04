@@ -4,6 +4,10 @@ import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import {
+  PublishedReviewsPanel,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
+import {
   Button,
   Card,
   CardBody,
@@ -108,6 +112,7 @@ const getTypeLookupLabel = (item) =>
 const getSizeLookupLabel = (item) => buildSizeLabel(item);
 
 const Details = () => {
+  const publishedReviews = usePublishedReviews("TRANSPORTATION_COMPANY");
   const { id } = useParams();
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -597,6 +602,15 @@ const Details = () => {
                   </div>
                 </CardBody>
               </Card>
+            </Col>
+          </Row>
+
+          <Row>
+            <Col xs="12">
+              <PublishedReviewsPanel
+                sourceName={selected?.COMPANY_NAME || ""}
+                reviewState={publishedReviews}
+              />
             </Col>
           </Row>
         </Container>

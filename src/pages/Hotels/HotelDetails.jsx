@@ -24,6 +24,10 @@ import {
 import ReactEcharts from "echarts-for-react";
 
 import RoleProtected from "../../components/Common/RoleProtected";
+import {
+  PublishedReviewsPanel,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 
@@ -94,6 +98,7 @@ const formatMoney = (value) => {
 };
 
 const HotelDetails = () => {
+  const publishedReviews = usePublishedReviews("HOTEL");
   const { id } = useParams();
   const nav = useNavigate();
   const dispatch = useDispatch();
@@ -580,6 +585,11 @@ const HotelDetails = () => {
                   </Row>
                 </CardBody>
               </Card>
+
+              <PublishedReviewsPanel
+                sourceName={selected?.HOTEL_NAME || ""}
+                reviewState={publishedReviews}
+              />
 
               <Card>
                 <CardBody>

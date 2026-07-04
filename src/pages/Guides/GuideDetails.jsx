@@ -13,6 +13,10 @@ import {
   Table,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
+import {
+  PublishedReviewsPanel,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
 import { fetchGuide } from "../../store/Guides/actions";
 import { fetchReservationFiles } from "../../store/ReservationFiles/actions";
 import { getAttachmentDownloadUrl } from "../../helpers/attachments_helper";
@@ -43,6 +47,7 @@ const asArray = value => (Array.isArray(value) ? value : []);
 const normalizeText = value => String(value || "").trim().toLowerCase();
 
 const GuideDetails = () => {
+  const publishedReviews = usePublishedReviews("GUIDE");
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { id } = useParams();
@@ -415,6 +420,15 @@ const GuideDetails = () => {
                     ) : null}
                   </CardBody>
                 </Card>
+              </Col>
+            </Row>
+
+            <Row>
+              <Col xl="12">
+                <PublishedReviewsPanel
+                  sourceName={selected?.GUIDE_NAME || ""}
+                  reviewState={publishedReviews}
+                />
               </Col>
             </Row>
           </>

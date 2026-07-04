@@ -171,3 +171,81 @@ PublishedReviewsCell.propTypes = {
     error: PropTypes.string.isRequired,
   }).isRequired,
 };
+
+export const PublishedReviewsPanel = ({ sourceName, reviewState }) => {
+  const summary = getPublishedReviewSummary(reviewState.index, sourceName);
+  const chartData = useMemo(
+    () => getRatingDoughnutData(summary.averageRating),
+    [summary.averageRating],
+  );
+
+  return (
+    <Card className="mb-4">
+      <CardBody>
+        <h4 className="card-title mb-4">Published Reviews — {sourceName || "-"}</h4>
+        {reviewState.loading ? (
+          <div className="text-center py-5"><Spinner /></div>
+        ) : reviewState.error ? (
+          <div className="alert alert-danger mb-0">{reviewState.error}</div>
+        ) : (
+          <>
+            <Row className="align-items-center g-3 mb-4">
+              <Col md="8">
+                <h5 className="mb-1">Overall Average</h5>
+                <p className="text-muted mb-2">
+                  Average score across all approved customer submissions.
+                </p>
+                <div className="d-flex align-items-center gap-2">
+                  <Stars rating={summary.averageRating} />
+                  <span className="text-muted">
+                    {summary.reviewCount} review{summary.reviewCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+              </Col>
+              <Col md="4">
+                <div style={{ height: 180, position: "relative" }}>
+                  <Doughnut data={chartData} options={chartOptions} />
+                  <div className="position-absolute top-50 start-50 translate-middle text-center">
+                    <div className="h3 mb-0">{summary.averageRating.toFixed(1)}</div>
+                    <div className="text-muted small">of 5</div>
+                  </div>
+                </div>
+              </Col>
+            </Row>
+
+            <h5 className="mb-3">Customer Reviews</h5>
+            {summary.reviewCount ? (
+              <div className="d-grid gap-3">
+                {summary.reviews.map((review, index) => (
+                  <div key={`${review.reviewerName}-${review.submittedOn || index}`} className="border rounded p-3">
+                    <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                      <strong>{review.reviewerName || "Guest"}</strong>
+                      <div className="d-flex align-items-center gap-2">
+                        <Stars rating={Number(review.rating) || 0} />
+                        <span>{review.rating} / 5</span>
+                      </div>
+                    </div>
+                    {review.comment ? <p className="mb-0">{review.comment}</p> : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-muted py-4">
+                There are no published reviews for {sourceName || "this item"} yet.
+              </div>
+            )}
+          </>
+        )}
+      </CardBody>
+    </Card>
+  );
+};
+
+PublishedReviewsPanel.propTypes = {
+  sourceName: PropTypes.string.isRequired,
+  reviewState: PropTypes.shape({
+    index: PropTypes.instanceOf(Map).isRequired,
+    loading: PropTypes.bool.isRequired,
+    error: PropTypes.string.isRequired,
+  }).isRequired,
+};
