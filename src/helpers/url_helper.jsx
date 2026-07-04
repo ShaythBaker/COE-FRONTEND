@@ -98,6 +98,8 @@ export const TASK_CLAIM = id => `/tasks/${id}/claim`;
 export const TASK_RECLAIM = id => `/tasks/${id}/reclaim`;
 export const TASK_LOGS = id => `/tasks/${id}/logs`;
 export const TASK_CLOSE = id => `/tasks/${id}/close`;
+export const TASK_NOTIFICATIONS = "/task-notifications";
+export const TASK_NOTIFICATION_READ = id => `/task-notifications/${id}/read`;
 
 // =====================
 // Hotels

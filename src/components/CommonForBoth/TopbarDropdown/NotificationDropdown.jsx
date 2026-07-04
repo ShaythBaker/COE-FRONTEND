@@ -1,163 +1,129 @@
-import React, { useState } from "react"
-import PropTypes from 'prop-types'
+import { useCallback, useEffect, useState } from "react"
+import PropTypes from "prop-types"
 import { Link } from "react-router-dom"
-import { Dropdown, DropdownToggle, DropdownMenu, Row, Col } from "reactstrap"
+import { Dropdown, DropdownToggle, DropdownMenu, Row, Col, Spinner } from "reactstrap"
 import SimpleBar from "simplebar-react"
-
-//Import images
-import avatar3 from "../../../assets/images/users/avatar-3.jpg"
-import avatar4 from "../../../assets/images/users/avatar-4.jpg"
-
-//i18n
 import { withTranslation } from "react-i18next"
+import { get, patch } from "../../../helpers/api_helper"
+import {
+  TASK_NOTIFICATIONS,
+  TASK_NOTIFICATION_READ,
+} from "../../../helpers/url_helper"
+import {
+  normalizeTaskNotifications,
+  taskNotificationLink,
+} from "../../../helpers/task_notifications"
 
 const NotificationDropdown = props => {
-  // Declare a new state variable, which we'll call "menu"
   const [menu, setMenu] = useState(false)
+  const [items, setItems] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      setLoading(true)
+      setLoadError(false)
+      const data = normalizeTaskNotifications(await get(TASK_NOTIFICATIONS))
+      setItems(data.items)
+      setUnreadCount(data.unreadCount)
+    } catch {
+      setLoadError(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadNotifications()
+  }, [loadNotifications])
+
+  const toggleMenu = () => {
+    const opening = !menu
+    setMenu(opening)
+    if (opening) loadNotifications()
+  }
+
+  const markRead = async notification => {
+    if (!notification?._id || notification.READ_ON) return
+    setItems(current =>
+      current.map(item =>
+        item._id === notification._id
+          ? { ...item, READ_ON: new Date().toISOString() }
+          : item
+      )
+    )
+    setUnreadCount(current => Math.max(0, current - 1))
+    try {
+      await patch(TASK_NOTIFICATION_READ(notification._id))
+    } catch {
+      loadNotifications()
+    }
+  }
 
   return (
-    <React.Fragment>
-      <Dropdown
-        isOpen={menu}
-        toggle={() => setMenu(!menu)}
-        className="dropdown d-inline-block"
-        tag="li"
+    <Dropdown isOpen={menu} toggle={toggleMenu} className="dropdown d-inline-block" tag="li">
+      <DropdownToggle
+        className="btn header-item noti-icon position-relative"
+        tag="button"
+        id="page-header-notifications-dropdown"
       >
-        <DropdownToggle
-          className="btn header-item noti-icon position-relative"
-          tag="button"
-          id="page-header-notifications-dropdown"
-        >
-          <i className="bx bx-bell bx-tada" />
-          <span className="badge bg-danger rounded-pill">3</span>
-        </DropdownToggle>
+        <i className="bx bx-bell bx-tada" />
+        {unreadCount > 0 ? (
+          <span className="badge bg-danger rounded-pill">{unreadCount}</span>
+        ) : null}
+      </DropdownToggle>
 
-        <DropdownMenu className="dropdown-menu dropdown-menu-lg p-0 dropdown-menu-end">
-          <div className="p-3">
-            <Row className="align-items-center">
-              <Col>
-                <h6 className="m-0"> {props.t("Notifications")} </h6>
-              </Col>
-              <div className="col-auto">
-                <a href="#!" className="small">
-                  {" "}
-                  View All
-                </a>
-              </div>
-            </Row>
-          </div>
+      <DropdownMenu className="dropdown-menu dropdown-menu-lg p-0 dropdown-menu-end">
+        <div className="p-3">
+          <Row className="align-items-center">
+            <Col><h6 className="m-0">{props.t("Notifications")}</h6></Col>
+          </Row>
+        </div>
 
-          <SimpleBar style={{ height: "230px" }}>
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <div className="avatar-xs me-3">
-                  <span className="avatar-title bg-primary rounded-circle font-size-16">
-                    <i className="bx bx-cart" />
-                  </span>
-                </div>
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">
-                    {props.t("Your order is placed")}
-                  </h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t("If several languages coalesce the grammar")}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />{" "}
-                      {props.t("3 min ago")}{" "}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <img
-                  src={avatar3}
-                  className="me-3 rounded-circle avatar-xs"
-                  alt="user-pic"
-                />
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">James Lemire</h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t("It will seem like simplified English") + "."}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />
-                      {props.t("1 hours ago")}{" "}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <div className="avatar-xs me-3">
-                  <span className="avatar-title bg-success rounded-circle font-size-16">
-                    <i className="bx bx-badge-check" />
-                  </span>
-                </div>
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">
-                    {props.t("Your item is shipped")}
-                  </h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t("If several languages coalesce the grammar")}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />{" "}
-                      {props.t("3 min ago")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <img
-                  src={avatar4}
-                  className="me-3 rounded-circle avatar-xs"
-                  alt="user-pic"
-                />
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">Salena Layfield</h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t(
-                        "As a skeptical Cambridge friend of mine occidental"
-                      ) + "."}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />
-                      {props.t("1 hours ago")}{" "}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-          </SimpleBar>
-          <div className="p-2 border-top d-grid">
+        <SimpleBar style={{ height: "230px" }}>
+          {loading && !items.length ? (
+            <div className="text-center py-5"><Spinner size="sm" color="primary" /></div>
+          ) : null}
+          {loadError && !items.length ? (
+            <div className="text-center text-muted p-4">Unable to load notifications.</div>
+          ) : null}
+          {!loading && !loadError && !items.length ? (
+            <div className="text-center text-muted p-4">No notifications.</div>
+          ) : null}
+          {items.map(notification => (
             <Link
-              className="btn btn-sm btn-link font-size-14 btn-block text-center"
-              to="#"
+              key={notification._id}
+              to={taskNotificationLink(notification)}
+              className={`text-reset notification-item ${notification.READ_ON ? "" : "bg-light"}`}
+              onClick={() => markRead(notification)}
             >
-              <i className="mdi mdi-arrow-right-circle me-1"></i>
-              {" "}
-              {props.t("View all")}{" "}
+              <div className="d-flex">
+                <div className="avatar-xs me-3">
+                  <span className="avatar-title bg-warning rounded-circle font-size-16">
+                    <i className="bx bx-task" />
+                  </span>
+                </div>
+                <div className="flex-grow-1">
+                  <h6 className="mt-0 mb-1">Task Due Today</h6>
+                  <div className="font-size-12 text-muted">
+                    <p className="mb-1">{notification.MESSAGE}</p>
+                    <p className="mb-0">
+                      <i className="mdi mdi-calendar-clock me-1" />
+                      {notification.DUE_DATE_KEY}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </Link>
-          </div>
-        </DropdownMenu>
-      </Dropdown>
-    </React.Fragment>
+          ))}
+        </SimpleBar>
+      </DropdownMenu>
+    </Dropdown>
   )
 }
 
-export default withTranslation()(NotificationDropdown)
+NotificationDropdown.propTypes = { t: PropTypes.func.isRequired }
 
-NotificationDropdown.propTypes = {
-  t: PropTypes.any
-}
+export default withTranslation()(NotificationDropdown)

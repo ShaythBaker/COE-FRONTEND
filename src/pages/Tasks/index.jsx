@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import { useSelector } from "react-redux";
+import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -32,6 +33,7 @@ import {
   uploadAttachmentAndGetId,
 } from "../../helpers/attachments_helper";
 import { notifyError, notifySuccess } from "../../helpers/notify";
+import { getTaskStatusMeta } from "../../helpers/task_status";
 import {
   MY_TASKS,
   TASK_ASSIGNABLE_USERS,
@@ -189,6 +191,7 @@ const TaskTable = ({
               creatorUserId === currentUserId || isCurrentAssignee;
             const assignmentLoading = assignmentTaskId === taskId;
             const status = String(task?.STATUS || "PENDING").toUpperCase();
+            const statusMeta = getTaskStatusMeta(task);
             const canClose = isCurrentAssignee && status !== "CLOSED";
             const closeLoading = closingTaskId === taskId;
 
@@ -201,8 +204,8 @@ const TaskTable = ({
                 <td>{formatDateTime(task?.CREATED_ON)}</td>
                 <td>{formatDate(task?.DUE_DATE)}</td>
                 <td>
-                  <Badge color={status === "CLOSED" ? "success" : "warning"}>
-                    {status === "CLOSED" ? "Closed" : "Pending"}
+                  <Badge color={statusMeta.color}>
+                    {statusMeta.label}
                   </Badge>
                 </td>
                 <td>
@@ -288,6 +291,8 @@ TaskTable.propTypes = {
 
 const TasksPage = () => {
   const currentUserId = useSelector(state => state.Login?.userId || "");
+  const [searchParams] = useSearchParams();
+  const linkedTaskId = searchParams.get("task") || "";
 
   const [activeTab, setActiveTab] = useState(TABS.CREATE);
   const [allTasks, setAllTasks] = useState([]);
@@ -349,6 +354,32 @@ const TasksPage = () => {
     loadAllTasks();
     loadMyTasks();
   }, [loadAllTasks, loadMyTasks]);
+
+  useEffect(() => {
+    if (!linkedTaskId) return undefined;
+    let active = true;
+
+    const loadLinkedTask = async () => {
+      try {
+        setDetailsOpen(true);
+        setDetailsLoading(true);
+        const task = await get(TASK_BY_ID(linkedTaskId));
+        if (active) setSelectedTask(task);
+      } catch (error) {
+        if (active) {
+          setDetailsOpen(false);
+          notifyError(errorMessage(error, "Failed to load task details."));
+        }
+      } finally {
+        if (active) setDetailsLoading(false);
+      }
+    };
+
+    loadLinkedTask();
+    return () => {
+      active = false;
+    };
+  }, [linkedTaskId]);
 
   const loadAssignableUsers = async () => {
     try {
@@ -1011,14 +1042,8 @@ const TasksPage = () => {
                   <tr>
                     <th>Status</th>
                     <td>
-                      <Badge
-                        color={
-                          selectedTask.STATUS === "CLOSED"
-                            ? "success"
-                            : "warning"
-                        }
-                      >
-                        {selectedTask.STATUS === "CLOSED" ? "Closed" : "Pending"}
+                      <Badge color={getTaskStatusMeta(selectedTask).color}>
+                        {getTaskStatusMeta(selectedTask).label}
                       </Badge>
                     </td>
                   </tr>
