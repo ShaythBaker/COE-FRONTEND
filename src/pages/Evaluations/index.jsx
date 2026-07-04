@@ -531,6 +531,10 @@ const EvaluationsPage = () => {
               )}
             </CardBody>
           </Card>
+        ) : activeTab === TABS.EVALUATED ? (
+          <Card className="mb-4">
+            <CardBody />
+          </Card>
         ) : (
           <Card>
             <CardBody>
