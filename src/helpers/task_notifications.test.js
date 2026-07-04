@@ -24,11 +24,17 @@ test("builds a direct tasks-page link from populated or plain task ids", () => {
   assert.equal(taskNotificationLink({ TASK_ID: "task-2" }), "/tasks?task=task-2");
 });
 
-test("presents received-task and due-today notifications differently", () => {
-  assert.deepEqual(taskNotificationMeta({ TYPE: "TASK_RECEIVED" }), {
-    title: "Task Received",
+test("presents assigned and closed task notifications differently", () => {
+  assert.deepEqual(taskNotificationMeta({ TYPE: "TASK_ASSIGNED" }), {
+    title: "New Task Assigned",
     icon: "bx bx-task",
     color: "primary",
+    showDate: false,
+  });
+  assert.deepEqual(taskNotificationMeta({ TYPE: "TASK_CLOSED" }), {
+    title: "Task Completed",
+    icon: "bx bx-check-circle",
+    color: "success",
     showDate: false,
   });
   assert.equal(taskNotificationMeta({ TYPE: "TASK_DUE_TODAY" }).title, "Task Due Today");

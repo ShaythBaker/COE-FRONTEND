@@ -27,11 +27,20 @@ export const taskNotificationMeta = notification => {
     };
   }
 
-  if (notification?.TYPE === "TASK_RECEIVED") {
+  if (notification?.TYPE === "TASK_ASSIGNED") {
     return {
-      title: "Task Received",
+      title: "New Task Assigned",
       icon: "bx bx-task",
       color: "primary",
+      showDate: false,
+    };
+  }
+
+  if (notification?.TYPE === "TASK_CLOSED") {
+    return {
+      title: "Task Completed",
+      icon: "bx bx-check-circle",
+      color: "success",
       showDate: false,
     };
   }
