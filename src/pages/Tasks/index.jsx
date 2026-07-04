@@ -183,16 +183,20 @@ const TaskTable = ({
             const previousAssignedUserId = normalizeId(
               task?.PREVIOUS_ASSIGNED_TO
             );
+            const status = String(task?.STATUS || "PENDING").toUpperCase();
+            const isClosed = status === "CLOSED";
             const isCurrentAssignee = assignedUserId === currentUserId;
             const canReclaim =
-              !isCurrentAssignee && previousAssignedUserId === currentUserId;
-            const canClaim = !isCurrentAssignee && !canReclaim;
+              !isClosed &&
+              !isCurrentAssignee &&
+              previousAssignedUserId === currentUserId;
+            const canClaim = !isClosed && !isCurrentAssignee && !canReclaim;
             const canEdit =
-              creatorUserId === currentUserId || isCurrentAssignee;
+              !isClosed &&
+              (creatorUserId === currentUserId || isCurrentAssignee);
             const assignmentLoading = assignmentTaskId === taskId;
-            const status = String(task?.STATUS || "PENDING").toUpperCase();
             const statusMeta = getTaskStatusMeta(task);
-            const canClose = isCurrentAssignee && status !== "CLOSED";
+            const canClose = !isClosed && isCurrentAssignee;
             const closeLoading = closingTaskId === taskId;
 
             return (
@@ -694,6 +698,8 @@ const TasksPage = () => {
 
   const isAssignedUser =
     normalizeId(selectedTask?.ASSIGNED_TO) === String(currentUserId || "");
+  const isSelectedTaskClosed =
+    String(selectedTask?.STATUS || "PENDING").toUpperCase() === "CLOSED";
 
   return (
     <>
@@ -1092,7 +1098,7 @@ const TasksPage = () => {
                 <p className="text-muted">No images or attachments added.</p>
               )}
 
-              {isAssignedUser ? (
+              {isAssignedUser && !isSelectedTaskClosed ? (
                 <Row className="g-3 mt-2">
                   <Col md="7">
                     <Label className="form-label">Note</Label>
