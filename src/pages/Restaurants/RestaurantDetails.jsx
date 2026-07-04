@@ -21,6 +21,10 @@ import {
 } from "reactstrap";
 
 import RoleProtected from "../../components/Common/RoleProtected";
+import {
+  PublishedReviewsPanel,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 import {
@@ -50,6 +54,7 @@ const RestaurantDetails = () => {
   const roles = useSelector((s) => s.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
   const meals = mealsByRestaurant[id] || [];
+  const publishedReviews = usePublishedReviews("RESTAURANT");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -288,6 +293,11 @@ const RestaurantDetails = () => {
                   )}
                 </CardBody>
               </Card>
+
+              <PublishedReviewsPanel
+                sourceName={selected?.REATAURANT_NAME || ""}
+                reviewState={publishedReviews}
+              />
             </>
           )}
 

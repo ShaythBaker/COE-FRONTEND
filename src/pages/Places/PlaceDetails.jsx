@@ -22,10 +22,6 @@ import {
   Table,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
-import {
-  PublishedReviewsPanel,
-  usePublishedReviews,
-} from "../../components/Common/PublishedReviews";
 import { fetchPlace, fetchPlacesLookups, updatePlace } from "../../store/Places/actions";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import {
@@ -195,7 +191,6 @@ const BasicInfoModal = ({
 };
 
 const PlaceDetailsPage = () => {
-  const publishedReviews = usePublishedReviews("PLACE");
   const { id } = useParams();
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -866,15 +861,6 @@ const PlaceDetailsPage = () => {
                 </div>
               </CardBody>
             </Card>
-          </Col>
-        </Row>
-
-        <Row>
-          <Col xs="12">
-            <PublishedReviewsPanel
-              sourceName={selected?.PLACE_NAME || ""}
-              reviewState={publishedReviews}
-            />
           </Col>
         </Row>
 
