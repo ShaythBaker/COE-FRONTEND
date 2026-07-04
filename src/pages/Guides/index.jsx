@@ -26,6 +26,10 @@ import {
   Table,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
+import {
+  PublishedReviewsCell,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 import { buildGuideReservationUsageMap } from "../../helpers/reservation_options";
@@ -172,6 +176,7 @@ const GuidesPage = () => {
   } = guidesState;
 
   const roles = useSelector(state => state.Login?.roles || []);
+  const publishedReviews = usePublishedReviews("GUIDE");
   const authUser = useSelector(state => state.Login || {});
   const reservationFiles = useSelector(
     state => state.ReservationFiles?.items || []
@@ -834,6 +839,7 @@ const GuidesPage = () => {
                             <th>Image</th>
                             <th>Status</th>
                             <th>Updated On</th>
+                            <th>Published Reviews</th>
                             <th style={{ width: 220 }}>Actions</th>
                           </tr>
                         </thead>
@@ -904,6 +910,12 @@ const GuidesPage = () => {
                                 {formatDateTime(
                                   guide?.UPDATED_ON || guide?.CREATED_ON
                                 )}
+                              </td>
+                              <td>
+                                <PublishedReviewsCell
+                                  sourceName={guide?.GUIDE_NAME || ""}
+                                  reviewState={publishedReviews}
+                                />
                               </td>
                               <td>
                                 <div className="d-flex gap-2 flex-wrap">

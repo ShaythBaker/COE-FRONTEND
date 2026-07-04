@@ -4,6 +4,10 @@ import { useDispatch, useSelector } from "react-redux";
 import { Link } from "react-router-dom";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import {
+  PublishedReviewsCell,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
+import {
   Button,
   Card,
   CardBody,
@@ -40,6 +44,7 @@ const List = () => {
   const { items, loading } = useSelector((state) => state.TransportationCompanies || {});
   const roles = useSelector((state) => state.Login?.roles || []);
   const canManageTransportation = hasAnyRole(roles, ["COMPANY_ADMIN", "CONTRACTING"]);
+  const publishedReviews = usePublishedReviews("TRANSPORTATION_COMPANY");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
@@ -173,20 +178,21 @@ const List = () => {
                           <th>Phone</th>
                           <th>Email</th>
                           <th>Rates</th>
+                          <th>Published Reviews</th>
                           <th style={{ width: "150px" }}>Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {loading ? (
                           <tr>
-                            <td colSpan="6" className="text-center py-4">
+                            <td colSpan="7" className="text-center py-4">
                               <Spinner size="sm" className="me-2" />
                               Loading...
                             </td>
                           </tr>
                         ) : filteredItems.length === 0 ? (
                           <tr>
-                            <td colSpan="6" className="text-center text-muted py-4">
+                            <td colSpan="7" className="text-center text-muted py-4">
                               No transportation companies found.
                             </td>
                           </tr>
@@ -205,6 +211,12 @@ const List = () => {
                                 <td>{item?.COMPANY_PHONE || "-"}</td>
                                 <td>{item?.COMPANY_EMAIL || "-"}</td>
                                 <td>{rates.length}</td>
+                                <td>
+                                  <PublishedReviewsCell
+                                    sourceName={item?.COMPANY_NAME || ""}
+                                    reviewState={publishedReviews}
+                                  />
+                                </td>
                                 <td>
                                   <Link
                                     to={`/transportation-companies/${item?._id}`}

@@ -21,6 +21,10 @@ import {
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import {
+  PublishedReviewsCell,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
+import {
   fetchPlaces,
   createPlace,
   deletePlace,
@@ -192,6 +196,7 @@ const PlacesPage = () => {
   const navigate = useNavigate();
 
   const roles = useSelector((state) => state.Login?.roles || []);
+  const publishedReviews = usePublishedReviews("PLACE");
   const placesState = useSelector((state) => state.Places || {});
 
   const items = normalizeList(placesState.items);
@@ -417,13 +422,14 @@ const PlacesPage = () => {
                         <th style={{ width: 90 }}>Image</th>
                         <th>Name</th>
                         <th>City</th>
+                        <th>Published Reviews</th>
                         <th style={{ width: 220 }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {loading ? (
                         <tr>
-                          <td colSpan="4" className="text-center py-5">
+                          <td colSpan="5" className="text-center py-5">
                             <Spinner color="primary" />
                           </td>
                         </tr>
@@ -463,6 +469,12 @@ const PlacesPage = () => {
                               <td>{place?.PLACE_NAME || "-"}</td>
                               <td>{cityLabel(place?.PLACE_CITY, cities)}</td>
                               <td>
+                                <PublishedReviewsCell
+                                  sourceName={place?.PLACE_NAME || ""}
+                                  reviewState={publishedReviews}
+                                />
+                              </td>
+                              <td>
                                 <div className="d-flex flex-wrap gap-2">
                                   <Button
                                     size="sm"
@@ -488,7 +500,7 @@ const PlacesPage = () => {
                         })
                       ) : (
                         <tr>
-                          <td colSpan="4" className="text-center py-5 text-muted">
+                          <td colSpan="5" className="text-center py-5 text-muted">
                             No places found.
                           </td>
                         </tr>

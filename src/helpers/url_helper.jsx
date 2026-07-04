@@ -100,6 +100,8 @@ export const TASK_LOGS = id => `/tasks/${id}/logs`;
 export const TASK_CLOSE = id => `/tasks/${id}/close`;
 export const TASK_NOTIFICATIONS = "/task-notifications";
 export const TASK_NOTIFICATION_READ = id => `/task-notifications/${id}/read`;
+export const EVALUATION_SOURCE_REVIEWS = sourceType =>
+  `/evaluations/published-source-reviews?sourceType=${encodeURIComponent(sourceType)}`;
 
 // =====================
 // Hotels
