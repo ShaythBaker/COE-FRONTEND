@@ -16,3 +16,21 @@ export const taskNotificationLink = notification => {
   const taskId = idString(notification?.TASK_ID);
   return taskId ? `/tasks?task=${encodeURIComponent(taskId)}` : "/tasks";
 };
+
+export const taskNotificationMeta = notification => {
+  if (notification?.TYPE === "TASK_RECEIVED") {
+    return {
+      title: "Task Received",
+      icon: "bx bx-task",
+      color: "primary",
+      showDate: false,
+    };
+  }
+
+  return {
+    title: "Task Due Today",
+    icon: "bx bx-calendar-exclamation",
+    color: "warning",
+    showDate: true,
+  };
+};

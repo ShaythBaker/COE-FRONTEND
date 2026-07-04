@@ -12,6 +12,7 @@ import {
 import {
   normalizeTaskNotifications,
   taskNotificationLink,
+  taskNotificationMeta,
 } from "../../../helpers/task_notifications"
 
 const NotificationDropdown = props => {
@@ -92,8 +93,10 @@ const NotificationDropdown = props => {
           {!loading && !loadError && !items.length ? (
             <div className="text-center text-muted p-4">No notifications.</div>
           ) : null}
-          {items.map(notification => (
-            <Link
+          {items.map(notification => {
+            const meta = taskNotificationMeta(notification)
+            return (
+              <Link
               key={notification._id}
               to={taskNotificationLink(notification)}
               className={`text-reset notification-item ${notification.READ_ON ? "" : "bg-light"}`}
@@ -101,23 +104,26 @@ const NotificationDropdown = props => {
             >
               <div className="d-flex">
                 <div className="avatar-xs me-3">
-                  <span className="avatar-title bg-warning rounded-circle font-size-16">
-                    <i className="bx bx-task" />
+                  <span className={`avatar-title bg-${meta.color} rounded-circle font-size-16`}>
+                    <i className={meta.icon} />
                   </span>
                 </div>
                 <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">Task Due Today</h6>
+                  <h6 className="mt-0 mb-1">{meta.title}</h6>
                   <div className="font-size-12 text-muted">
                     <p className="mb-1">{notification.MESSAGE}</p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-calendar-clock me-1" />
-                      {notification.DUE_DATE_KEY}
-                    </p>
+                    {meta.showDate ? (
+                      <p className="mb-0">
+                        <i className="mdi mdi-calendar-clock me-1" />
+                        {notification.DUE_DATE_KEY}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
-            </Link>
-          ))}
+              </Link>
+            )
+          })}
         </SimpleBar>
       </DropdownMenu>
     </Dropdown>
