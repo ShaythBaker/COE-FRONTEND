@@ -34,6 +34,7 @@ import { notifyError, notifySuccess } from "../../helpers/notify";
 import {
   RESERVATION_STATUS_OPTIONS,
   buildAccommodationOptionChoices,
+  buildContractingUserOptions,
   buildGuideLanguageOptions,
   buildGuideNameOptions,
   buildHotelNameOptions,
@@ -49,6 +50,7 @@ import {
   RESERVATION_FILE_BY_ID,
   RESERVATION_FILE_STATUS as RESERVATION_FILE_STATUS_URL,
   USER_BY_ID,
+  USERS,
 } from "../../helpers/url_helper";
 import {
   RESERVATION_FILE_STATUS as RESERVATION_WORKFLOW_STATUS,
@@ -1561,6 +1563,7 @@ const ReservationFileDetails = () => {
   const [logFilterDateFrom, setLogFilterDateFrom] = useState("");
   const [logFilterDateTo, setLogFilterDateTo] = useState("");
   const [logFilterEvent, setLogFilterEvent] = useState("");
+  const [contractingUsers, setContractingUsers] = useState([]);
   const [pendingAccommodationOptionKey, setPendingAccommodationOptionKey] =
     useState("");
 
@@ -1598,6 +1601,30 @@ const ReservationFileDetails = () => {
   useEffect(() => {
     if (id) dispatch(fetchReservationFile(id));
   }, [dispatch, id]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadContractingUsers = async () => {
+      try {
+        const users = await get(USERS);
+        if (isMounted) setContractingUsers(asArray(users));
+      } catch (error) {
+        if (isMounted) {
+          notifyError(
+            error?.response?.data?.message ||
+              error?.message ||
+              "Failed to load contracting users."
+          );
+        }
+      }
+    };
+
+    loadContractingUsers();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -1698,6 +1725,10 @@ const ReservationFileDetails = () => {
   const guideNameOptions = useMemo(
     () => buildGuideNameOptions(guideDirectory),
     [guideDirectory]
+  );
+  const contractingUserOptions = useMemo(
+    () => buildContractingUserOptions(contractingUsers),
+    [contractingUsers]
   );
 
   document.title = "Reservation File Details | Skote";
@@ -2303,7 +2334,24 @@ const ReservationFileDetails = () => {
                 <td><Input value={text(row.flight)} onChange={e => updateRow("arrDep", index, "flight", e.target.value)} /></td>
                 <td><Input type="time" value={text(row.time)} onChange={e => updateRow("arrDep", index, "time", e.target.value)} /></td>
                 <td><Input type="number" value={text(row.pax)} onChange={e => updateRow("arrDep", index, "pax", e.target.value)} /></td>
-                <td><Input value={text(row.meetBy)} onChange={e => updateRow("arrDep", index, "meetBy", e.target.value)} /></td>
+                <td>
+                  <Input
+                    type="select"
+                    value={text(row.meetBy)}
+                    onChange={e =>
+                      updateRow("arrDep", index, "meetBy", e.target.value)
+                    }
+                  >
+                    {withCurrentOption(
+                      contractingUserOptions,
+                      row.meetBy
+                    ).map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Input>
+                </td>
                 <td><Input value={text(row.driverName)} onChange={e => updateRow("arrDep", index, "driverName", e.target.value)} /></td>
                 <td><Input type="textarea" value={text(row.notes)} onChange={e => updateRow("arrDep", index, "notes", e.target.value)} /></td>
               </tr>

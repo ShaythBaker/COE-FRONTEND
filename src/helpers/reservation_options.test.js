@@ -3,10 +3,50 @@ import assert from "node:assert/strict";
 
 import {
   buildAccommodationOptionChoices,
+  buildContractingUserOptions,
   buildManifestDisplayRows,
   filterFileByAccommodationOption,
   mergeReservationMetadata,
 } from "./reservation_options.js";
+
+test("buildContractingUserOptions includes only active CONTRACTING users", () => {
+  const options = buildContractingUserOptions([
+    {
+      _id: "user-2",
+      FIRST_NAME: "Zaid",
+      LAST_NAME: "Ali",
+      EMAIL: "zaid@example.com",
+      ROLES: ["CONTRACTING"],
+      ACTIVE_STATUS: true,
+    },
+    {
+      _id: "user-1",
+      FIRST_NAME: "Ahmad",
+      LAST_NAME: "Saleh",
+      EMAIL: "ahmad@example.com",
+      ROLES: ["USER", "contracting"],
+      ACTIVE_STATUS: true,
+    },
+    {
+      _id: "user-3",
+      FIRST_NAME: "Other",
+      ROLES: ["OPERATION"],
+      ACTIVE_STATUS: true,
+    },
+    {
+      _id: "user-4",
+      FIRST_NAME: "Inactive",
+      ROLES: ["CONTRACTING"],
+      ACTIVE_STATUS: false,
+    },
+  ]);
+
+  assert.deepEqual(options, [
+    { value: "", label: "Select Contracting User" },
+    { value: "user-1", label: "Ahmad Saleh" },
+    { value: "user-2", label: "Zaid Ali" },
+  ]);
+});
 
 test("filterFileByAccommodationOption keeps only the selected accommodation option", () => {
   const file = {

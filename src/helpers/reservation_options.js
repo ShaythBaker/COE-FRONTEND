@@ -55,6 +55,35 @@ export const RESERVATION_STATUS_OPTIONS = [
   { value: "Invoiced", label: "Invoiced" },
 ];
 
+export const buildContractingUserOptions = users => {
+  const options = asArray(users)
+    .filter(user => user?.ACTIVE_STATUS !== false)
+    .filter(user => {
+      const roles = Array.isArray(user?.ROLES)
+        ? user.ROLES
+        : [user?.ROLE].filter(Boolean);
+      return roles.some(
+        role => cleanText(role).toUpperCase() === "CONTRACTING"
+      );
+    })
+    .map(user => {
+      const value = getId(user);
+      const fullName = cleanText(
+        `${user?.FIRST_NAME || ""} ${user?.LAST_NAME || ""}`
+      );
+      return {
+        value,
+        label: fullName || cleanText(user?.EMAIL) || value,
+      };
+    })
+    .filter(option => option.value)
+    .sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+    );
+
+  return [{ value: "", label: "Select Contracting User" }, ...options];
+};
+
 export const getAccommodationEntries = file => {
   const entries = asArray(file?.QUOTATION_ACCUMIDATIONS);
   if (entries.length) return entries;
