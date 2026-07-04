@@ -18,6 +18,15 @@ export const taskNotificationLink = notification => {
 };
 
 export const taskNotificationMeta = notification => {
+  if (notification?.TYPE === "TASK_OVERDUE") {
+    return {
+      title: "Task Overdue",
+      icon: "bx bx-error-circle",
+      color: "danger",
+      showDate: true,
+    };
+  }
+
   if (notification?.TYPE === "TASK_RECEIVED") {
     return {
       title: "Task Received",

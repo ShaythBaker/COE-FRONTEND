@@ -33,3 +33,12 @@ test("presents received-task and due-today notifications differently", () => {
   });
   assert.equal(taskNotificationMeta({ TYPE: "TASK_DUE_TODAY" }).title, "Task Due Today");
 });
+
+test("presents overdue notifications with a danger treatment", () => {
+  assert.deepEqual(taskNotificationMeta({ TYPE: "TASK_OVERDUE" }), {
+    title: "Task Overdue",
+    icon: "bx bx-error-circle",
+    color: "danger",
+    showDate: true,
+  });
+});
