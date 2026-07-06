@@ -105,6 +105,11 @@ export const EVALUATION_SOURCE_REVIEWS = sourceType =>
   `/evaluations/published-source-reviews?sourceType=${encodeURIComponent(sourceType)}`;
 
 // =====================
+// Analytics
+// =====================
+export const ANALYTICS = "/analytics";
+
+// =====================
 // Hotels
 // =====================
 export const HOTELS = "/hotels";

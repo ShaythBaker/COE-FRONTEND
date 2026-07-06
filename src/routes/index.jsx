@@ -1,5 +1,4 @@
 // path: src/routes/index.jsx
-import React from "react";
 import { Navigate } from "react-router-dom";
 
 // Authentication related pages
@@ -11,6 +10,7 @@ import NotAuthorized from "../pages/Authentication/NotAuthorized";
 
 // Dashboard
 import Dashboard from "../pages/Dashboard/index";
+import Analytics from "../pages/Analytics";
 
 // System Settings
 import CompanyUsers from "../pages/Settings/CompanyUsers";
@@ -69,6 +69,14 @@ import PublicEvaluationPage from "../pages/Evaluations/PublicEvaluation";
 
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
+  {
+    path: "/analytics",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN"]}>
+        <Analytics />
+      </RoleProtected>
+    ),
+  },
 
   {
     path: "/settings/users",

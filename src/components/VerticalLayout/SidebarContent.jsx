@@ -262,6 +262,13 @@ const SidebarContent = (props) => {
                     <span>Users</span>
                   </Link>
                 </li>
+
+                <li className={isActive("/analytics") ? "mm-active" : ""}>
+                  <Link to="/analytics" className="waves-effect">
+                    <i className="bx bx-bar-chart-alt-2" />
+                    <span>Analytics</span>
+                  </Link>
+                </li>
               </>
             )}
 

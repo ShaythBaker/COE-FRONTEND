@@ -386,6 +386,73 @@
     font-size: 0.82rem;
   }
 
+  .analytics-tabs-card {
+    position: sticky;
+    top: 74px;
+    z-index: 4;
+  }
+
+  .analytics-tab-nav {
+    gap: 0.65rem;
+
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      border-radius: 999px;
+      color: $gray-700;
+      font-weight: 700;
+      background: rgba($primary, 0.06);
+      border: 1px solid rgba($primary, 0.08);
+
+      i {
+        font-size: 1rem;
+      }
+
+      &.active {
+        color: $white;
+        background: $primary;
+        box-shadow: 0 12px 24px rgba($primary, 0.18);
+      }
+    }
+  }
+
+  .analytics-empty-state,
+  .analytics-loading {
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    color: $gray-600;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .analytics-empty-state {
+    border-radius: 1rem;
+    background: rgba($gray-500, 0.08);
+
+    i {
+      color: $primary;
+      font-size: 2rem;
+    }
+  }
+
+  .analytics-loading {
+    min-height: 320px;
+  }
+
+  .analytics-research-list {
+    display: grid;
+    gap: 0.85rem;
+
+    a {
+      font-weight: 700;
+    }
+  }
+
   @media (max-width: 1199.98px) {
     .dashboard-chart-grid,
     .dashboard-doughnut-panel,
@@ -420,6 +487,16 @@
 
     .dashboard-hero-card__title {
       font-size: 1.5rem;
+    }
+
+    .analytics-tabs-card {
+      position: static;
+    }
+
+    .analytics-tab-nav {
+      .nav-link {
+        width: 100%;
+      }
     }
   }
 }

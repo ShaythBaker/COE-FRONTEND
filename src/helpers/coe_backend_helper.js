@@ -5,6 +5,7 @@ import {
   LIST_ITEMS,
   ATTACHMENTS,
   ATTACHMENT_BY_ID,
+  ANALYTICS,
   QUOTATION_SEND_FOR_PRICING,
   QUOTATION_FINAL_PRICING,
 } from "./url_helper";
@@ -26,6 +27,12 @@ export const postSendQuotationForPricing = (quotationId, payload = {}) =>
 
 export const getQuotationFinalPricing = (quotationId) =>
   get(QUOTATION_FINAL_PRICING(quotationId));
+
+// =====================
+// Analytics
+// =====================
+
+export const getAnalyticsOverview = () => get(ANALYTICS);
 
 // =====================
 // COE Modules List Items
