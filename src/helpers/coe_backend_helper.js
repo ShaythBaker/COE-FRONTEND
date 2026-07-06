@@ -32,7 +32,16 @@ export const getQuotationFinalPricing = (quotationId) =>
 // Analytics
 // =====================
 
-export const getAnalyticsOverview = () => get(ANALYTICS);
+export const getAnalyticsOverview = (filters = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value).trim());
+    }
+  });
+  const query = params.toString();
+  return get(query ? `${ANALYTICS}?${query}` : ANALYTICS);
+};
 
 // =====================
 // COE Modules List Items
