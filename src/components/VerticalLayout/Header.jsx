@@ -120,7 +120,7 @@ const Header = props => {
             </form>
 
             <Dropdown
-              className="dropdown-mega d-none d-lg-block ms-2"
+              className="dropdown-mega d-none ms-2"
               isOpen={megaMenu}
               toggle={() => {
                 setmegaMenu(!megaMenu);

@@ -57,6 +57,21 @@ const NotificationDropdown = props => {
     return subscribeToNotificationRefresh(loadNotifications)
   }, [loadNotifications])
 
+  useEffect(() => {
+    const openFromProfileMenu = () => {
+      setAllOpen(true)
+      loadNotifications()
+    }
+    const refreshFromProfile = () => loadNotifications()
+
+    window.addEventListener("open-task-notifications", openFromProfileMenu)
+    window.addEventListener("coe-notifications-updated", refreshFromProfile)
+    return () => {
+      window.removeEventListener("open-task-notifications", openFromProfileMenu)
+      window.removeEventListener("coe-notifications-updated", refreshFromProfile)
+    }
+  }, [loadNotifications])
+
   const toggleMenu = () => {
     const opening = !menu
     setMenu(opening)
