@@ -98,18 +98,18 @@ const ProfileMenu = props => {
       className="d-inline-block"
     >
       <DropdownToggle
-        className="btn header-item"
+        className="btn header-item d-inline-flex align-items-center"
         id="page-header-user-dropdown"
         tag="button"
       >
         {avatarUrl ? (
           <img
-            className="rounded-circle header-profile-user"
+            className="coe-header-avatar"
             src={avatarUrl}
             alt="Header Avatar"
           />
         ) : (
-          <span className="rounded-circle header-profile-user avatar-title bg-primary text-white d-inline-flex align-items-center justify-content-center">
+          <span className="coe-header-avatar coe-header-avatar-fallback bg-primary text-white">
             {initialsFor(profile)}
           </span>
         )}

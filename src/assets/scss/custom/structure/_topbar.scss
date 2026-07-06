@@ -131,6 +131,27 @@
     padding: 3px;
 }
 
+.coe-header-avatar {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    max-width: 38px;
+    border-radius: 50%;
+    object-fit: cover;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.coe-header-avatar-fallback {
+    padding: 0;
+}
+
 .noti-icon {
     i {
         font-size: 22px;
