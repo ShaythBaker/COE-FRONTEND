@@ -1813,6 +1813,11 @@ const GeneralTab = ({ analytics }) => {
   const general = analytics.general || {};
   const summaryCards = asArray(general.summaryCards).filter(
     card => !isPriceMetric(card.label, card.footer, card.valueType),
+  ).map(card =>
+    card.label === "Active Users" ||
+    String(card.footer || "").toLowerCase().includes("total users")
+      ? { ...card, footer: "" }
+      : card
   );
   return (
     <>
@@ -1879,7 +1884,7 @@ const UsersTab = ({ analytics }) => {
           {
             label: "Users",
             value: users.active,
-            footer: `${formatNumber(users.total)} total accounts`,
+            footer: "",
             className: "success",
           },
         ]}
@@ -1891,8 +1896,6 @@ const UsersTab = ({ analytics }) => {
             subtitle="Most common operational roles among active users."
             badge={`${formatNumber(users.active)} active`}
             rows={users.byRole}
-            centerLabel="Users"
-            centerValue={users.total}
           />
         </Col>
         <Col xl={7}>
@@ -1912,8 +1915,6 @@ const UsersTab = ({ analytics }) => {
             title="Activity Level"
             subtitle="Current account activity split."
             rows={users.byStatus}
-            centerLabel="Users"
-            centerValue={users.total}
           />
         </Col>
         <Col xl={6}>
