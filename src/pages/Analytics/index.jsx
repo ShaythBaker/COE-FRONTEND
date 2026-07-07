@@ -1,5 +1,7 @@
 import PropTypes from "prop-types";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import {
   Alert,
   Badge,
@@ -24,6 +26,7 @@ import { Doughnut } from "react-chartjs-2";
 import ReactEcharts from "echarts-for-react";
 import { jsPDF } from "jspdf";
 import { withTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { getAnalyticsOverview } from "../../helpers/coe_backend_helper";
@@ -44,10 +47,10 @@ const CHART_COLORS = [
 const TABS = [
   { key: "general", label: "General", icon: "bx bx-grid-alt" },
   { key: "users", label: "Users", icon: "bx bx-user" },
-  { key: "guests", label: "Guests / Nationalities", icon: "bx bx-group" },
-  { key: "filesTrips", label: "Files / Trips", icon: "bx bx-folder-open" },
+  { key: "guests", label: "Guests", icon: "bx bx-group" },
+  { key: "filesTrips", label: "Files", icon: "bx bx-folder-open" },
   { key: "ratingsOverview", label: "Ratings Overview", icon: "bx bx-star" },
-  { key: "today", label: "Today / Current Status", icon: "bx bx-calendar-check" },
+  { key: "today", label: "Real Time Status", icon: "bx bx-map-alt" },
   { key: "hotels", label: "Hotels", icon: "bx bx-hotel" },
   { key: "guides", label: "Guides", icon: "bx bx-map-pin" },
   { key: "restaurants", label: "Restaurants", icon: "bx bx-restaurant" },
@@ -60,19 +63,28 @@ const TABS = [
   },
 ];
 
+const CURRENT_ANALYTICS_TAB_KEY = "current";
+const ALL_ANALYTICS_TABS_KEY = "all";
+
+const resolveExportTabKeys = (exportTarget, activeTab) => {
+  if (exportTarget === ALL_ANALYTICS_TABS_KEY) return TABS.map(tab => tab.key);
+  if (!exportTarget || exportTarget === CURRENT_ANALYTICS_TAB_KEY) return [activeTab];
+  return [exportTarget || activeTab].filter(key => TABS.some(tab => tab.key === key));
+};
+
 const TAB_DATA_BASIS = {
   general: "Company-scoped operational records currently available in the COE database.",
   users: "Current company user records, roles, creation dates, and completeness checks.",
   guests: "Quotation pax and reservation customer profiles; pax is not treated as individual guest records.",
   filesTrips: "Quotations and reservation files linked through saved quotation IDs.",
   ratingsOverview: "Approved evaluation responses and their saved reservation/quotation relationships.",
-  hotels: "Hotel inventory, saved accommodation options, configured rates, and approved ratings.",
+  hotels: "Hotel inventory, saved accommodation options, usage, and approved ratings.",
   guides: "Guide records, reservation assignments where names exist, guide types, and approved ratings.",
-  restaurants: "Restaurant inventory, quotation-day meal rows, configured meals, and approved ratings.",
-  travelAgents: "Travel-agent IDs stored on quotations with linked files, pax, and available saved pricing.",
-  places: "Place inventory and saved quotation-day entrance selections; these are not confirmed visits.",
-  transportationCompanies: "Resolved quotation-day transport selections, configured rates, and approved ratings.",
-  today: "Today Analytics based on saved trip dates and schedules; it is not live location tracking.",
+  restaurants: "Restaurant inventory, quotation-day meal rows, usage, and approved ratings.",
+  travelAgents: "Travel-agent IDs stored on quotations with linked files and pax.",
+  places: "Place inventory and saved itinerary/place selections; these are not confirmed visits.",
+  transportationCompanies: "Resolved quotation-day transport selections, usage, and approved ratings.",
+  today: "Real-time reservation-file schedules, current trip windows, city pax, and saved service rows.",
 };
 
 const RESEARCH_NOTES = {
@@ -200,6 +212,11 @@ const formatMetric = (value, type) => {
   return formatNumber(value);
 };
 
+const PRICE_METRIC_PATTERN =
+  /\b(price|pricing|priced|profit|cost|fee|fees|amount|amounts|money|revenue)\b|\brates?\b|base total|final total|final priced/i;
+const isPriceMetric = (...values) =>
+  values.some(value => PRICE_METRIC_PATTERN.test(String(value || "")));
+
 const getTopName = rows => asArray(rows)[0]?.name || "-";
 
 const EMPTY_ANALYTICS_FILTERS = {
@@ -257,7 +274,7 @@ const rankingTable = (title, rows) => reportTable(
   [
     { label: "Name", value: row => row?.name || "-" },
     { label: "Count", value: row => firstValue(row?.value, row?.count, row?.quotations, row?.ratingCount) },
-    { label: "Average", value: row => firstValue(row?.averageRating, row?.averageRate, row?.averagePrice, row?.averageAmount, row?.averageQuotationValue) },
+    { label: "Average", value: row => firstValue(row?.averageRating) },
     { label: "Files / Trips", value: row => firstValue(row?.tripCount, row?.filesHandled, row?.reservationFiles) },
     { label: "Occurrences", value: row => firstValue(row?.occurrences, row?.days) },
     { label: "Pax", value: row => firstValue(row?.linkedGroupPax, row?.paxHandled, row?.totalPax, row?.pax) },
@@ -303,7 +320,6 @@ const filterReportRows = analytics => {
 };
 
 const executiveSummaryRows = analytics => {
-  const general = analytics?.general || {};
   const users = analytics?.users || {};
   const guests = analytics?.guests || {};
   const files = analytics?.filesTrips || {};
@@ -317,7 +333,6 @@ const executiveSummaryRows = analytics => {
     { label: "Total Quotations", value: files.totalQuotations, notes: "Selected reporting period" },
     { label: "Total Files / Trips", value: files.totalFilesTrips, notes: "Reservation files linked to quotations" },
     { label: "Total Pax", value: guests.totalPax, notes: "Quotation group pax" },
-    { label: "Final Priced Total", value: general.priceSummary?.finalTotal, notes: "Available saved pricing; not collected revenue" },
     { label: "Total Ratings", value: ratings.totalRatings, notes: "Approved evaluation ratings" },
     { label: "Average Rating", value: ratings.averageOverallRating, notes: "Across approved rating answers" },
     { label: "Best Hotel", value: hotels.bestHotel?.name || "No data", notes: hotels.bestHotel ? `${hotels.bestHotel.averageRating} average rating` : "" },
@@ -348,14 +363,12 @@ const buildAnalyticsReport = analytics => {
     { name: "Filters", tables: [reportTable("Selected Filters", [{ label: "Filter", value: "label" }, { label: "Value", value: "value" }], filterReportRows(analytics))] },
     { name: "General", title: "General Overview", tables: [
       metricsTable([
-        ...asArray(general.summaryCards).map(card => ({ label: card.label, value: card.value, notes: card.footer })),
-        { label: "Base Total", value: general.priceSummary?.baseTotal, notes: "Before profit" },
-        { label: "Profit Total", value: general.priceSummary?.profitTotal, notes: "Saved pricing rows" },
-        { label: "Final Priced Total", value: general.priceSummary?.finalTotal, notes: "Available saved pricing" },
+        ...asArray(general.summaryCards)
+          .filter(card => !isPriceMetric(card.label, card.footer, card.valueType))
+          .map(card => ({ label: card.label, value: card.value, notes: card.footer })),
       ]),
       rankingTable("Entity Counts", general.entityCounts),
       rankingTable("Quotation Status", general.quotationStatus),
-      rankingTable("Pricing Breakdown", general.pricingBreakdown),
       reportTable("Quotation Activity by Month", [
         { label: "Month", value: row => row?.month || row?.name }, { label: "Total", value: "total" },
         { label: "Approved", value: "APPROVED" }, { label: "Sent for Pricing", value: "SEND_FOR_PRICING" },
@@ -364,16 +377,17 @@ const buildAnalyticsReport = analytics => {
     ] },
     { name: "Users", tables: [
       metricsTable([
-        { label: "Total Users", value: users.total }, { label: "Active Users", value: users.active },
-        { label: "Inactive Users", value: users.inactive }, { label: "Role Assignments", value: users.roleAssignments },
+        { label: "Roles", value: asArray(users.byRole).length },
+        { label: "Users", value: users.active },
       ]),
       rankingTable("Users by Role", users.byRole),
+      rankingTable("Activity Level", users.byStatus),
       reportTable("Recent Users", [
         { label: "Name", value: "name" }, { label: "Email", value: "email" },
         { label: "Roles", value: row => asArray(row?.roles).join(", ") }, { label: "Created", value: row => formatDate(row?.createdOn) },
       ], users.recentUsers),
     ] },
-    { name: "Guests - Nationalities", tables: [
+    { name: "Guests", tables: [
       metricsTable([
         { label: "Total Pax", value: guests.totalPax, notes: "Quotation pax" },
         { label: "Quotations", value: guests.quotationCount }, { label: "Top Nationality", value: guests.topNationality },
@@ -385,11 +399,6 @@ const buildAnalyticsReport = analytics => {
       ], guests.byNationality),
       reportTable("Pax Trend", [{ label: "Month", value: "month" }, { label: "Quotations", value: "quotations" }, { label: "Pax", value: "pax" }], guests.paxByMonth),
       nationalityRatingsTable(guests.ratingsByNationality),
-      reportTable("Recent Guest Activity", [
-        { label: "Quotation", value: "quotationReference" }, { label: "File", value: "fileReference" },
-        { label: "Nationality", value: "nationality" }, { label: "Pax", value: "pax" },
-        { label: "Trip Start", value: row => formatDate(row?.tripStart) }, { label: "Status", value: "status" },
-      ], guests.recentActivity),
     ] },
     { name: "Files - Trips", tables: [
       metricsTable([
@@ -424,48 +433,48 @@ const buildAnalyticsReport = analytics => {
       nationalityRatingsTable(ratings.ratingsByNationality),
     ] },
     { name: "Hotels", tables: [
-      metricsTable([{ label: "Total Hotels", value: hotels.total }, { label: "Average Rate", value: hotels.priceSummary?.averageRate }, { label: "Best Hotel", value: hotels.bestHotel?.name }, { label: "Most Used Hotel", value: getTopName(hotels.rankedByUsage) }]),
+      metricsTable([{ label: "Total Hotels", value: hotels.total }, { label: "Best Hotel", value: hotels.bestHotel?.name }, { label: "Most Used Hotel", value: getTopName(hotels.rankedByUsage) }]),
       rankingTable("Top Rated Hotels", hotels.rankedByRating), rankingTable("Most Used Hotels", hotels.rankedByUsage),
       rankingTable("Hotels by Linked Group Pax", hotels.hotelsByLinkedGroupPax),
       reportTable("Hotel Usage by Month", [{ label: "Month", value: "month" }, { label: "Hotel", value: "name" }, { label: "Files / Trips", value: "filesHandled" }, { label: "Occurrences", value: "occurrences" }, { label: "Nights", value: "totalNights" }, { label: "Linked Pax", value: "linkedGroupPax" }], hotels.usageByMonth),
       rankingTable("Hotels by City", hotels.byCity), rankingTable("Hotels by Chain", hotels.byChain), rankingTable("Hotels by Stars", hotels.byStars),
-      nationalityRatingsTable(hotels.ratingsByNationality), rankingTable("Rates by Board", hotels.ratesByBoard), rankingTable("Rates by Season", hotels.ratesBySeason),
+      nationalityRatingsTable(hotels.ratingsByNationality),
     ] },
     { name: "Guides", tables: [
-      metricsTable([{ label: "Total Guides", value: guides.total }, { label: "Best Guide", value: guides.bestGuide?.name }, { label: "Most Languages", value: guides.mostLanguagesGuide?.name }, { label: "Average Guide Cost", value: guides.priceSummary?.averageGuideCost }]),
+      metricsTable([{ label: "Total Guides", value: guides.total }, { label: "Best Guide", value: guides.bestGuide?.name }, { label: "Most Languages", value: guides.mostLanguagesGuide?.name }]),
       rankingTable("Top Rated Guides", guides.rankedByRating), rankingTable("Most Multilingual Guides", guides.rankedByLanguages),
       rankingTable("Most Used Guides", guides.mostUsedGuides), rankingTable("Guides by Pax Handled", guides.guidesByPaxHandled),
       rankingTable("Guide Type Usage", guides.guideTypeUsage), nationalityRatingsTable(guides.ratingsByNationality),
     ] },
     { name: "Restaurants", tables: [
-      metricsTable([{ label: "Total Restaurants", value: restaurants.total }, { label: "Average Meal Price", value: restaurants.priceSummary?.averageMealPrice }, { label: "Best Restaurant", value: restaurants.bestRestaurant?.name }, { label: "Most Used Restaurant", value: getTopName(restaurants.rankedByUsage) }]),
+      metricsTable([{ label: "Total Restaurants", value: restaurants.total }, { label: "Best Restaurant", value: restaurants.bestRestaurant?.name }, { label: "Most Used Restaurant", value: getTopName(restaurants.rankedByUsage) }]),
       rankingTable("Top Rated Restaurants", restaurants.rankedByRating), rankingTable("Most Used Restaurants", restaurants.rankedByUsage),
       rankingTable("Restaurants by Linked Group Pax", restaurants.restaurantsByLinkedGroupPax), rankingTable("Restaurants by City", restaurants.byCity),
-      rankingTable("Meal Types", restaurants.mealTypes), nationalityRatingsTable(restaurants.ratingsByNationality),
+      nationalityRatingsTable(restaurants.ratingsByNationality),
     ] },
     { name: "Travel Agents", tables: [
-      metricsTable([{ label: "Total Travel Agents", value: agents.total }, { label: "Quotations", value: agents.totalQuotations }, { label: "Files / Trips", value: agents.totalReservationFiles }, { label: "Linked Group Pax", value: agents.totalPax }, { label: "Saved Pricing Total", value: agents.totalPricing, notes: "Not collected revenue" }]),
+      metricsTable([{ label: "Total Travel Agents", value: agents.total }, { label: "Quotations", value: agents.totalQuotations }, { label: "Files / Trips", value: agents.totalReservationFiles }, { label: "Linked Group Pax", value: agents.totalPax }]),
       rankingTable("Most Active Agents", agents.mostActiveAgents), rankingTable("Agents by Quotations", agents.byQuotations),
       rankingTable("Agents by Files / Trips", agents.byReservationFiles), rankingTable("Agents by Pax", agents.byPax),
-      rankingTable("Saved Pricing by Agent", agents.byPricingTotal), rankingTable("Agents by Country", agents.byCountry),
+      rankingTable("Agents by Country", agents.byCountry),
     ] },
     { name: "Places", tables: [
-      metricsTable([{ label: "Total Places", value: places.total }, { label: "Average Entrance Fee", value: places.priceSummary?.averageEntranceFee }, { label: "Best Rated Place", value: places.bestPlace?.name }, { label: "Most Used Place", value: getTopName(places.rankedByUsage) }]),
+      metricsTable([{ label: "Total Places", value: places.total }, { label: "Best Rated Place", value: places.bestPlace?.name }, { label: "Most Used Place", value: getTopName(places.rankedByUsage) }]),
       rankingTable("Top Rated Places", places.rankedByRating), rankingTable("Most Used Places", places.rankedByUsage),
       rankingTable("Places by Linked Group Pax", places.placesByLinkedGroupPax), rankingTable("Places by City", places.byCity),
-      rankingTable("Configured Entrance Fees by Nationality", places.feesByNationality), rankingTable("Selected Entrance Fees by Nationality", places.selectedFeesByNationality),
       nationalityRatingsTable(places.ratingsByNationality),
     ] },
     { name: "Transportation Companies", tables: [
-      metricsTable([{ label: "Transportation Companies", value: transportation.total }, { label: "Average Configured Rate", value: transportation.priceSummary?.averageRate }, { label: "Average Selected Rate", value: transportation.priceSummary?.averageSelectedRate }, { label: "Best Company", value: transportation.bestTransportationCompany?.name }, { label: "Most Used Company", value: getTopName(transportation.rankedByUsage) }]),
+      metricsTable([{ label: "Transportation Companies", value: transportation.total }, { label: "Best Company", value: transportation.bestTransportationCompany?.name }, { label: "Most Used Company", value: getTopName(transportation.rankedByUsage) }]),
       rankingTable("Top Rated Transportation Companies", transportation.rankedByRating), rankingTable("Most Used Transportation Companies", transportation.rankedByUsage),
       rankingTable("Transportation by Linked Group Pax", transportation.companiesByLinkedGroupPax), rankingTable("Type Usage", transportation.typeUsage),
-      rankingTable("Vehicle / Size Usage", transportation.sizeUsage), rankingTable("Rates by Type", transportation.ratesByType),
-      rankingTable("Rates by Size", transportation.ratesBySize), nationalityRatingsTable(transportation.ratingsByNationality),
+      rankingTable("Vehicle / Size Usage", transportation.sizeUsage), nationalityRatingsTable(transportation.ratingsByNationality),
     ] },
-    { name: "Today - Current Status", tables: [
-      metricsTable([{ label: "Report Date", value: today.date }, { label: "Active Trips Today", value: today.activeTripsCount }, { label: "Active Linked Pax", value: today.activePax }, { label: "Scheduled Days", value: today.scheduledDaysCount }, { label: "Explicit Free Days", value: today.explicitFreeDays, notes: today.freeDayBasis }]),
-      reportTable("Active Files / Trips", [{ label: "File", value: "fileReference" }, { label: "Quotation", value: "quotationReference" }, { label: "Status", value: "status" }, { label: "Start", value: row => formatDate(row?.startDate) }, { label: "End", value: row => formatDate(row?.endDate) }, { label: "Pax", value: "pax" }], today.activeTrips),
+    { name: "Real Time Status", tables: [
+      metricsTable([{ label: "Report Date", value: today.date }, { label: "Current Time", value: today.nowLabel, notes: today.timeZone }, { label: "Pax in Trip Now", value: today.activePax }, { label: "Pax at Stops Now", value: today.currentStopPax }, { label: "Pax in Free Time Now", value: today.freeNowPax }, { label: "Active Files", value: today.activeTripsCount }]),
+      reportTable("Pax by Current City", [{ label: "City", value: "name" }, { label: "Pax", value: "pax" }, { label: "Files", value: "files" }], today.cityPax),
+      reportTable("Active Reservation Files", [{ label: "File", value: "fileReference" }, { label: "Quotation", value: "quotationReference" }, { label: "Current City", value: "currentCity" }, { label: "Current Location", value: "currentLocation" }, { label: "Next Stop", value: row => row?.nextStop?.name || "-" }, { label: "Next Time", value: row => row?.nextStop?.timeLabel || "-" }, { label: "Pax", value: "pax" }], today.activeTrips),
+      reportTable("Free Time Now", [{ label: "File", value: "fileReference" }, { label: "City", value: "city" }, { label: "From", value: "from" }, { label: "To", value: "to" }, { label: "Pax", value: "pax" }, { label: "Reason", value: "reason" }], today.freeNowFiles),
       rankingTable("Guide Types Today", today.serviceDistribution?.guideTypes), rankingTable("Restaurants Today", today.serviceDistribution?.restaurants),
       rankingTable("Transportation Companies Today", today.serviceDistribution?.transportationCompanies), rankingTable("Places Today", today.serviceDistribution?.places),
       rankingTable("Saved Hotel Options", today.serviceDistribution?.hotelOptions), rankingTable("Today Itinerary", today.serviceDistribution?.itinerary),
@@ -476,7 +485,7 @@ const buildAnalyticsReport = analytics => {
 const REPORT_SECTION_BY_TAB = {
   general: "General",
   users: "Users",
-  guests: "Guests - Nationalities",
+  guests: "Guests",
   filesTrips: "Files - Trips",
   ratingsOverview: "Ratings Overview",
   hotels: "Hotels",
@@ -485,18 +494,16 @@ const REPORT_SECTION_BY_TAB = {
   travelAgents: "Travel Agents",
   places: "Places",
   transportationCompanies: "Transportation Companies",
-  today: "Today - Current Status",
+  today: "Real Time Status",
 };
 
 const reportTitleForTab = activeTab => {
   const label = TABS.find(tab => tab.key === activeTab)?.label || "Analytics";
-  return `COE ${label.replace(" / Current Status", "")} Analytics Report`;
+  return `COE ${label} Analytics Report`;
 };
 
-const getCurrentReportSection = (analytics, activeTab) =>
-  buildAnalyticsReport(analytics).find(
-    section => section.name === REPORT_SECTION_BY_TAB[activeTab],
-  );
+const getReportSectionFromReport = (report, activeTab) =>
+  report.find(section => section.name === REPORT_SECTION_BY_TAB[activeTab]);
 
 const getPdfChartSpecs = (analytics, activeTab) => {
   const data = analytics?.[activeTab] || {};
@@ -699,10 +706,17 @@ const downloadBlob = (content, type, filename) => {
   URL.revokeObjectURL(url);
 };
 
-const exportAnalyticsExcel = (analytics, activeTab) => {
-  const currentSection = getCurrentReportSection(analytics, activeTab);
-  if (!currentSection) return;
-  const filterSection = buildAnalyticsReport(analytics).find(section => section.name === "Filters");
+const exportAnalyticsExcel = (analytics, activeTab, exportTarget = activeTab) => {
+  const report = buildAnalyticsReport(analytics);
+  const targetTabKeys = resolveExportTabKeys(exportTarget, activeTab);
+  const selectedSections = targetTabKeys
+    .map(tabKey => ({ tabKey, section: getReportSectionFromReport(report, tabKey) }))
+    .filter(item => item.section);
+  if (!selectedSections.length) return;
+  const exportAll = exportTarget === ALL_ANALYTICS_TABS_KEY;
+  const currentSection = selectedSections[0].section;
+  const filterSection = report.find(section => section.name === "Filters");
+  const summarySection = report.find(section => section.name === "Summary");
   const usedSheetNames = new Set();
   const safeSheetName = value => {
     const base = ["\\", "/", ":", "?", "*", "[", "]"]
@@ -719,23 +733,41 @@ const exportAnalyticsExcel = (analytics, activeTab) => {
     usedSheetNames.add(name);
     return name;
   };
-  const workbookSections = [
-    {
-      name: safeSheetName("Summary"),
-      title: `${currentSection.title || currentSection.name} Summary`,
-      tables: currentSection.tables.slice(0, 1),
-    },
-    ...currentSection.tables.slice(1).map(table => ({
-      name: safeSheetName(table.title),
-      title: table.title,
-      tables: [table],
-    })),
-    {
-      name: safeSheetName("Filters"),
-      title: "Selected Filters",
-      tables: filterSection?.tables || [],
-    },
-  ];
+  const workbookSections = exportAll
+    ? [
+        {
+          name: safeSheetName("Summary"),
+          title: "COE All Analytics Summary",
+          tables: summarySection?.tables || [],
+        },
+        ...selectedSections.map(({ tabKey, section }) => ({
+          name: safeSheetName(TABS.find(tab => tab.key === tabKey)?.label || section.name),
+          title: reportTitleForTab(tabKey),
+          tables: section.tables,
+        })),
+        {
+          name: safeSheetName("Filters"),
+          title: "Selected Filters",
+          tables: filterSection?.tables || [],
+        },
+      ]
+    : [
+        {
+          name: safeSheetName("Summary"),
+          title: `${currentSection.title || currentSection.name} Summary`,
+          tables: currentSection.tables.slice(0, 1),
+        },
+        ...currentSection.tables.slice(1).map(table => ({
+          name: safeSheetName(table.title),
+          title: table.title,
+          tables: [table],
+        })),
+        {
+          name: safeSheetName("Filters"),
+          title: "Selected Filters",
+          tables: filterSection?.tables || [],
+        },
+      ];
   const cell = (value, style = "") => {
     const isNumber = typeof value === "number" && Number.isFinite(value);
     const displayValue = isNumber ? value : friendlyReportValue(value ?? "");
@@ -768,11 +800,11 @@ const exportAnalyticsExcel = (analytics, activeTab) => {
   downloadBlob(
     workbook,
     "application/vnd.ms-excel;charset=utf-8",
-    `coe-${activeTab}-analytics-${new Date().toISOString().slice(0, 10)}.xls`,
+    `coe-${exportAll ? "all" : selectedSections[0].tabKey}-analytics-${new Date().toISOString().slice(0, 10)}.xls`,
   );
 };
 
-const exportAnalyticsPdf = (analytics, activeTab) => {
+const exportAnalyticsPdf = (analytics, activeTab, exportTarget = activeTab) => {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const margin = 44;
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -973,22 +1005,27 @@ const exportAnalyticsPdf = (analytics, activeTab) => {
 
   const report = buildAnalyticsReport(analytics);
   const filterTable = report.find(section => section.name === "Filters")?.tables[0];
-  const selectedSection = getCurrentReportSection(analytics, activeTab);
-  if (!selectedSection) return;
-  const summaryTable = selectedSection.tables[0];
-  const reportTitle = reportTitleForTab(activeTab);
-  const dataBasis = analytics?.[activeTab]?.dataBasis || TAB_DATA_BASIS[activeTab];
-  const selectedHasData = selectedSection.tables.some(table =>
-    table.rows.some(row =>
-      row.slice(1).some(value =>
-        value !== "" &&
-        value !== null &&
-        value !== undefined &&
-        value !== 0 &&
-        value !== "No data",
+  const targetTabKeys = resolveExportTabKeys(exportTarget, activeTab);
+  const selectedSections = targetTabKeys
+    .map(tabKey => ({ tabKey, section: getReportSectionFromReport(report, tabKey) }))
+    .filter(item => item.section);
+  if (!selectedSections.length) return;
+  const exportAll = exportTarget === ALL_ANALYTICS_TABS_KEY;
+  const reportTitle = exportAll
+    ? "COE All Analytics Report"
+    : reportTitleForTab(selectedSections[0].tabKey);
+  const sectionHasData = section =>
+    section.tables.some(table =>
+      table.rows.some(row =>
+        row.slice(1).some(value =>
+          value !== "" &&
+          value !== null &&
+          value !== undefined &&
+          value !== 0 &&
+          value !== "No data",
+        ),
       ),
-    ),
-  );
+    );
 
   doc.setFillColor(47, 85, 151);
   doc.rect(0, 0, pageWidth, 178, "F");
@@ -1002,27 +1039,40 @@ const exportAnalyticsPdf = (analytics, activeTab) => {
   y = 218;
   drawText("Active Filters", 14, true);
   drawTable(filterTable, { rowLimit: 20, columnLimit: 2 });
-  drawText("Data Basis", 12, true);
-  drawText(dataBasis || "Current company analytics data for the selected filters.", 9, false);
-
-  addSectionPage("Executive Summary");
-  drawText(`Key performance indicators for ${TABS.find(tab => tab.key === activeTab)?.label || "this section"}.`, 9, false);
-  if (selectedHasData) drawKpiCards(summaryTable);
-  else drawText("No data available for the selected filters.", 10, false);
-
-  const chartSpecs = getPdfChartSpecs(analytics, activeTab);
-  if (selectedHasData && chartSpecs.length) {
-    addSectionPage("Visual Insights");
-    drawText("Charts highlight the most important rankings, distributions, and trends for this report.", 9, false);
-    chartSpecs.slice(0, 3).forEach(drawChart);
+  if (exportAll) {
+    drawText("Export Scope", 12, true);
+    drawText("All analytics tabs included in one PDF report.", 9, false);
+  } else {
+    const tabKey = selectedSections[0].tabKey;
+    const dataBasis = analytics?.[tabKey]?.dataBasis || TAB_DATA_BASIS[tabKey];
+    drawText("Data Basis", 12, true);
+    drawText(dataBasis || "Current company analytics data for the selected filters.", 9, false);
   }
 
-  const importantTables = selectedSection.tables.slice(1, 6);
-  if (selectedHasData && importantTables.length) {
-    addSectionPage(selectedSection.title || selectedSection.name.replaceAll(" - ", " / "));
-    drawText("Detailed business tables for the selected Analytics tab.", 9, false);
-    importantTables.forEach(table => drawTable(table, { rowLimit: 10, columnLimit: 6 }));
-  }
+  selectedSections.forEach(({ tabKey, section }) => {
+    const tabLabel = TABS.find(tab => tab.key === tabKey)?.label || section.name;
+    const summaryTable = section.tables[0];
+    const selectedHasData = sectionHasData(section);
+
+    addSectionPage(exportAll ? `${tabLabel} Summary` : "Executive Summary");
+    drawText(`Key performance indicators for ${tabLabel}.`, 9, false);
+    if (selectedHasData) drawKpiCards(summaryTable);
+    else drawText("No data available for the selected filters.", 10, false);
+
+    const chartSpecs = getPdfChartSpecs(analytics, tabKey);
+    if (selectedHasData && chartSpecs.length) {
+      addSectionPage(exportAll ? `${tabLabel} Visual Insights` : "Visual Insights");
+      drawText("Charts highlight the most important rankings, distributions, and trends for this report.", 9, false);
+      chartSpecs.slice(0, 3).forEach(drawChart);
+    }
+
+    const importantTables = section.tables.slice(1, exportAll ? 5 : 6);
+    if (selectedHasData && importantTables.length) {
+      addSectionPage(section.title || section.name.replaceAll(" - ", " / "));
+      drawText("Detailed business tables for the selected Analytics tab.", 9, false);
+      importantTables.forEach(table => drawTable(table, { rowLimit: 10, columnLimit: 6 }));
+    }
+  });
 
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
@@ -1033,7 +1083,7 @@ const exportAnalyticsPdf = (analytics, activeTab) => {
     doc.text(reportTitle, margin, pageHeight - 16);
     doc.text(`Page ${page} of ${pageCount}`, pageWidth - margin, pageHeight - 16, { align: "right" });
   }
-  doc.save(`coe-${activeTab}-analytics-${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`coe-${exportAll ? "all" : selectedSections[0].tabKey}-analytics-${new Date().toISOString().slice(0, 10)}.pdf`);
 };
 
 const EmptyState = ({ label }) => (
@@ -1112,7 +1162,7 @@ const SummaryCards = ({ cards }) => (
           value={card.value}
           footer={card.footer || ""}
           accentClass={card.accentClass || "primary"}
-          valueType={card.valueType || (String(card.label).toLowerCase().includes("total") ? "money" : "number")}
+          valueType={card.valueType || "number"}
         />
       </Col>
     ))}
@@ -1231,6 +1281,45 @@ const buildLineOption = ({ rows, fields, nameField }) => ({
   })),
 });
 
+const buildGroupedBarOption = ({ rows, fields, nameField }) => ({
+  color: CHART_COLORS,
+  tooltip: {
+    trigger: "axis",
+    backgroundColor: "rgba(16,24,40,0.92)",
+    borderWidth: 0,
+    textStyle: { color: "#fff" },
+  },
+  legend: {
+    top: 0,
+    right: 0,
+    icon: "circle",
+    textStyle: { color: "#6c757d" },
+  },
+  grid: { left: 28, right: 20, top: 52, bottom: 58, containLabel: true },
+  xAxis: {
+    type: "category",
+    data: rows.map(row => row[nameField] || row.name || "Unspecified"),
+    axisTick: { show: false },
+    axisLabel: { color: "#6c757d", interval: 0, rotate: rows.length > 5 ? 28 : 0 },
+    axisLine: { lineStyle: { color: "rgba(166,176,207,0.35)" } },
+  },
+  yAxis: {
+    type: "value",
+    min: 0,
+    max: 5,
+    splitLine: { lineStyle: { color: "rgba(166,176,207,0.16)" } },
+    axisLine: { show: false },
+    axisLabel: { color: "#6c757d" },
+  },
+  series: fields.map(field => ({
+    name: field.label,
+    type: "bar",
+    barMaxWidth: 20,
+    data: rows.map(row => toNumber(row[field.key])),
+    itemStyle: { borderRadius: [6, 6, 0, 0] },
+  })),
+});
+
 const BarChartCard = ({
   title,
   subtitle,
@@ -1308,6 +1397,43 @@ const LineChartCard = ({
 };
 
 LineChartCard.propTypes = {
+  badge: PropTypes.string,
+  fields: PropTypes.arrayOf(PropTypes.object).isRequired,
+  nameField: PropTypes.string,
+  rows: PropTypes.arrayOf(PropTypes.object),
+  subtitle: PropTypes.string.isRequired,
+  title: PropTypes.string.isRequired,
+};
+
+const GroupedBarChartCard = ({
+  title,
+  subtitle,
+  badge = "",
+  rows = [],
+  fields,
+  nameField = "name",
+}) => {
+  const cleanRows = asArray(rows);
+  const option = useMemo(
+    () => buildGroupedBarOption({ rows: cleanRows, fields, nameField }),
+    [cleanRows, fields, nameField],
+  );
+
+  return (
+    <Card className="dashboard-card h-100">
+      <CardBody>
+        <CardHeaderBlock title={title} subtitle={subtitle} badge={badge} />
+        {cleanRows.length ? (
+          <ReactEcharts option={option} style={{ height: 360 }} />
+        ) : (
+          <EmptyState label="No rating rows available yet" />
+        )}
+      </CardBody>
+    </Card>
+  );
+};
+
+GroupedBarChartCard.propTypes = {
   badge: PropTypes.string,
   fields: PropTypes.arrayOf(PropTypes.object).isRequired,
   nameField: PropTypes.string,
@@ -1496,100 +1622,153 @@ InsightGrid.propTypes = {
   items: PropTypes.arrayOf(PropTypes.object).isRequired,
 };
 
-const ResearchPanel = ({ tabKey }) => (
-  <Card className="dashboard-card h-100">
-    <CardBody>
-      <CardHeaderBlock
-        title="Internet-informed analysis"
-        subtitle="External KPI patterns mapped to the data this system already stores."
-        badge="Research"
-      />
-      <div className="analytics-research-list">
-        {asArray(RESEARCH_NOTES[tabKey]).map(item => (
-          <div key={item.title} className="dashboard-ranking-list__item">
-            <div className="dashboard-ranking-list__head">
-              <strong>{item.title}</strong>
-              <a href={item.href} target="_blank" rel="noreferrer">
-                {item.source}
-              </a>
-            </div>
-            <p className="mb-0 mt-2 text-muted">{item.body}</p>
-          </div>
-        ))}
-      </div>
-    </CardBody>
-  </Card>
-);
-
-ResearchPanel.propTypes = {
-  tabKey: PropTypes.string.isRequired,
+const REAL_TIME_MAP_CENTER = [31.9539, 35.9106];
+const STOP_TYPE_LABELS = {
+  arrival: "Arrival",
+  departure: "Departure",
+  restaurant: "Restaurant",
+  place: "Place",
+  hotel: "Hotel",
+  transportation: "Transportation",
+  extra: "Extra",
 };
 
-const DataQualityPanel = ({ dataQuality = {} }) => (
-  <Card className="dashboard-card h-100">
-    <CardBody>
-      <CardHeaderBlock
-        title="Data Quality"
-        subtitle="Completeness, uniqueness, coverage, and freshness checks for the dashboard grain."
-        badge={`${asArray(dataQuality?.checks).length} checks`}
-      />
-      <div className="dashboard-ranking-list">
-        {asArray(dataQuality?.checks).map(check => (
-          <div key={check.label} className="dashboard-ranking-list__item">
-            <div className="dashboard-ranking-list__head">
-              <div>
-                <strong>{check.label}</strong>
-                <p className="mb-0 text-muted">{check.detail}</p>
-              </div>
-              <Badge color={check.status === "ok" ? "success" : "warning"}>
-                {check.status}
-              </Badge>
-            </div>
-          </div>
-        ))}
-      </div>
-    </CardBody>
-  </Card>
-);
-
-DataQualityPanel.propTypes = {
-  dataQuality: PropTypes.object,
+const stopTypeLabel = type => STOP_TYPE_LABELS[type] || "Stop";
+const stopTypeClass = point => {
+  if (point?.current) return "is-current";
+  if (point?.status === "past") return "is-past";
+  if (point?.type === "restaurant") return "is-restaurant";
+  if (point?.type === "hotel") return "is-hotel";
+  if (point?.type === "place") return "is-place";
+  return "is-upcoming";
 };
 
-const ProfileTable = ({ rows = [] }) => (
-  <Card className="dashboard-card h-100">
-    <CardBody>
-      <CardHeaderBlock
-        title="Collection Profile"
-        subtitle="Rows and latest observed changes by source collection."
-        badge={`${asArray(rows).length} collections`}
-      />
-      <div className="table-responsive">
-        <Table className="table-nowrap align-middle mb-0">
-          <thead>
-            <tr>
-              <th>Collection</th>
-              <th className="text-end">Rows</th>
-              <th>Latest change</th>
-            </tr>
-          </thead>
-          <tbody>
-            {asArray(rows).map(row => (
-              <tr key={row.name}>
-                <td className="fw-semibold">{row.name}</td>
-                <td className="text-end">{formatNumber(row.value)}</td>
-                <td>{formatDate(row.latestChange)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </div>
-    </CardBody>
-  </Card>
-);
+const hasMapCoordinates = point =>
+  Number.isFinite(Number(point?.lat)) && Number.isFinite(Number(point?.lng));
 
-ProfileTable.propTypes = {
-  rows: PropTypes.arrayOf(PropTypes.object),
+const mapPopupHtml = point => {
+  const fileHref = point?.fileUrl || "#";
+  const fileLabel = point?.fileReference || "Open file";
+  return `
+    <div class="real-time-map-popup">
+      <strong>${xmlEscape(point?.name || "Scheduled stop")}</strong>
+      <span>${xmlEscape(stopTypeLabel(point?.type))}${point?.city ? ` - ${xmlEscape(point.city)}` : ""}</span>
+      <span>${xmlEscape(point?.timeLabel || "Time not saved")} - ${formatNumber(point?.pax)} pax</span>
+      <a href="${xmlEscape(fileHref)}">${xmlEscape(fileLabel)}</a>
+      ${
+        point?.googleMapsUrl
+          ? `<a href="${xmlEscape(point.googleMapsUrl)}" target="_blank" rel="noreferrer">Open in Google Maps</a>`
+          : ""
+      }
+    </div>
+  `;
+};
+
+const RealTimeStatusMap = ({ points = [], routePoints = [] }) => {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerLayerRef = useRef(null);
+  const routeLayerRef = useRef(null);
+  const cleanPoints = asArray(points).filter(hasMapCoordinates);
+  const cleanRoutePoints = asArray(routePoints).filter(hasMapCoordinates);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return undefined;
+    const map = L.map(containerRef.current, {
+      center: REAL_TIME_MAP_CENTER,
+      zoom: 7,
+      scrollWheelZoom: false,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+    markerLayerRef.current = L.layerGroup().addTo(map);
+    routeLayerRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    const resizeId = window.setTimeout(() => map.invalidateSize(), 0);
+
+    return () => {
+      window.clearTimeout(resizeId);
+      map.remove();
+      mapRef.current = null;
+      markerLayerRef.current = null;
+      routeLayerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !markerLayerRef.current || !routeLayerRef.current) return;
+    markerLayerRef.current.clearLayers();
+    routeLayerRef.current.clearLayers();
+
+    const bounds = [];
+    cleanPoints.forEach((point, index) => {
+      const markerClass = stopTypeClass(point);
+      const marker = L.marker([Number(point.lat), Number(point.lng)], {
+        icon: L.divIcon({
+          className: "real-time-marker-shell",
+          html: `
+            <div class="real-time-marker ${markerClass}">
+              <span class="real-time-marker__time">${xmlEscape(point.timeLabel || "")}</span>
+              <span class="real-time-marker__dot"></span>
+            </div>
+          `,
+          iconAnchor: [39, 44],
+          iconSize: [78, 54],
+          popupAnchor: [0, -38],
+        }),
+        zIndexOffset: point.current ? 1000 : index,
+      });
+      marker.bindPopup(mapPopupHtml(point));
+      marker.addTo(markerLayerRef.current);
+      bounds.push([Number(point.lat), Number(point.lng)]);
+    });
+
+    if (cleanRoutePoints.length > 1) {
+      L.polyline(
+        cleanRoutePoints.map(point => [Number(point.lat), Number(point.lng)]),
+        {
+          color: "#556ee6",
+          dashArray: "8 8",
+          opacity: 0.8,
+          weight: 4,
+        },
+      ).addTo(routeLayerRef.current);
+    }
+
+    if (bounds.length) {
+      map.fitBounds(L.latLngBounds(bounds).pad(0.18), {
+        maxZoom: bounds.length === 1 ? 13 : 11,
+      });
+    } else {
+      map.setView(REAL_TIME_MAP_CENTER, 7);
+    }
+    const resizeId = window.setTimeout(() => map.invalidateSize(), 0);
+    return () => window.clearTimeout(resizeId);
+  }, [cleanPoints, cleanRoutePoints]);
+
+  return (
+    <div className="real-time-map">
+      <div ref={containerRef} className="real-time-map__canvas" />
+      {!cleanPoints.length ? (
+        <div className="real-time-map__empty">
+          <EmptyState label="No reservation-file map points are scheduled for today." />
+        </div>
+      ) : null}
+      <div className="real-time-map__legend">
+        <span><i className="real-time-legend-dot is-current" /> Current stop</span>
+        <span><i className="real-time-legend-dot is-upcoming" /> Upcoming</span>
+        <span><i className="real-time-legend-dot is-past" /> Past</span>
+      </div>
+    </div>
+  );
+};
+
+RealTimeStatusMap.propTypes = {
+  points: PropTypes.arrayOf(PropTypes.object),
+  routePoints: PropTypes.arrayOf(PropTypes.object),
 };
 
 const RecentUsersTable = ({ users = [] }) => (
@@ -1632,14 +1811,17 @@ RecentUsersTable.propTypes = {
 
 const GeneralTab = ({ analytics }) => {
   const general = analytics.general || {};
+  const summaryCards = asArray(general.summaryCards).filter(
+    card => !isPriceMetric(card.label, card.footer, card.valueType),
+  );
   return (
     <>
-      <SummaryCards cards={general.summaryCards || []} />
+      <SummaryCards cards={summaryCards} />
       <Row className="g-4 mb-4">
         <Col xl={7}>
           <LineChartCard
             title="Quotation Activity"
-            subtitle="Monthly quotation volume and pricing progress."
+            subtitle="Monthly quotation volume and workflow progress."
             badge={`${formatNumber(asArray(general.monthlyQuotations).length)} months`}
             rows={general.monthlyQuotations}
             fields={[
@@ -1665,7 +1847,7 @@ const GeneralTab = ({ analytics }) => {
         </Col>
       </Row>
       <Row className="g-4 mb-4">
-        <Col xl={6}>
+        <Col xl={12}>
           <BarChartCard
             title="System Entity Counts"
             subtitle="Inventory and supplier records available for analysis."
@@ -1673,53 +1855,6 @@ const GeneralTab = ({ analytics }) => {
             rows={general.entityCounts}
             horizontal
           />
-        </Col>
-        <Col xl={6}>
-          <BarChartCard
-            title="Pricing Breakdown"
-            subtitle="Saved quotation pricing snapshot totals."
-            badge={formatMoney(general.priceSummary?.finalTotal)}
-            rows={general.pricingBreakdown}
-            valueType="money"
-            horizontal
-          />
-        </Col>
-      </Row>
-      <InsightGrid
-        items={[
-          {
-            label: "Base total",
-            value: general.priceSummary?.baseTotal,
-            type: "money",
-            footer: "Before profit",
-          },
-          {
-            label: "Profit total",
-            value: general.priceSummary?.profitTotal,
-            type: "money",
-            footer: "Saved pricing rows",
-            className: "success",
-          },
-          {
-            label: "Average meal",
-            value: general.priceSummary?.averageMealPrice,
-            type: "money",
-            footer: "From restaurant meals and itinerary rows",
-          },
-          {
-            label: "Average transport",
-            value: general.priceSummary?.averageTransportRate,
-            type: "money",
-            footer: "From resolved quotation-day rates",
-          },
-        ]}
-      />
-      <Row className="g-4">
-        <Col xl={6}>
-          <DataQualityPanel dataQuality={analytics.dataQuality} />
-        </Col>
-        <Col xl={6}>
-          <ResearchPanel tabKey="general" />
         </Col>
       </Row>
     </>
@@ -1736,10 +1871,17 @@ const UsersTab = ({ analytics }) => {
     <>
       <InsightGrid
         items={[
-          { label: "Total users", value: users.total, footer: "All company users" },
-          { label: "Active users", value: users.active, footer: "Can use the system", className: "success" },
-          { label: "Inactive users", value: users.inactive, footer: "Soft-disabled accounts" },
-          { label: "Role assignments", value: users.roleAssignments, footer: "Total roles assigned" },
+          {
+            label: "Roles",
+            value: asArray(users.byRole).length,
+            footer: "Role types in use",
+          },
+          {
+            label: "Users",
+            value: users.active,
+            footer: `${formatNumber(users.total)} total accounts`,
+            className: "success",
+          },
         ]}
       />
       <Row className="g-4 mb-4">
@@ -1765,39 +1907,26 @@ const UsersTab = ({ analytics }) => {
         </Col>
       </Row>
       <Row className="g-4 mb-4">
-        <Col xl={4}>
+        <Col xl={6}>
           <DoughnutCard
-            title="User Status"
-            subtitle="Active and inactive account split."
+            title="Activity Level"
+            subtitle="Current account activity split."
             rows={users.byStatus}
+            centerLabel="Users"
+            centerValue={users.total}
           />
         </Col>
-        <Col xl={4}>
+        <Col xl={6}>
           <RankingCard
-            title="Most Roles"
-            subtitle="Role assignment counts across active users."
+            title="Role Activity"
+            subtitle="Active users grouped by assigned role."
             rows={users.byRole}
           />
         </Col>
-        <Col xl={4}>
-          <ResearchPanel tabKey="users" />
-        </Col>
       </Row>
       <Row className="g-4">
-        <Col xl={8}>
+        <Col xl={12}>
           <RecentUsersTable users={users.recentUsers} />
-        </Col>
-        <Col xl={4}>
-          <RankingCard
-            title="User Data Gaps"
-            subtitle="Quality issues found in user records."
-            rows={[
-              { name: "Missing email", value: users.quality?.missingEmail },
-              { name: "Missing name", value: users.quality?.missingName },
-              { name: "Missing roles", value: users.quality?.missingRoles },
-              { name: "Duplicate emails", value: users.quality?.duplicateEmails },
-            ]}
-          />
         </Col>
       </Row>
     </>
@@ -1810,70 +1939,14 @@ UsersTab.propTypes = {
 
 const ratingValue = value => (toNumber(value) > 0 ? formatDecimal(value) : "-");
 
-const GuestsNationalitiesTab = ({
-  analytics,
-  filterDraft,
-  onFilterChange,
-  onApplyFilters,
-  onClearFilters,
-}) => {
+const GuestsNationalitiesTab = ({ analytics }) => {
   const guests = analytics.guests || {};
   const nationalities = asArray(guests.byNationality);
   const ratings = asArray(guests.ratingsByNationality);
   const trend = asArray(guests.paxByMonth);
-  const recentActivity = asArray(guests.recentActivity);
-  const invalidDateRange = Boolean(
-    filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to,
-  );
 
   return (
     <>
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Guest and Nationality Filters"
-            subtitle="Shared date range: this section and Files / Trips use quotation start dates; Ratings Overview uses submission dates."
-            badge="Real quotation data"
-          />
-          <Row className="g-3 align-items-end">
-            <Col md={4}>
-              <Label className="form-label">From</Label>
-              <Input
-                type="date"
-                value={filterDraft.from}
-                onChange={event => onFilterChange("from", event.target.value)}
-              />
-            </Col>
-            <Col md={4}>
-              <Label className="form-label">To</Label>
-              <Input
-                type="date"
-                value={filterDraft.to}
-                onChange={event => onFilterChange("to", event.target.value)}
-              />
-            </Col>
-            <Col md={4} className="d-flex gap-2">
-              <Button
-                color="primary"
-                onClick={onApplyFilters}
-                disabled={invalidDateRange}
-              >
-                Apply
-              </Button>
-              <Button color="light" className="border" onClick={onClearFilters}>
-                Clear
-              </Button>
-            </Col>
-          </Row>
-          {invalidDateRange ? (
-            <Alert color="warning" className="mt-3 mb-0">
-              The From date must be before the To date.
-            </Alert>
-          ) : null}
-          <p className="text-muted small mb-0 mt-3">{guests.dataBasis}</p>
-        </CardBody>
-      </Card>
-
       <InsightGrid
         items={[
           {
@@ -1903,240 +1976,60 @@ const GuestsNationalitiesTab = ({
 
       <Row className="g-4 mb-4">
         <Col xl={5}>
-          <Card className="dashboard-card h-100">
-            <CardBody>
-              <CardHeaderBlock
-                title="Pax by Nationality"
-                subtitle="Nationality and pax are taken directly from quotations."
-                badge={`${formatNumber(nationalities.length)} rows`}
-              />
-              {nationalities.length ? (
-                <div className="table-responsive">
-                  <Table className="align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Nationality</th>
-                        <th className="text-end">Pax</th>
-                        <th className="text-end">Quotes</th>
-                        <th className="text-end">Share</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {nationalities.map(row => (
-                        <tr key={row.name}>
-                          <td>{row.name}</td>
-                          <td className="text-end">{formatNumber(row.pax)}</td>
-                          <td className="text-end">{formatNumber(row.quotations)}</td>
-                          <td className="text-end">{formatDecimal(row.sharePercent)}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              ) : (
-                <EmptyState label="No quotation nationality data is available." />
-              )}
-            </CardBody>
-          </Card>
+          <BarChartCard
+            title="Pax by Nationality"
+            subtitle="Quotation pax grouped by nationality."
+            badge={`${formatNumber(nationalities.length)} rows`}
+            rows={nationalities}
+            valueField="pax"
+            horizontal
+          />
         </Col>
         <Col xl={7}>
-          <Card className="dashboard-card h-100">
-            <CardBody>
-              <CardHeaderBlock
-                title="Pax Trend"
-                subtitle="Trip volume grouped by quotation start month."
-                badge={`${formatNumber(trend.length)} months`}
-              />
-              {trend.length ? (
-                <div className="table-responsive">
-                  <Table className="align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Month</th>
-                        <th className="text-end">Quotations</th>
-                        <th className="text-end">Pax</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trend.map(row => (
-                        <tr key={row.month}>
-                          <td>{row.month}</td>
-                          <td className="text-end">{formatNumber(row.quotations)}</td>
-                          <td className="text-end">{formatNumber(row.pax)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              ) : (
-                <EmptyState label="No pax trend is available for this range." />
-              )}
-            </CardBody>
-          </Card>
+          <LineChartCard
+            title="Pax Trend"
+            subtitle="Trip volume grouped by quotation start month."
+            badge={`${formatNumber(trend.length)} months`}
+            rows={trend}
+            fields={[
+              { key: "pax", label: "Pax" },
+              { key: "quotations", label: "Quotations", dashed: true },
+            ]}
+            nameField="month"
+          />
         </Col>
       </Row>
 
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Ratings by Nationality"
-            subtitle="Customer nationality is linked from evaluation response to reservation file and quotation."
-            badge={`${formatNumber(guests.totalRatedResponses)} responses`}
-          />
-          {ratings.length ? (
-            <div className="table-responsive">
-              <Table className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Nationality</th>
-                    <th className="text-end">Responses</th>
-                    <th className="text-end">Overall</th>
-                    <th className="text-end">Hotels</th>
-                    <th className="text-end">Restaurants</th>
-                    <th className="text-end">Guides</th>
-                    <th className="text-end">Transportation</th>
-                    <th className="text-end">Places</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ratings.map(row => (
-                    <tr key={row.name}>
-                      <td>{row.name}</td>
-                      <td className="text-end">{formatNumber(row.ratedResponses)}</td>
-                      <td className="text-end">{ratingValue(row.overallAverage)}</td>
-                      <td className="text-end">{ratingValue(row.hotelAverage)}</td>
-                      <td className="text-end">{ratingValue(row.restaurantAverage)}</td>
-                      <td className="text-end">{ratingValue(row.guideAverage)}</td>
-                      <td className="text-end">{ratingValue(row.transportationAverage)}</td>
-                      <td className="text-end">{ratingValue(row.placeAverage)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState label="No approved rating responses are linked to quotation nationalities." />
-          )}
-        </CardBody>
-      </Card>
-
-      <Card className="dashboard-card">
-        <CardBody>
-          <CardHeaderBlock
-            title="Recent Guest Activity"
-            subtitle="Recent quotation trips with their real pax and nationality data."
-            badge={`${formatNumber(recentActivity.length)} recent`}
-          />
-          {recentActivity.length ? (
-            <div className="table-responsive">
-              <Table className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Quotation</th>
-                    <th>Reservation File</th>
-                    <th>Nationality</th>
-                    <th className="text-end">Pax</th>
-                    <th>Trip Start</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentActivity.map((row, index) => (
-                    <tr key={`${row.quotationReference}-${index}`}>
-                      <td>{row.quotationReference || "-"}</td>
-                      <td>{row.fileReference || "-"}</td>
-                      <td>{row.nationality}</td>
-                      <td className="text-end">{formatNumber(row.pax)}</td>
-                      <td>{formatDate(row.tripStart)}</td>
-                      <td>{row.status || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState label="No guest activity is available for this range." />
-          )}
-        </CardBody>
-      </Card>
+      <GroupedBarChartCard
+        title="Ratings by Nationality"
+        subtitle="Average approved ratings grouped by linked quotation nationality."
+        badge={`${formatNumber(guests.totalRatedResponses)} responses`}
+        rows={ratings}
+        fields={[
+          { key: "overallAverage", label: "Overall" },
+          { key: "hotelAverage", label: "Hotels" },
+          { key: "restaurantAverage", label: "Restaurants" },
+          { key: "guideAverage", label: "Guides" },
+          { key: "transportationAverage", label: "Transportation" },
+          { key: "placeAverage", label: "Places" },
+        ]}
+      />
     </>
   );
 };
 
 GuestsNationalitiesTab.propTypes = {
   analytics: PropTypes.object.isRequired,
-  filterDraft: PropTypes.shape({
-    from: PropTypes.string,
-    to: PropTypes.string,
-  }).isRequired,
-  onFilterChange: PropTypes.func.isRequired,
-  onApplyFilters: PropTypes.func.isRequired,
-  onClearFilters: PropTypes.func.isRequired,
 };
 
-const FilesTripsTab = ({
-  analytics,
-  filterDraft,
-  onFilterChange,
-  onApplyFilters,
-  onClearFilters,
-}) => {
+const FilesTripsTab = ({ analytics }) => {
   const filesTrips = analytics.filesTrips || {};
   const monthly = asArray(filesTrips.filesByMonth);
   const recentFiles = asArray(filesTrips.recentFiles);
   const linkedServices = asArray(filesTrips.topLinkedServices);
-  const invalidDateRange = Boolean(
-    filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to,
-  );
 
   return (
     <>
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Files / Trips Filters"
-            subtitle="Shared date range: Files / Trips and Guests use quotation start dates; Ratings Overview uses submission dates."
-            badge="Reservation file data"
-          />
-          <Row className="g-3 align-items-end">
-            <Col md={4}>
-              <Label className="form-label">From</Label>
-              <Input
-                type="date"
-                value={filterDraft.from}
-                onChange={event => onFilterChange("from", event.target.value)}
-              />
-            </Col>
-            <Col md={4}>
-              <Label className="form-label">To</Label>
-              <Input
-                type="date"
-                value={filterDraft.to}
-                onChange={event => onFilterChange("to", event.target.value)}
-              />
-            </Col>
-            <Col md={4} className="d-flex gap-2">
-              <Button
-                color="primary"
-                onClick={onApplyFilters}
-                disabled={invalidDateRange}
-              >
-                Apply
-              </Button>
-              <Button color="light" className="border" onClick={onClearFilters}>
-                Clear
-              </Button>
-            </Col>
-          </Row>
-          {invalidDateRange ? (
-            <Alert color="warning" className="mt-3 mb-0">
-              The From date must be before the To date.
-            </Alert>
-          ) : null}
-          <p className="text-muted small mb-0 mt-3">{filesTrips.dataBasis}</p>
-        </CardBody>
-      </Card>
-
       <InsightGrid
         items={[
           {
@@ -2292,13 +2185,6 @@ const FilesTripsTab = ({
 
 FilesTripsTab.propTypes = {
   analytics: PropTypes.object.isRequired,
-  filterDraft: PropTypes.shape({
-    from: PropTypes.string,
-    to: PropTypes.string,
-  }).isRequired,
-  onFilterChange: PropTypes.func.isRequired,
-  onApplyFilters: PropTypes.func.isRequired,
-  onClearFilters: PropTypes.func.isRequired,
 };
 
 const RatedEntitiesTable = ({ rows, emptyLabel }) =>
@@ -2334,75 +2220,16 @@ RatedEntitiesTable.propTypes = {
   emptyLabel: PropTypes.string.isRequired,
 };
 
-const RatingsOverviewTab = ({
-  analytics,
-  filterDraft,
-  onFilterChange,
-  onApplyFilters,
-  onClearFilters,
-}) => {
+const RatingsOverviewTab = ({ analytics }) => {
   const ratings = analytics.ratingsOverview || {};
   const byType = asArray(ratings.ratingsByType);
   const topEntities = asArray(ratings.topRatedEntities);
   const lowestEntities = asArray(ratings.lowestRatedEntities);
-  const recentResponses = asArray(ratings.recentResponses);
   const trend = asArray(ratings.ratingTrendByMonth);
   const byNationality = asArray(ratings.ratingsByNationality);
-  const invalidDateRange = Boolean(
-    filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to,
-  );
 
   return (
     <>
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Ratings Overview Filters"
-            subtitle="Filters use evaluation response submission dates."
-            badge="Approved responses"
-          />
-          <Row className="g-3 align-items-end">
-            <Col md={4}>
-              <Label className="form-label">From</Label>
-              <Input
-                type="date"
-                value={filterDraft.from}
-                onChange={event => onFilterChange("from", event.target.value)}
-              />
-            </Col>
-            <Col md={4}>
-              <Label className="form-label">To</Label>
-              <Input
-                type="date"
-                value={filterDraft.to}
-                onChange={event => onFilterChange("to", event.target.value)}
-              />
-            </Col>
-            <Col md={4} className="d-flex gap-2">
-              <Button
-                color="primary"
-                onClick={onApplyFilters}
-                disabled={invalidDateRange}
-              >
-                Apply
-              </Button>
-              <Button color="light" className="border" onClick={onClearFilters}>
-                Clear
-              </Button>
-            </Col>
-          </Row>
-          {invalidDateRange ? (
-            <Alert color="warning" className="mt-3 mb-0">
-              The From date must be before the To date.
-            </Alert>
-          ) : null}
-          <p className="text-muted small mb-1 mt-3">{ratings.dataBasis}</p>
-          <p className="text-muted small mb-0">
-            Matching: {ratings.matchingMethod || "-"}
-          </p>
-        </CardBody>
-      </Card>
-
       <InsightGrid
         items={[
           {
@@ -2528,48 +2355,6 @@ const RatingsOverviewTab = ({
         </Col>
       </Row>
 
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Recent Rating Responses"
-            subtitle="Approved responses with linked file, quotation, and nationality where available."
-            badge={`${formatNumber(recentResponses.length)} recent`}
-          />
-          {recentResponses.length ? (
-            <div className="table-responsive">
-              <Table className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Customer</th>
-                    <th>File</th>
-                    <th>Quotation</th>
-                    <th>Nationality</th>
-                    <th className="text-end">Ratings</th>
-                    <th className="text-end">Average</th>
-                    <th>Submitted</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentResponses.map((row, index) => (
-                    <tr key={row.responseId || `${row.fileReference}-${index}`}>
-                      <td>{row.clientName}</td>
-                      <td>{row.fileReference || "-"}</td>
-                      <td>{row.quotationReference || "-"}</td>
-                      <td>{row.nationality}</td>
-                      <td className="text-end">{formatNumber(row.ratingCount)}</td>
-                      <td className="text-end">{ratingValue(row.averageRating)}</td>
-                      <td>{formatDate(row.submittedOn)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState label="No approved responses are available for this range." />
-          )}
-        </CardBody>
-      </Card>
-
       <Card className="dashboard-card">
         <CardBody>
           <CardHeaderBlock
@@ -2615,13 +2400,6 @@ const RatingsOverviewTab = ({
 
 RatingsOverviewTab.propTypes = {
   analytics: PropTypes.object.isRequired,
-  filterDraft: PropTypes.shape({
-    from: PropTypes.string,
-    to: PropTypes.string,
-  }).isRequired,
-  onFilterChange: PropTypes.func.isRequired,
-  onApplyFilters: PropTypes.func.isRequired,
-  onClearFilters: PropTypes.func.isRequired,
 };
 
 const HotelsTab = ({ analytics }) => {
@@ -2631,18 +2409,13 @@ const HotelsTab = ({ analytics }) => {
   const byLinkedPax = asArray(hotels.hotelsByLinkedGroupPax);
   const usageByMonth = asArray(hotels.usageByMonth);
   const ratingsByNationality = asArray(hotels.ratingsByNationality);
-  const rateProfiles = asArray(hotels.hotelRateProfiles);
   const bestHotel = hotels.bestHotel;
 
   return (
     <>
-      <Alert color="info" className="mb-4">
-        {hotels.dataBasis}
-      </Alert>
       <InsightGrid
         items={[
           { label: "Hotels", value: hotels.total, footer: "Active hotel records" },
-          { label: "Average rate", value: hotels.priceSummary?.averageRate, type: "money", footer: "Season rate rows" },
           {
             label: "Best hotel",
             value: bestHotel?.name || "-",
@@ -2807,89 +2580,6 @@ const HotelsTab = ({ analytics }) => {
           </Card>
         </Col>
       </Row>
-
-      <Row className="g-4 mb-4">
-        <Col xl={6}>
-          <BarChartCard
-            title="Rate by Board"
-            subtitle="Average saved hotel season rates by board basis."
-            rows={hotels.ratesByBoard}
-            valueField="averageAmount"
-            valueType="money"
-            horizontal
-          />
-        </Col>
-        <Col xl={6}>
-          <BarChartCard
-            title="Rate by Season"
-            subtitle="Average combined saved rate values by season row."
-            rows={hotels.ratesBySeason}
-            valueField="averageAmount"
-            valueType="money"
-            horizontal
-          />
-        </Col>
-      </Row>
-
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Hotel Rate Profiles"
-            subtitle="Saved season-rate rows and average positive board rate for each hotel."
-            badge={`${formatNumber(rateProfiles.length)} hotels`}
-          />
-          {rateProfiles.length ? (
-            <div className="table-responsive">
-              <Table className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Hotel</th>
-                    <th className="text-end">Rate Rows</th>
-                    <th className="text-end">Rate Values</th>
-                    <th className="text-end">Average Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rateProfiles.map(row => (
-                    <tr key={row.hotelId}>
-                      <td>{row.name}</td>
-                      <td className="text-end">{formatNumber(row.rateRows)}</td>
-                      <td className="text-end">{formatNumber(row.amountCount)}</td>
-                      <td className="text-end">{formatMoney(row.averageRate)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState label="No saved hotel season-rate rows are available." />
-          )}
-        </CardBody>
-      </Card>
-
-      <Row className="g-4">
-        <Col xl={6}>
-          <RankingCard
-            title="Hotel Data Gaps"
-            subtitle="Completeness and accommodation-matching checks."
-            rows={[
-              { name: "Missing city", value: hotels.quality?.missingCity },
-              { name: "Missing chain", value: hotels.quality?.missingChain },
-              { name: "Missing stars", value: hotels.quality?.missingStars },
-              { name: "Missing phone", value: hotels.quality?.missingPhone },
-              { name: "Missing website", value: hotels.quality?.missingWebsite },
-              { name: "Without rates", value: hotels.quality?.hotelsWithoutRates },
-              { name: "Unmatched accommodation stays", value: hotels.quality?.unmatchedAccommodationOccurrences },
-              { name: "Accommodation records with alternatives", value: hotels.quality?.accommodationRecordsWithAlternatives },
-              { name: "Matched by hotel ID", value: hotels.quality?.matchedByHotelId },
-              { name: "Matched by name fallback", value: hotels.quality?.matchedByNameFallback },
-            ]}
-          />
-        </Col>
-        <Col xl={6}>
-          <ResearchPanel tabKey="hotels" />
-        </Col>
-      </Row>
     </>
   );
 };
@@ -2912,14 +2602,10 @@ const GuidesTab = ({ analytics }) => {
 
   return (
     <>
-      <Alert color="info" className="mb-4">
-        {guides.dataBasis}
-      </Alert>
       <InsightGrid
         items={[
           { label: "Guides", value: guides.total, footer: "Active guide records" },
           { label: "Multilingual", value: guides.multilingual, footer: "More than one language", className: "success" },
-          { label: "Average guide cost", value: guides.priceSummary?.averageGuideCost, type: "money", footer: "Quotation-day guide costs" },
           {
             label: "Best guide",
             value: bestGuide?.name || "-",
@@ -3077,24 +2763,6 @@ const GuidesTab = ({ analytics }) => {
           </Card>
         </Col>
       </Row>
-
-      <Row className="g-4">
-        <Col xl={6}>
-          <RankingCard
-            title="Guide Data Gaps"
-            subtitle="Completeness checks for guide records."
-            rows={[
-              { name: "Missing languages", value: guides.quality?.missingLanguages },
-              { name: "Missing email", value: guides.quality?.missingEmail },
-              { name: "Missing phone", value: guides.quality?.missingPhone },
-              { name: "Unmatched saved guide names", value: guides.quality?.unmatchedNamedAssignments },
-            ]}
-          />
-        </Col>
-        <Col xl={6}>
-          <ResearchPanel tabKey="guides" />
-        </Col>
-      </Row>
     </>
   );
 };
@@ -3110,18 +2778,13 @@ const RestaurantsTab = ({ analytics }) => {
   const byLinkedPax = asArray(restaurants.restaurantsByLinkedGroupPax);
   const usageByMonth = asArray(restaurants.usageByMonth);
   const ratingsByNationality = asArray(restaurants.ratingsByNationality);
-  const mealProfiles = asArray(restaurants.mealProfiles);
   const bestRestaurant = restaurants.bestRestaurant;
 
   return (
     <>
-      <Alert color="info" className="mb-4">
-        {restaurants.dataBasis}
-      </Alert>
       <InsightGrid
         items={[
           { label: "Restaurants", value: restaurants.total, footer: "Active restaurant records" },
-          { label: "Average meal", value: restaurants.priceSummary?.averageMealPrice, type: "money", footer: "Meal price rows" },
           {
             label: "Best restaurant",
             value: bestRestaurant?.name || "-",
@@ -3149,24 +2812,14 @@ const RestaurantsTab = ({ analytics }) => {
         ]}
       />
       <Row className="g-4 mb-4">
-        <Col xl={4}>
+        <Col xl={6}>
           <DoughnutCard
             title="Restaurants by City"
             subtitle="Restaurant inventory by destination."
             rows={restaurants.byCity}
           />
         </Col>
-        <Col xl={4}>
-          <BarChartCard
-            title="Meal Price by Type"
-            subtitle="Average meal price from restaurant meal rows."
-            rows={restaurants.mealTypes}
-            valueField="averagePrice"
-            valueType="money"
-            horizontal
-          />
-        </Col>
-        <Col xl={4}>
+        <Col xl={6}>
           <BarChartCard
             title="Most Ordered Meals"
             subtitle="Meal type selections from quotation days."
@@ -3290,60 +2943,6 @@ const RestaurantsTab = ({ analytics }) => {
           </Card>
         </Col>
       </Row>
-
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Restaurant Meal Profiles"
-            subtitle="Saved menu rows and average price for each restaurant."
-            badge={`${formatNumber(mealProfiles.length)} restaurants`}
-          />
-          {mealProfiles.length ? (
-            <div className="table-responsive">
-              <Table className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Restaurant</th>
-                    <th className="text-end">Meal Types</th>
-                    <th className="text-end">Average Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mealProfiles.map(row => (
-                    <tr key={row.restaurantId}>
-                      <td>{row.name}</td>
-                      <td className="text-end">{formatNumber(row.mealCount)}</td>
-                      <td className="text-end">{formatMoney(row.averagePrice)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState label="No saved restaurant meal rows are available." />
-          )}
-        </CardBody>
-      </Card>
-
-      <Row className="g-4">
-        <Col xl={6}>
-          <RankingCard
-            title="Restaurant Data Gaps"
-            subtitle="Completeness and matching checks for restaurant analytics."
-            rows={[
-              { name: "Missing city", value: restaurants.quality?.missingCity },
-              { name: "Missing email", value: restaurants.quality?.missingEmail },
-              { name: "Missing phone", value: restaurants.quality?.missingPhone },
-              { name: "Missing website", value: restaurants.quality?.missingWebsite },
-              { name: "Without meal rows", value: restaurants.quality?.restaurantsWithoutMeals },
-              { name: "Unmatched trip occurrences", value: restaurants.quality?.unmatchedRestaurantOccurrences },
-            ]}
-          />
-        </Col>
-        <Col xl={6}>
-          <ResearchPanel tabKey="restaurants" />
-        </Col>
-      </Row>
     </>
   );
 };
@@ -3358,22 +2957,16 @@ const TravelAgentsTab = ({ analytics }) => {
   const byQuotations = asArray(agents.byQuotations);
   const byFiles = asArray(agents.byReservationFiles);
   const byPax = asArray(agents.byPax);
-  const byPricing = asArray(agents.byPricingTotal);
-  const activityByMonth = asArray(agents.activityByMonth);
   const recentTrips = asArray(agents.recentAgentTrips);
 
   return (
     <>
-      <Alert color="info" className="mb-4">
-        {agents.dataBasis}
-      </Alert>
       <InsightGrid
         items={[
           { label: "Travel agents", value: agents.total, footer: "Active agent records" },
           { label: "Quotations", value: agents.totalQuotations, footer: "In the selected date range" },
           { label: "Files / Trips", value: agents.totalReservationFiles, footer: "Reservation files linked to quotations" },
           { label: "Linked Group Pax", value: agents.totalPax, footer: "Quotation pax, not confirmed travellers" },
-          { label: "Saved pricing total", value: agents.totalPricing, type: "money", footer: `${formatNumber(agents.pricedQuotations)} priced quotations; not collected revenue` },
           { label: "Most active agent", value: getTopName(mostActive), type: "text", footer: mostActive.length ? `${formatNumber(mostActive[0].reservationFiles)} files / trips` : "No linked activity" },
         ]}
       />
@@ -3436,60 +3029,7 @@ const TravelAgentsTab = ({ analytics }) => {
             ]}
           />
         </Col>
-        <Col xl={4}>
-          <RankingCard
-            title="Saved Pricing Totals by Agent"
-            subtitle="Final totals from available quotation-pricing records; not collected revenue."
-            rows={byPricing}
-            valueField="pricingTotal"
-            valueType="money"
-            secondary={[
-              { label: "Priced quotes", field: "pricedQuotations" },
-              { label: "Average", field: "averageQuotationValue", type: "money" },
-            ]}
-          />
-        </Col>
       </Row>
-
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Agent Activity by Month"
-            subtitle="Quotation start month with files, pax, and available saved pricing totals."
-            badge={`${formatNumber(activityByMonth.length)} rows`}
-          />
-          {activityByMonth.length ? (
-            <div className="table-responsive">
-              <Table className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Month</th>
-                    <th>Agent</th>
-                    <th className="text-end">Quotations</th>
-                    <th className="text-end">Files / Trips</th>
-                    <th className="text-end">Pax</th>
-                    <th className="text-end">Saved Pricing</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activityByMonth.map(row => (
-                    <tr key={`${row.month}-${row.agentId}`}>
-                      <td>{row.month}</td>
-                      <td>{row.name}</td>
-                      <td className="text-end">{formatNumber(row.quotations)}</td>
-                      <td className="text-end">{formatNumber(row.reservationFiles)}</td>
-                      <td className="text-end">{formatNumber(row.totalPax)}</td>
-                      <td className="text-end">{formatMoney(row.pricingTotal)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState label="No agent activity is available for this range." />
-          )}
-        </CardBody>
-      </Card>
 
       <Card className="dashboard-card mb-4">
         <CardBody>
@@ -3530,28 +3070,6 @@ const TravelAgentsTab = ({ analytics }) => {
           )}
         </CardBody>
       </Card>
-
-      <Row className="g-4">
-        <Col xl={6}>
-          <RankingCard
-            title="Agent Data and Linkage Gaps"
-            subtitle="Contact, quotation, reservation-file, and pricing completeness checks."
-            rows={[
-              { name: "Missing country", value: agents.quality?.missingCountry },
-              { name: "Missing email", value: agents.quality?.missingEmail },
-              { name: "Missing phone", value: agents.quality?.missingPhone },
-              { name: "Agents without quotations", value: agents.quality?.agentsWithoutQuotations },
-              { name: "Quotations without known agent", value: agents.quality?.quotationsWithoutKnownAgent },
-              { name: "Quotations without reservation file", value: agents.quality?.quotationsWithoutReservationFile },
-              { name: "Reservation files without quotation", value: agents.quality?.reservationFilesWithoutQuotation },
-              { name: "Quotations without pricing", value: agents.quality?.quotationsWithoutPricing },
-            ]}
-          />
-        </Col>
-        <Col xl={6}>
-          <ResearchPanel tabKey="travelAgents" />
-        </Col>
-      </Row>
     </>
   );
 };
@@ -3565,20 +3083,14 @@ const PlacesTab = ({ analytics }) => {
   const rankedByRating = asArray(places.rankedByRating);
   const rankedByUsage = asArray(places.rankedByUsage);
   const byLinkedPax = asArray(places.placesByLinkedGroupPax);
-  const usageByMonth = asArray(places.usageByMonth);
   const ratingsByNationality = asArray(places.ratingsByNationality);
-  const selectedFeesByNationality = asArray(places.selectedFeesByNationality);
   const bestPlace = places.bestPlace;
 
   return (
     <>
-      <Alert color="info" className="mb-4">
-        {places.dataBasis}
-      </Alert>
       <InsightGrid
         items={[
           { label: "Places", value: places.total, footer: "Active destination records" },
-          { label: "Average entrance", value: places.priceSummary?.averageEntranceFee, type: "money", footer: "Saved entrance fee rows" },
           {
             label: "Best rated place",
             value: bestPlace?.name || "-",
@@ -3606,31 +3118,11 @@ const PlacesTab = ({ analytics }) => {
         ]}
       />
       <Row className="g-4 mb-4">
-        <Col xl={4}>
+        <Col xl={12}>
           <DoughnutCard
             title="Places by City"
             subtitle="Place inventory by destination city."
             rows={places.byCity}
-          />
-        </Col>
-        <Col xl={4}>
-          <BarChartCard
-            title="Configured Entrance Fees"
-            subtitle="Average configured place entrance fee by nationality list item."
-            rows={places.feesByNationality}
-            valueField="averageAmount"
-            valueType="money"
-            horizontal
-          />
-        </Col>
-        <Col xl={4}>
-          <BarChartCard
-            title="Selected Entrance Fees by Nationality"
-            subtitle="Average saved quotation-day fee grouped by quotation nationality."
-            rows={selectedFeesByNationality}
-            valueField="averageAmount"
-            valueType="money"
-            horizontal
           />
         </Col>
       </Row>
@@ -3651,10 +3143,7 @@ const PlacesTab = ({ analytics }) => {
             subtitle="Matched places ranked by unique reservation-file trips."
             rows={rankedByUsage}
             valueField="tripCount"
-            secondary={[
-              { label: "Occurrences", field: "occurrences" },
-              { label: "Avg selected fee", field: "averageSelectedFee", type: "money" },
-            ]}
+            secondary={[{ label: "Occurrences", field: "occurrences" }]}
           />
         </Col>
         <Col xl={4}>
@@ -3670,107 +3159,39 @@ const PlacesTab = ({ analytics }) => {
           />
         </Col>
       </Row>
-
-      <Row className="g-4 mb-4">
-        <Col xl={7}>
-          <Card className="dashboard-card h-100">
-            <CardBody>
-              <CardHeaderBlock
-                title="Place Usage by Month"
-                subtitle="Matched entrance/place rows grouped by quotation start month."
-                badge={`${formatNumber(usageByMonth.length)} rows`}
-              />
-              {usageByMonth.length ? (
-                <div className="table-responsive">
-                  <Table className="align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Month</th>
-                        <th>Place</th>
-                        <th className="text-end">Files / Trips</th>
-                        <th className="text-end">Occurrences</th>
-                        <th className="text-end">Linked Group Pax</th>
-                        <th className="text-end">Avg Fee</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usageByMonth.map(row => (
-                        <tr key={`${row.month}-${row.name}`}>
-                          <td>{row.month}</td>
-                          <td>{row.name}</td>
-                          <td className="text-end">{formatNumber(row.filesHandled)}</td>
-                          <td className="text-end">{formatNumber(row.occurrences)}</td>
-                          <td className="text-end">{formatNumber(row.linkedGroupPax)}</td>
-                          <td className="text-end">{formatMoney(row.averageSelectedFee)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              ) : (
-                <EmptyState label="No matched place usage is available." />
-              )}
-            </CardBody>
-          </Card>
-        </Col>
-        <Col xl={5}>
-          <Card className="dashboard-card h-100">
-            <CardBody>
-              <CardHeaderBlock
-                title="Place Ratings by Nationality"
-                subtitle="Nationality is linked through reservation file and quotation records."
-                badge={`${formatNumber(ratingsByNationality.length)} nationalities`}
-              />
-              {ratingsByNationality.length ? (
-                <div className="table-responsive">
-                  <Table className="align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Nationality</th>
-                        <th className="text-end">Ratings</th>
-                        <th className="text-end">Average</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ratingsByNationality.map(row => (
-                        <tr key={row.name}>
-                          <td>{row.name}</td>
-                          <td className="text-end">{formatNumber(row.ratingCount)}</td>
-                          <td className="text-end">{ratingValue(row.averageRating)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              ) : (
-                <EmptyState label="No nationality-linked place ratings are available." />
-              )}
-            </CardBody>
-          </Card>
-        </Col>
-      </Row>
-
-      <Row className="g-4">
-        <Col xl={6}>
-          <RankingCard
-            title="Place Data Gaps"
-            subtitle="Place record, nationality, and trip-row matching completeness checks."
-            rows={[
-              { name: "Missing city", value: places.quality?.missingCity },
-              { name: "Without configured fees", value: places.quality?.placesWithoutFees },
-              { name: "Missing description", value: places.quality?.missingDescription },
-              { name: "Missing images", value: places.quality?.missingImages },
-              { name: "Unmatched place occurrences", value: places.quality?.unmatchedPlaceOccurrences },
-              { name: "Occurrences without known nationality", value: places.quality?.occurrencesWithoutKnownNationality },
-              { name: "Matched by place ID", value: places.quality?.matchedByPlaceId },
-              { name: "Matched by name fallback", value: places.quality?.matchedByNameFallback },
-            ]}
+      <Card className="dashboard-card">
+        <CardBody>
+          <CardHeaderBlock
+            title="Place Ratings by Nationality"
+            subtitle="Nationality is linked through reservation file and quotation records."
+            badge={`${formatNumber(ratingsByNationality.length)} nationalities`}
           />
-        </Col>
-        <Col xl={6}>
-          <ResearchPanel tabKey="places" />
-        </Col>
-      </Row>
+          {ratingsByNationality.length ? (
+            <div className="table-responsive">
+              <Table className="align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Nationality</th>
+                    <th className="text-end">Ratings</th>
+                    <th className="text-end">Average</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ratingsByNationality.map(row => (
+                    <tr key={row.name}>
+                      <td>{row.name}</td>
+                      <td className="text-end">{formatNumber(row.ratingCount)}</td>
+                      <td className="text-end">{ratingValue(row.averageRating)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          ) : (
+            <EmptyState label="No nationality-linked place ratings are available." />
+          )}
+        </CardBody>
+      </Card>
     </>
   );
 };
@@ -3784,22 +3205,14 @@ const TransportationCompaniesTab = ({ analytics }) => {
   const rankedByRating = asArray(transportation.rankedByRating);
   const rankedByUsage = asArray(transportation.rankedByUsage);
   const byLinkedPax = asArray(transportation.companiesByLinkedGroupPax);
-  const usageByMonth = asArray(transportation.usageByMonth);
   const ratingsByNationality = asArray(transportation.ratingsByNationality);
-  const typeOnlyUsage = asArray(transportation.typeOnlyUsage);
-  const sizeCapacityProfiles = asArray(transportation.sizeCapacityProfiles);
   const bestCompany = transportation.bestTransportationCompany;
 
   return (
     <>
-      <Alert color="info" className="mb-4">
-        {transportation.dataBasis}
-      </Alert>
       <InsightGrid
         items={[
           { label: "Companies", value: transportation.total, footer: "Active transportation providers" },
-          { label: "Average configured rate", value: transportation.priceSummary?.averageRate, type: "money", footer: "Active company rate rows" },
-          { label: "Average selected rate", value: transportation.priceSummary?.averageSelectedRate, type: "money", footer: "Resolved quotation-day selections" },
           {
             label: "Best company",
             value: bestCompany?.name || "-",
@@ -3826,38 +3239,6 @@ const TransportationCompaniesTab = ({ analytics }) => {
           },
         ]}
       />
-      <Row className="g-4 mb-4">
-        <Col xl={4}>
-          <BarChartCard
-            title="Rates by Company"
-            subtitle="Average saved transportation rates per company."
-            rows={transportation.byRateCount}
-            valueField="averageRate"
-            valueType="money"
-            horizontal
-          />
-        </Col>
-        <Col xl={4}>
-          <BarChartCard
-            title="Rates by Type"
-            subtitle="Average rate by transportation type."
-            rows={transportation.ratesByType}
-            valueField="averageRate"
-            valueType="money"
-            horizontal
-          />
-        </Col>
-        <Col xl={4}>
-          <BarChartCard
-            title="Rates by Size"
-            subtitle="Average configured rate by vehicle/size profile."
-            rows={transportation.ratesBySize}
-            valueField="averageRate"
-            valueType="money"
-            horizontal
-          />
-        </Col>
-      </Row>
 
       <Row className="g-4 mb-4">
         <Col xl={4}>
@@ -3866,10 +3247,7 @@ const TransportationCompaniesTab = ({ analytics }) => {
             subtitle="Matched companies ranked by unique reservation-file trips."
             rows={rankedByUsage}
             valueField="tripCount"
-            secondary={[
-              { label: "Occurrences", field: "occurrences" },
-              { label: "Avg selected rate", field: "averageSelectedRate", type: "money" },
-            ]}
+            secondary={[{ label: "Occurrences", field: "occurrences" }]}
           />
         </Col>
         <Col xl={4}>
@@ -3897,48 +3275,7 @@ const TransportationCompaniesTab = ({ analytics }) => {
       </Row>
 
       <Row className="g-4 mb-4">
-        <Col xl={7}>
-          <Card className="dashboard-card h-100">
-            <CardBody>
-              <CardHeaderBlock
-                title="Transportation Usage by Month"
-                subtitle="Matched company rows grouped by quotation start month."
-                badge={`${formatNumber(usageByMonth.length)} rows`}
-              />
-              {usageByMonth.length ? (
-                <div className="table-responsive">
-                  <Table className="align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Month</th>
-                        <th>Company</th>
-                        <th className="text-end">Files / Trips</th>
-                        <th className="text-end">Occurrences</th>
-                        <th className="text-end">Linked Group Pax</th>
-                        <th className="text-end">Avg Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usageByMonth.map(row => (
-                        <tr key={`${row.month}-${row.name}`}>
-                          <td>{row.month}</td>
-                          <td>{row.name}</td>
-                          <td className="text-end">{formatNumber(row.filesHandled)}</td>
-                          <td className="text-end">{formatNumber(row.occurrences)}</td>
-                          <td className="text-end">{formatNumber(row.linkedGroupPax)}</td>
-                          <td className="text-end">{formatMoney(row.averageSelectedRate)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              ) : (
-                <EmptyState label="No matched transportation company usage is available." />
-              )}
-            </CardBody>
-          </Card>
-        </Col>
-        <Col xl={5}>
+        <Col xl={12}>
           <Card className="dashboard-card h-100">
             <CardBody>
               <CardHeaderBlock
@@ -3975,93 +3312,20 @@ const TransportationCompaniesTab = ({ analytics }) => {
         </Col>
       </Row>
 
-      <Row className="g-4 mb-4">
-        <Col xl={4}>
+      <Row className="g-4">
+        <Col xl={6}>
           <RankingCard
             title="Transportation Type Usage"
             subtitle="Types found in resolved quotation-day transportation rows."
             rows={transportation.typeUsage}
           />
         </Col>
-        <Col xl={4}>
+        <Col xl={6}>
           <RankingCard
             title="Vehicle / Size Usage"
             subtitle="Vehicle or size selections found in resolved rows."
             rows={transportation.sizeUsage}
           />
-        </Col>
-        <Col xl={4}>
-          <RankingCard
-            title="Type-only Transportation Usage"
-            subtitle="Real selections where a type exists but no company could be matched."
-            rows={typeOnlyUsage}
-            valueField="occurrences"
-            secondary={[
-              { label: "Trips", field: "tripCount" },
-              { label: "Linked pax", field: "linkedGroupPax" },
-            ]}
-          />
-        </Col>
-      </Row>
-
-      <Card className="dashboard-card mb-4">
-        <CardBody>
-          <CardHeaderBlock
-            title="Vehicle / Size Capacity Profiles"
-            subtitle="Configured transportation size records and their saved capacity ranges."
-            badge={`${formatNumber(sizeCapacityProfiles.length)} profiles`}
-          />
-          {sizeCapacityProfiles.length ? (
-            <div className="table-responsive">
-              <Table className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Vehicle / Size</th>
-                    <th className="text-end">Minimum Capacity</th>
-                    <th className="text-end">Maximum Capacity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sizeCapacityProfiles.map(row => (
-                    <tr key={row.sizeId}>
-                      <td>{row.name}</td>
-                      <td className="text-end">{formatNumber(row.minimumCapacity)}</td>
-                      <td className="text-end">{formatNumber(row.maximumCapacity)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState label="No transportation size profiles are available." />
-          )}
-        </CardBody>
-      </Card>
-
-      <Row className="g-4">
-        <Col xl={6}>
-          <RankingCard
-            title="Transportation Data Gaps"
-            subtitle="Company, rate, type, size, and matching completeness checks."
-            rows={[
-              { name: "Companies without rates", value: transportation.quality?.companiesWithoutRates },
-              { name: "Missing company name", value: transportation.quality?.missingCompanyName },
-              { name: "Missing company phone", value: transportation.quality?.missingCompanyPhone },
-              { name: "Missing company email", value: transportation.quality?.missingCompanyEmail },
-              { name: "Disabled types", value: transportation.quality?.disabledTypes },
-              { name: "Types without configured rates", value: transportation.quality?.typesWithoutConfiguredRates },
-              { name: "Sizes without configured rates", value: transportation.quality?.sizesWithoutConfiguredRates },
-              { name: "Unmatched company occurrences", value: transportation.quality?.unmatchedCompanyOccurrences },
-              { name: "Type-only occurrences", value: transportation.quality?.typeOnlyOccurrences },
-              { name: "Selections missing type", value: transportation.quality?.missingTypeSelections },
-              { name: "Selections missing size", value: transportation.quality?.missingSizeSelections },
-              { name: "Matched by company ID", value: transportation.quality?.matchedByCompanyId },
-              { name: "Matched by name fallback", value: transportation.quality?.matchedByNameFallback },
-            ]}
-          />
-        </Col>
-        <Col xl={6}>
-          <ResearchPanel tabKey="transportationCompanies" />
         </Col>
       </Row>
     </>
@@ -4074,17 +3338,21 @@ TransportationCompaniesTab.propTypes = {
 
 const UnifiedAnalyticsToolbar = ({
   analytics,
+  activeTab,
   draft,
   applied,
+  exportTarget,
   loading,
   onChange,
   onApply,
   onClear,
   onExportExcel,
   onExportPdf,
+  onExportTargetChange,
 }) => {
   const [open, setOpen] = useState(false);
   const options = analytics?.filterOptions || {};
+  const currentTabLabel = TABS.find(tab => tab.key === activeTab)?.label || "Current tab";
   const optionFields = [
     ["nationality", "Nationality", options.nationalities],
     ["guide", "Guide", options.guides],
@@ -4120,16 +3388,36 @@ const UnifiedAnalyticsToolbar = ({
               Filters affect only sections that use the selected data relationship.
             </p>
           </div>
-          <div className="d-flex flex-wrap gap-2">
+          <div className="d-flex flex-wrap align-items-end gap-2">
+            <div>
+              <Label for="analytics-export-target" className="form-label mb-1">
+                Export
+              </Label>
+              <Input
+                id="analytics-export-target"
+                type="select"
+                value={exportTarget}
+                onChange={event => onExportTargetChange(event.target.value)}
+                disabled={!analytics}
+              >
+                <option value={CURRENT_ANALYTICS_TAB_KEY}>Current tab ({currentTabLabel})</option>
+                <option value={ALL_ANALYTICS_TABS_KEY}>All analytics tabs</option>
+                {TABS.map(tab => (
+                  <option value={tab.key} key={tab.key}>
+                    {tab.label}
+                  </option>
+                ))}
+              </Input>
+            </div>
             <Button color="light" className="border" onClick={() => setOpen(current => !current)}>
               <i className="bx bx-filter-alt me-1" />
               {open ? "Hide filters" : "Show filters"}
             </Button>
             <Button color="success" outline disabled={!analytics} onClick={onExportExcel}>
-              <i className="bx bx-spreadsheet me-1" /> Export Current Tab Excel
+              <i className="bx bx-spreadsheet me-1" /> Export Excel
             </Button>
             <Button color="danger" outline disabled={!analytics} onClick={onExportPdf}>
-              <i className="bx bxs-file-pdf me-1" /> Export Current Tab PDF
+              <i className="bx bxs-file-pdf me-1" /> Export PDF
             </Button>
           </div>
         </div>
@@ -4191,62 +3479,252 @@ const UnifiedAnalyticsToolbar = ({
 };
 
 UnifiedAnalyticsToolbar.propTypes = {
+  activeTab: PropTypes.string.isRequired,
   analytics: PropTypes.object,
   applied: PropTypes.object.isRequired,
   draft: PropTypes.object.isRequired,
+  exportTarget: PropTypes.string.isRequired,
   loading: PropTypes.bool.isRequired,
   onApply: PropTypes.func.isRequired,
   onChange: PropTypes.func.isRequired,
   onClear: PropTypes.func.isRequired,
   onExportExcel: PropTypes.func.isRequired,
   onExportPdf: PropTypes.func.isRequired,
+  onExportTargetChange: PropTypes.func.isRequired,
 };
 
 const TodayStatusTab = ({ analytics }) => {
   const today = analytics.today || {};
   const distribution = today.serviceDistribution || {};
+  const activeTrips = asArray(today.activeTrips);
+  const cityPax = asArray(today.cityPax)
+    .slice()
+    .sort((a, b) => toNumber(b.pax) - toNumber(a.pax) || String(a.name || "").localeCompare(String(b.name || "")));
+  const freeNowFiles = asArray(today.freeNowFiles);
+  const [selectedFileId, setSelectedFileId] = useState("");
+  const selectedTrip = activeTrips.find(trip => trip.fileId === selectedFileId) || null;
+  const visibleMapPoints = selectedTrip ? asArray(selectedTrip.stops) : asArray(today.mapPoints);
+  const selectedStops = asArray(selectedTrip?.stops);
+  const currentStopName = selectedTrip?.currentStop?.name || selectedTrip?.currentLocation || "";
+
   return (
     <>
-      <Alert color="info" className="mb-4">{today.dataBasis}</Alert>
-      <InsightGrid
-        items={[
-          { label: "Active trips today", value: today.activeTripsCount, footer: today.date || "Current schedule date" },
-          { label: "Active linked pax", value: today.activePax, footer: "Quotation group pax on active files" },
-          { label: "Scheduled days", value: today.scheduledDaysCount, footer: "Quotation-day schedules saved for today" },
-          { label: "Explicit Free Days", value: today.explicitFreeDays, footer: today.freeDayBasis },
-        ]}
-      />
+      <Alert color="info" className="mb-4">
+        {today.dataBasis}
+      </Alert>
       <Card className="dashboard-card mb-4">
         <CardBody>
-          <CardHeaderBlock title="Active Files / Trips Today" subtitle="Reservation files whose quotation dates include today." badge={`${formatNumber(asArray(today.activeTrips).length)} trips`} />
-          {asArray(today.activeTrips).length ? (
-            <div className="table-responsive">
+          <CardHeaderBlock
+            title={selectedTrip ? `Route Map - ${selectedTrip.fileReference || "Selected file"}` : "Real Time Map"}
+            subtitle="Reservation-file schedule points for today. Current stops are highlighted; file links open the reservation file."
+            badge={selectedTrip ? `${formatNumber(selectedStops.length)} stops` : `${formatNumber(visibleMapPoints.length)} points`}
+          />
+          {selectedTrip ? (
+            <div className="real-time-route-strip mb-3">
+              <div>
+                <strong>{selectedTrip.fileReference || "Selected file"}</strong>
+                <span>{formatNumber(selectedTrip.pax)} pax - {selectedTrip.currentCity || "City not saved"} - {currentStopName || "No current stop"}</span>
+              </div>
+              <Button color="light" size="sm" onClick={() => setSelectedFileId("")}>
+                <i className="bx bx-world me-1" />
+                All points
+              </Button>
+            </div>
+          ) : null}
+          <RealTimeStatusMap points={visibleMapPoints} routePoints={selectedStops} />
+          {today.mapLocationNote ? (
+            <p className="dashboard-card__hint mb-0">{today.mapLocationNote}</p>
+          ) : null}
+          {selectedTrip ? (
+            <div className="table-responsive mt-4">
               <Table className="align-middle mb-0">
-                <thead><tr><th>File</th><th>Quotation</th><th>Status</th><th>Start</th><th>End</th><th className="text-end">Pax</th></tr></thead>
-                <tbody>{asArray(today.activeTrips).map(row => (
-                  <tr key={row.fileId}><td>{row.fileReference || "-"}</td><td>{row.quotationReference || "-"}</td><td>{row.status || "-"}</td><td>{formatDate(row.startDate)}</td><td>{formatDate(row.endDate)}</td><td className="text-end">{formatNumber(row.pax)}</td></tr>
-                ))}</tbody>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Point</th>
+                    <th>Type</th>
+                    <th>City</th>
+                    <th className="text-end">Pax</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedStops.map(stop => (
+                    <tr key={stop.id}>
+                      <td>{stop.timeLabel || "-"}</td>
+                      <td>{stop.name || "-"}</td>
+                      <td>{stopTypeLabel(stop.type)}</td>
+                      <td>{stop.city || "-"}</td>
+                      <td className="text-end">{formatNumber(stop.pax)}</td>
+                      <td>
+                        <Badge color={stop.current ? "success" : stop.status === "past" ? "secondary" : "primary"}>
+                          {stop.current ? "Current" : friendlyReportValue(stop.status)}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
               </Table>
             </div>
-          ) : <EmptyState label="No active reservation-file trips are scheduled for today." />}
+          ) : null}
+        </CardBody>
+      </Card>
+      <InsightGrid
+        items={[
+          { label: "Pax in trip now", value: today.activePax, footer: `${today.date || "Today"} - ${today.nowLabel || ""}` },
+          { label: "Pax at stops now", value: today.currentStopPax, footer: "Groups currently inside a saved timed stop", className: "success" },
+          { label: "Pax in free time now", value: today.freeNowPax, footer: "No saved stop in the current time window", className: "info" },
+          { label: "Active files today", value: today.activeTripsCount, footer: `${today.timeZone || "Local"} schedule time` },
+        ]}
+      />
+      <Row className="g-4 mb-4">
+        <Col xl={5}>
+          <Card className="dashboard-card h-100">
+            <CardBody>
+              <CardHeaderBlock
+                title="Pax by Current City"
+                subtitle="Current city is calculated from the active stop, free-time window, or next saved stop."
+                badge={`${formatNumber(cityPax.length)} cities`}
+              />
+              {cityPax.length ? (
+                <div className="table-responsive">
+                  <Table className="align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>City</th>
+                        <th className="text-end">Pax</th>
+                        <th className="text-end">Files</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cityPax.map(row => (
+                        <tr key={row.name}>
+                          <td>{row.name || "Unspecified"}</td>
+                          <td className="text-end">{formatNumber(row.pax)}</td>
+                          <td className="text-end">{formatNumber(row.files)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              ) : (
+                <EmptyState label="No current city pax is available." />
+              )}
+            </CardBody>
+          </Card>
+        </Col>
+        <Col xl={7}>
+          <Card className="dashboard-card h-100">
+            <CardBody>
+              <CardHeaderBlock
+                title="Free Time Now"
+                subtitle="Reservation files whose current time has no saved hotel, place, restaurant, transport, or extra-service stop."
+                badge={`${formatNumber(freeNowFiles.length)} files`}
+              />
+              {freeNowFiles.length ? (
+                <div className="table-responsive">
+                  <Table className="align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>File</th>
+                        <th>City</th>
+                        <th>Window</th>
+                        <th className="text-end">Pax</th>
+                        <th>Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {freeNowFiles.map(row => (
+                        <tr key={`${row.fileId}-${row.from}-${row.to}`}>
+                          <td>
+                            <Link to={row.fileUrl || (row.fileId ? `/reservation-files/${row.fileId}` : "#")}>
+                              {row.fileReference || row.fileId || "-"}
+                            </Link>
+                          </td>
+                          <td>{row.city || "-"}</td>
+                          <td>{row.from || "-"} - {row.to || "-"}</td>
+                          <td className="text-end">{formatNumber(row.pax)}</td>
+                          <td>{row.reason || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              ) : (
+                <EmptyState label="No pax are in free time right now." />
+              )}
+            </CardBody>
+          </Card>
+        </Col>
+      </Row>
+      <Card className="dashboard-card mb-4">
+        <CardBody>
+          <CardHeaderBlock
+            title="Active Reservation Files Today"
+            subtitle="Click a file number to open the reservation file, or show route to draw that file's day path on the map."
+            badge={`${formatNumber(activeTrips.length)} files`}
+          />
+          {activeTrips.length ? (
+            <div className="table-responsive">
+              <Table className="align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th>Quotation</th>
+                    <th>Current City</th>
+                    <th>Current Location</th>
+                    <th>Next Stop</th>
+                    <th className="text-end">Pax</th>
+                    <th className="text-end">Map</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeTrips.map(row => (
+                    <tr key={row.fileId}>
+                      <td>
+                        <Link to={row.fileUrl || (row.fileId ? `/reservation-files/${row.fileId}` : "#")}>
+                          {row.fileReference || row.fileId || "-"}
+                        </Link>
+                      </td>
+                      <td>{row.quotationReference || "-"}</td>
+                      <td>{row.currentCity || "-"}</td>
+                      <td>{row.currentLocation || "-"}</td>
+                      <td>
+                        {row.nextStop ? `${row.nextStop.timeLabel || "-"} - ${row.nextStop.name || "-"}` : "-"}
+                      </td>
+                      <td className="text-end">{formatNumber(row.pax)}</td>
+                      <td className="text-end">
+                        <Button
+                          color={selectedFileId === row.fileId ? "primary" : "light"}
+                          size="sm"
+                          onClick={() => setSelectedFileId(current => (current === row.fileId ? "" : row.fileId))}
+                        >
+                          <i className="bx bx-route me-1" />
+                          Route
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          ) : (
+            <EmptyState label="No active reservation-file trips are scheduled for today." />
+          )}
         </CardBody>
       </Card>
       <Row className="g-4 mb-4">
-        <Col xl={4}><RankingCard title="Guide Types Today" subtitle="Scheduled guide types; specific guide assignment is shown only when stored." rows={distribution.guideTypes} /></Col>
-        <Col xl={4}><RankingCard title="Restaurants Today" subtitle="Restaurant rows saved on today’s quotation-day schedules." rows={distribution.restaurants} /></Col>
-        <Col xl={4}><RankingCard title="Transportation Today" subtitle="Named transportation companies scheduled today." rows={distribution.transportationCompanies} /></Col>
+        <Col xl={4}><RankingCard title="Guide Types Today" subtitle="Reservation-file guide rows scheduled today." rows={distribution.guideTypes} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
+        <Col xl={4}><RankingCard title="Restaurants Today" subtitle="Restaurant rows saved on today's reservation-file schedules." rows={distribution.restaurants} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
+        <Col xl={4}><RankingCard title="Transportation Today" subtitle="Named transportation companies scheduled today from reservation files." rows={distribution.transportationCompanies} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
       </Row>
       <Row className="g-4 mb-4">
-        <Col xl={4}><RankingCard title="Transportation Types Today" subtitle="Type-only rows where no specific company is stored." rows={distribution.transportationTypes} /></Col>
-        <Col xl={4}><RankingCard title="Places / Activities Today" subtitle="Saved place and entrance rows for today." rows={distribution.places} /></Col>
-        <Col xl={4}><RankingCard title="Saved Hotel Options" subtitle="Options for active trips; alternatives may be included and are not confirmed assignments." rows={distribution.hotelOptions} /></Col>
+        <Col xl={4}><RankingCard title="Transportation Types Today" subtitle="Vehicle or type rows scheduled today." rows={distribution.transportationTypes} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
+        <Col xl={4}><RankingCard title="Places / Activities Today" subtitle="Saved place and entrance rows scheduled today." rows={distribution.places} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
+        <Col xl={4}><RankingCard title="Saved Hotel Options" subtitle="Hotel rows active today from reservation files or linked accommodation records." rows={distribution.hotelOptions} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
       </Row>
       <Row className="g-4">
-        <Col xl={8}><RankingCard title="Today Itinerary Distribution" subtitle="Saved route text from today’s quotation-day schedules." rows={distribution.itinerary} /></Col>
-        <Col xl={4}><RankingCard title="Today Data Gaps" subtitle="Schedule and accommodation limitations for current-status reporting." rows={[
-          { name: "Active trips without today schedule", value: today.quality?.activeTripsWithoutTodaySchedule },
-          { name: "Accommodation records with alternatives", value: today.quality?.accommodationRecordsWithAlternatives },
-        ]} /></Col>
+        <Col xl={12}><RankingCard title="Today Itinerary Distribution" subtitle="Saved route text from today's reservation file or quotation day schedule." rows={distribution.itinerary} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
       </Row>
     </>
   );
@@ -4263,6 +3741,7 @@ const Analytics = ({ t }) => {
   const [error, setError] = useState("");
   const [filterDraft, setFilterDraft] = useState({ ...EMPTY_ANALYTICS_FILTERS });
   const [filters, setFilters] = useState({ ...EMPTY_ANALYTICS_FILTERS });
+  const [exportTarget, setExportTarget] = useState(CURRENT_ANALYTICS_TAB_KEY);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -4313,35 +3792,11 @@ const Analytics = ({ t }) => {
       case "users":
         return <UsersTab analytics={analytics} />;
       case "guests":
-        return (
-          <GuestsNationalitiesTab
-            analytics={analytics}
-            filterDraft={filterDraft}
-            onFilterChange={handleFilterChange}
-            onApplyFilters={applyFilters}
-            onClearFilters={clearFilters}
-          />
-        );
+        return <GuestsNationalitiesTab analytics={analytics} />;
       case "filesTrips":
-        return (
-          <FilesTripsTab
-            analytics={analytics}
-            filterDraft={filterDraft}
-            onFilterChange={handleFilterChange}
-            onApplyFilters={applyFilters}
-            onClearFilters={clearFilters}
-          />
-        );
+        return <FilesTripsTab analytics={analytics} />;
       case "ratingsOverview":
-        return (
-          <RatingsOverviewTab
-            analytics={analytics}
-            filterDraft={filterDraft}
-            onFilterChange={handleFilterChange}
-            onApplyFilters={applyFilters}
-            onClearFilters={clearFilters}
-          />
-        );
+        return <RatingsOverviewTab analytics={analytics} />;
       case "today":
         return <TodayStatusTab analytics={analytics} />;
       case "hotels":
@@ -4377,7 +3832,7 @@ const Analytics = ({ t }) => {
                       Company Analytics Workspace
                     </span>
                     <h2 className="dashboard-hero-card__title mb-2">
-                      Real system analytics across users, suppliers, pricing,
+                      Real system analytics across users, suppliers,
                       quotations, and traveler feedback
                     </h2>
                     <p className="dashboard-hero-card__text mb-0">
@@ -4404,14 +3859,17 @@ const Analytics = ({ t }) => {
 
         <UnifiedAnalyticsToolbar
           analytics={analytics}
+          activeTab={activeTab}
           draft={filterDraft}
           applied={filters}
+          exportTarget={exportTarget}
           loading={loading}
           onChange={handleFilterChange}
           onApply={applyFilters}
           onClear={clearFilters}
-          onExportExcel={() => exportAnalyticsExcel(analytics, activeTab)}
-          onExportPdf={() => exportAnalyticsPdf(analytics, activeTab)}
+          onExportExcel={() => exportAnalyticsExcel(analytics, activeTab, exportTarget)}
+          onExportPdf={() => exportAnalyticsPdf(analytics, activeTab, exportTarget)}
+          onExportTargetChange={setExportTarget}
         />
 
         <Card className="dashboard-card analytics-tabs-card mb-4">
@@ -4465,13 +3923,6 @@ const Analytics = ({ t }) => {
           </>
         ) : null}
 
-        {!loading && !error && analytics?.dataQuality ? (
-          <Row className="g-4 mt-1">
-            <Col xl={12}>
-              <ProfileTable rows={analytics.dataQuality.collectionProfile} />
-            </Col>
-          </Row>
-        ) : null}
       </Container>
     </div>
   );
