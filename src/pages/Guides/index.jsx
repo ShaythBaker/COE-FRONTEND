@@ -1027,18 +1027,20 @@ const GuidesPage = () => {
 
             <Col md="6">
               <Label className="form-label">Status</Label>
-              <div className="d-flex align-items-center gap-2 pt-2">
-                <Input
-                  id="guide-active-status"
-                  name="ACTIVE_STATUS"
-                  type="checkbox"
-                  checked={!!form.ACTIVE_STATUS}
-                  onChange={handleInputChange}
-                />
-                <Label for="guide-active-status" className="mb-0">
-                  Active
-                </Label>
-              </div>
+              <Input
+                type="select"
+                name="ACTIVE_STATUS"
+                value={form.ACTIVE_STATUS ? "true" : "false"}
+                onChange={event =>
+                  setForm(prev => ({
+                    ...prev,
+                    ACTIVE_STATUS: event.target.value === "true",
+                  }))
+                }
+              >
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </Input>
             </Col>
 
             <Col md="6">
