@@ -17,6 +17,9 @@ import {
 export const login = (data) => post(url.LOGIN, data); // {email,password}
 export const refreshToken = (data) => post(url.REFRESH, data); // {refreshToken}
 export const logout = (data) => post(url.LOGOUT, data); // {refreshToken}
+export const getMyProfile = () => get(url.MY_PROFILE);
+export const updateMyProfile = (data) => patch(url.MY_PROFILE, data);
+export const changePassword = (data) => post(url.CHANGE_PASSWORD, data);
 
 // =====================
 // Quotation Pricing

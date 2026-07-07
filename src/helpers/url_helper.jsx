@@ -21,6 +21,8 @@ export const LOGOUT = "/auth/logout";
 // PROFILE
 export const POST_EDIT_JWT_PROFILE = "/post-jwt-profile";
 export const POST_EDIT_PROFILE = "/post-fake-profile";
+export const MY_PROFILE = "/users/me";
+export const CHANGE_PASSWORD = "/auth/change-password";
 
 // ===========================
 // Company Users (REAL API)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import {
   Dropdown,
@@ -6,99 +6,153 @@ import {
   DropdownMenu,
   DropdownItem,
 } from "reactstrap";
-
-//i18n
 import { withTranslation } from "react-i18next";
-
-// Redux
 import { connect } from "react-redux";
 import { Link } from "react-router-dom";
 import withRouter from "../../Common/withRouter";
+import { getMyProfile } from "../../../helpers/coe_backend_helper";
+import { getAttachmentDownloadUrl } from "../../../helpers/attachments_helper";
 
-// users
-import user1 from "../../../assets/images/users/avatar-1.jpg";
+const initialsFor = user => {
+  const first = String(user?.FIRST_NAME || user?.firstName || "").trim().charAt(0);
+  const last = String(user?.LAST_NAME || user?.lastName || "").trim().charAt(0);
+  const fallback = String(user?.FULL_NAME || user?.fullName || user?.username || "U")
+    .trim()
+    .charAt(0);
+  return `${first}${last}`.toUpperCase() || fallback.toUpperCase() || "U";
+};
 
-const ProfileMenu = (props) => {
-  // Declare a new state variable, which we'll call "menu"
+const readCachedUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem("authUser") || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const ProfileMenu = props => {
   const [menu, setMenu] = useState(false);
+  const [profile, setProfile] = useState(readCachedUser());
+  const [avatarUrl, setAvatarUrl] = useState("");
 
-  const [username, setusername] = useState("Admin");
+  const displayName = useMemo(
+    () =>
+      profile?.FULL_NAME ||
+      profile?.fullName ||
+      profile?.username ||
+      profile?.EMAIL ||
+      profile?.email ||
+      "User",
+    [profile],
+  );
+
+  const loadProfile = useCallback(async () => {
+    try {
+      const data = await getMyProfile();
+      setProfile(data);
+
+      try {
+        const current = readCachedUser();
+        const next = {
+          ...current,
+          firstName: data?.FIRST_NAME || current.firstName || null,
+          lastName: data?.LAST_NAME || current.lastName || null,
+          fullName: data?.FULL_NAME || current.fullName || null,
+          username: data?.FULL_NAME || current.username || null,
+          PROFILE_IMG_ATTACHMENT_ID:
+            data?.PROFILE_IMG_ATTACHMENT_ID || current.PROFILE_IMG_ATTACHMENT_ID || null,
+        };
+        localStorage.setItem("authUser", JSON.stringify(next));
+        localStorage.setItem("user", JSON.stringify(next));
+      } catch {
+        // Profile cache is optional.
+      }
+
+      if (data?.PROFILE_IMG_ATTACHMENT_ID) {
+        setAvatarUrl(await getAttachmentDownloadUrl(data.PROFILE_IMG_ATTACHMENT_ID));
+      } else {
+        setAvatarUrl("");
+      }
+    } catch {
+      setProfile(readCachedUser());
+      setAvatarUrl("");
+    }
+  }, []);
 
   useEffect(() => {
-    if (localStorage.getItem("authUser")) {
-      if (import.meta.env.VITE_APP_DEFAULTAUTH === "firebase") {
-        const obj = JSON.parse(localStorage.getItem("authUser"));
-        setusername(obj.email);
-      } else if (
-        import.meta.env.VITE_APP_DEFAULTAUTH === "fake" ||
-        import.meta.env.VITE_APP_DEFAULTAUTH === "jwt"
-      ) {
-        const obj = JSON.parse(localStorage.getItem("authUser"));
-        setusername(obj.username);
-      }
-    }
-  }, [props.success]);
+    loadProfile();
+    window.addEventListener("coe-profile-updated", loadProfile);
+    return () => window.removeEventListener("coe-profile-updated", loadProfile);
+  }, [loadProfile, props.success]);
+
+  const openNotifications = event => {
+    event.preventDefault();
+    window.dispatchEvent(new Event("open-task-notifications"));
+    setMenu(false);
+  };
 
   return (
-    <React.Fragment>
-      <Dropdown
-        isOpen={menu}
-        toggle={() => setMenu(!menu)}
-        className="d-inline-block"
+    <Dropdown
+      isOpen={menu}
+      toggle={() => setMenu(!menu)}
+      className="d-inline-block"
+    >
+      <DropdownToggle
+        className="btn header-item d-inline-flex align-items-center"
+        id="page-header-user-dropdown"
+        tag="button"
       >
-        <DropdownToggle
-          className="btn header-item "
-          id="page-header-user-dropdown"
-          tag="button"
-        >
+        {avatarUrl ? (
           <img
-            className="rounded-circle header-profile-user"
-            src={user1}
+            className="coe-header-avatar"
+            src={avatarUrl}
             alt="Header Avatar"
           />
-          <span className="d-none d-xl-inline-block ms-2 me-1">{username}</span>
-          <i className="mdi mdi-chevron-down d-none d-xl-inline-block" />
-        </DropdownToggle>
-        <DropdownMenu className="dropdown-menu-end">
-          <DropdownItem tag="a" href="/profile">
-            {" "}
-            <i className="bx bx-user font-size-16 align-middle me-1" />
-            {props.t("Profile")}{" "}
-          </DropdownItem>
-          <DropdownItem tag="a" href="/crypto-wallet">
-            <i className="bx bx-wallet font-size-16 align-middle me-1" />
-            {props.t("My Wallet")}
-          </DropdownItem>
-          <DropdownItem tag="a" href="#">
-            <span className="badge bg-success float-end">11</span>
-            <i className="bx bx-wrench font-size-16 align-middle me-1" />
-            {props.t("Settings")}
-          </DropdownItem>
-          <DropdownItem tag="a" href="auth-lock-screen">
-            <i className="bx bx-lock-open font-size-16 align-middle me-1" />
-            {props.t("Lock screen")}
-          </DropdownItem>
-          <div className="dropdown-divider" />
-          <Link to="/logout" className="dropdown-item">
-            <i className="bx bx-power-off font-size-16 align-middle me-1 text-danger" />
-            <span>{props.t("Logout")}</span>
-          </Link>
-        </DropdownMenu>
-      </Dropdown>
-    </React.Fragment>
+        ) : (
+          <span className="coe-header-avatar coe-header-avatar-fallback bg-primary text-white">
+            {initialsFor(profile)}
+          </span>
+        )}
+        <span className="d-none d-xl-inline-block ms-2 me-1">{displayName}</span>
+        <i className="mdi mdi-chevron-down d-none d-xl-inline-block" />
+      </DropdownToggle>
+      <DropdownMenu className="dropdown-menu-end">
+        <DropdownItem tag={Link} to="/profile">
+          <i className="bx bx-user font-size-16 align-middle me-1" />
+          My Profile
+        </DropdownItem>
+        <DropdownItem tag={Link} to="/profile#change-password">
+          <i className="bx bx-key font-size-16 align-middle me-1" />
+          Change Password
+        </DropdownItem>
+        <DropdownItem href="#" onClick={openNotifications}>
+          <i className="bx bx-bell font-size-16 align-middle me-1" />
+          Notifications
+        </DropdownItem>
+        <DropdownItem tag={Link} to="/profile">
+          <i className="bx bx-image font-size-16 align-middle me-1" />
+          Change Profile Picture
+        </DropdownItem>
+        <div className="dropdown-divider" />
+        <Link to="/logout" className="dropdown-item">
+          <i className="bx bx-power-off font-size-16 align-middle me-1 text-danger" />
+          <span>{props.t("Logout")}</span>
+        </Link>
+      </DropdownMenu>
+    </Dropdown>
   );
 };
 
 ProfileMenu.propTypes = {
   success: PropTypes.any,
-  t: PropTypes.any,
+  t: PropTypes.func.isRequired,
 };
 
-const mapStatetoProps = (state) => {
+const mapStatetoProps = state => {
   const { error, success } = state.Profile;
   return { error, success };
 };
 
 export default withRouter(
-  connect(mapStatetoProps, {})(withTranslation()(ProfileMenu))
+  connect(mapStatetoProps, {})(withTranslation()(ProfileMenu)),
 );

@@ -7,6 +7,7 @@ import Logout from "../pages/Authentication/Logout";
 import Register from "../pages/Authentication/Register";
 import ForgetPwd from "../pages/Authentication/ForgetPassword";
 import NotAuthorized from "../pages/Authentication/NotAuthorized";
+import UserProfile from "../pages/Authentication/user-profile";
 
 // Dashboard
 import Dashboard from "../pages/Dashboard/index";
@@ -69,6 +70,7 @@ import PublicEvaluationPage from "../pages/Evaluations/PublicEvaluation";
 
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
+  { path: "/profile", component: <UserProfile /> },
   {
     path: "/analytics",
     component: (

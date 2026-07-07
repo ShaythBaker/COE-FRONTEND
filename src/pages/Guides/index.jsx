@@ -78,6 +78,79 @@ const GUIDE_TYPE_LABELS = new Set([
 
 const GENDER_OPTIONS = ["Male", "Female"];
 
+const guideInitials = name => {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) return "G";
+  return parts
+    .slice(0, 2)
+    .map(part => part.charAt(0))
+    .join("")
+    .toUpperCase();
+};
+
+const GuideAvatar = ({ attachmentId, name }) => {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (!attachmentId) {
+      setUrl("");
+      return () => {
+        mounted = false;
+      };
+    }
+
+    getAttachmentDownloadUrl(attachmentId)
+      .then(downloadUrl => {
+        if (mounted) setUrl(downloadUrl || "");
+      })
+      .catch(() => {
+        if (mounted) setUrl("");
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [attachmentId]);
+
+  const avatarStyle = {
+    width: 40,
+    height: 40,
+    minWidth: 40,
+    maxWidth: 40,
+    borderRadius: "50%",
+    objectFit: "cover",
+    overflow: "hidden",
+    flexShrink: 0,
+  };
+
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={`${name || "Guide"} profile`}
+        className="border bg-light"
+        style={avatarStyle}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="bg-primary-subtle text-primary border d-inline-flex align-items-center justify-content-center fw-semibold"
+      style={avatarStyle}
+      title={name || "Guide"}
+    >
+      {guideInitials(name)}
+    </div>
+  );
+};
+
 const normalizeBooleanFilter = value => {
   if (value === "" || value === null || value === undefined) return undefined;
   if (value === true || value === "true") return true;
@@ -836,7 +909,6 @@ const GuidesPage = () => {
                             <th>Phone</th>
                             <th>Email</th>
                             <th>Languages</th>
-                            <th>Image</th>
                             <th>Status</th>
                             <th>Updated On</th>
                             <th>Published Reviews</th>
@@ -848,11 +920,19 @@ const GuidesPage = () => {
                             return (
                             <tr key={guide?._id}>
                               <td>
-                                <div className="fw-semibold">
-                                  {guide?.GUIDE_NAME || "-"}
-                                </div>
-                                <div className="text-muted small">
-                                  {guide?._id || "-"}
+                                <div className="d-flex align-items-center gap-2">
+                                  <GuideAvatar
+                                    attachmentId={guide?.GUIDE_IMAGE_ID}
+                                    name={guide?.GUIDE_NAME}
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="fw-semibold">
+                                      {guide?.GUIDE_NAME || "-"}
+                                    </div>
+                                    <div className="text-muted small">
+                                      {guide?._id || "-"}
+                                    </div>
+                                  </div>
                                 </div>
                               </td>
                               <td>{guide?.GUIDE_PHONE || "-"}</td>
@@ -878,18 +958,6 @@ const GuidesPage = () => {
                                   </div>
                                 ) : (
                                   "-"
-                                )}
-                              </td>
-                              <td>
-                                {guide?.GUIDE_IMAGE_ID ? (
-                                  <Badge color="success">Uploaded</Badge>
-                                ) : (
-                                  <Badge
-                                    color="light"
-                                    className="text-dark border"
-                                  >
-                                    No Image
-                                  </Badge>
                                 )}
                               </td>
                               <td>
@@ -1027,18 +1095,20 @@ const GuidesPage = () => {
 
             <Col md="6">
               <Label className="form-label">Status</Label>
-              <div className="d-flex align-items-center gap-2 pt-2">
-                <Input
-                  id="guide-active-status"
-                  name="ACTIVE_STATUS"
-                  type="checkbox"
-                  checked={!!form.ACTIVE_STATUS}
-                  onChange={handleInputChange}
-                />
-                <Label for="guide-active-status" className="mb-0">
-                  Active
-                </Label>
-              </div>
+              <Input
+                type="select"
+                name="ACTIVE_STATUS"
+                value={form.ACTIVE_STATUS ? "true" : "false"}
+                onChange={event =>
+                  setForm(prev => ({
+                    ...prev,
+                    ACTIVE_STATUS: event.target.value === "true",
+                  }))
+                }
+              >
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </Input>
             </Col>
 
             <Col md="6">
