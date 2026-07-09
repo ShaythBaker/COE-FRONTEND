@@ -77,7 +77,7 @@ const TAB_DATA_BASIS = {
   users: "Current company user records, roles, creation dates, and completeness checks.",
   guests: "Quotation pax and reservation customer profiles; pax is not treated as individual guest records.",
   filesTrips: "Quotations and reservation files linked through saved quotation IDs.",
-  ratingsOverview: "Approved evaluation responses and their saved reservation/quotation relationships.",
+  ratingsOverview: "Approved evaluation files and their saved reservation/quotation relationships.",
   hotels: "Hotel inventory, saved accommodation options, usage, and approved ratings.",
   guides: "Guide records, reservation assignments where names exist, guide types, and approved ratings.",
   restaurants: "Restaurant inventory, quotation-day meal rows, usage, and approved ratings.",
@@ -286,7 +286,7 @@ const nationalityRatingsTable = rows => reportTable(
   "Ratings by Nationality",
   [
     { label: "Nationality", value: "name" },
-    { label: "Responses", value: row => firstValue(row?.ratedResponses, row?.ratingCount) },
+    { label: "Evaluation Files", value: row => firstValue(row?.ratedResponses, row?.ratingCount) },
     { label: "Overall Average", value: row => firstValue(row?.overallAverage, row?.averageRating) },
     { label: "Hotel Average", value: "hotelAverage" },
     { label: "Guide Average", value: "guideAverage" },
@@ -391,7 +391,7 @@ const buildAnalyticsReport = analytics => {
       metricsTable([
         { label: "Total Pax", value: guests.totalPax, notes: "Quotation pax" },
         { label: "Quotations", value: guests.quotationCount }, { label: "Top Nationality", value: guests.topNationality },
-        { label: "Nationalities", value: guests.nationalityCount }, { label: "Rated Responses", value: guests.totalRatedResponses },
+        { label: "Nationalities", value: guests.nationalityCount }, { label: "Evaluation Files", value: guests.totalRatedResponses },
       ]),
       reportTable("Pax by Nationality", [
         { label: "Nationality", value: "name" }, { label: "Pax", value: "pax" },
@@ -420,13 +420,13 @@ const buildAnalyticsReport = analytics => {
     ] },
     { name: "Ratings Overview", tables: [
       metricsTable([
-        { label: "Rating Responses", value: ratings.totalResponses }, { label: "Total Ratings", value: ratings.totalRatings },
+        { label: "Evaluation Files", value: ratings.totalResponses }, { label: "Total Ratings", value: ratings.totalRatings },
         { label: "Average Overall Rating", value: ratings.averageOverallRating }, { label: "Best Rated Entity Type", value: ratings.bestRatedEntityType },
         { label: "Most Reviewed Entity Type", value: ratings.mostReviewedEntityType }, { label: "Unmatched Ratings", value: ratings.unmatchedRatings },
       ]),
       reportTable("Ratings by Entity Type", [
         { label: "Entity Type", value: "name" }, { label: "Ratings", value: "ratingCount" },
-        { label: "Responses", value: "responseCount" }, { label: "Average", value: "averageRating" },
+        { label: "Evaluation Files", value: "responseCount" }, { label: "Average", value: "averageRating" },
       ], ratings.ratingsByType),
       reportTable("Top Rated Entities", [{ label: "Entity Type", value: "entityType" }, { label: "Name", value: "name" }, { label: "Ratings", value: "ratingCount" }, { label: "Average", value: "averageRating" }], ratings.topRatedEntities),
       reportTable("Lowest Rated Entities", [{ label: "Entity Type", value: "entityType" }, { label: "Name", value: "name" }, { label: "Ratings", value: "ratingCount" }, { label: "Average", value: "averageRating" }], ratings.lowestRatedEntities),
@@ -536,7 +536,7 @@ const getPdfChartSpecs = (analytics, activeTab) => {
     ],
     ratingsOverview: [
       chart("Average Rating by Entity Type", "bar", data.ratingsByType, "averageRating"),
-      chart("Rating Responses by Type", "doughnut", data.ratingsByType, "ratingCount"),
+      chart("Evaluation Files by Type", "doughnut", data.ratingsByType, "ratingCount"),
       chart("Rating Trend", "line", data.ratingTrendByMonth, "averageRating", "month"),
     ],
     hotels: [
@@ -1968,7 +1968,7 @@ const GuestsNationalitiesTab = ({ analytics }) => {
             footer: "Known quotation nationalities",
           },
           {
-            label: "Rated responses",
+            label: "Evaluation files",
             value: guests.totalRatedResponses,
             footer: `${formatNumber(guests.recordedCustomerProfiles)} identified customer profiles`,
           },
@@ -2004,7 +2004,7 @@ const GuestsNationalitiesTab = ({ analytics }) => {
       <GroupedBarChartCard
         title="Ratings by Nationality"
         subtitle="Average approved ratings grouped by linked quotation nationality."
-        badge={`${formatNumber(guests.totalRatedResponses)} responses`}
+        badge={`${formatNumber(guests.totalRatedResponses)} evaluation files`}
         rows={ratings}
         fields={[
           { key: "overallAverage", label: "Overall" },
@@ -2236,7 +2236,7 @@ const RatingsOverviewTab = ({ analytics }) => {
           {
             label: "Total ratings",
             value: ratings.totalRatings,
-            footer: `${formatNumber(ratings.totalResponses)} approved responses`,
+            footer: `${formatNumber(ratings.totalResponses)} approved evaluation files`,
           },
           {
             label: "Average rating",
@@ -2278,7 +2278,7 @@ const RatingsOverviewTab = ({ analytics }) => {
         <Col xl={6}>
           <LineChartCard
             title="Rating Trend by Month"
-            subtitle="Average rating grouped by response submission month."
+            subtitle="Average rating grouped by evaluation submission month."
             badge={`${formatNumber(trend.reduce((sum, row) => sum + toNumber(row.ratings), 0))} ratings`}
             rows={trend}
             fields={[{ key: "averageRating", label: "Average Rating" }]}
@@ -2300,7 +2300,7 @@ const RatingsOverviewTab = ({ analytics }) => {
                 <thead>
                   <tr>
                     <th>Entity Type</th>
-                    <th className="text-end">Responses</th>
+                    <th className="text-end">Evaluation Files</th>
                     <th className="text-end">Ratings</th>
                     <th className="text-end">Average</th>
                   </tr>
@@ -2369,7 +2369,7 @@ const RatingsOverviewTab = ({ analytics }) => {
                 <thead>
                   <tr>
                     <th>Nationality</th>
-                    <th className="text-end">Responses</th>
+                    <th className="text-end">Evaluation Files</th>
                     <th className="text-end">Ratings</th>
                     <th className="text-end">Average</th>
                   </tr>
@@ -2390,7 +2390,7 @@ const RatingsOverviewTab = ({ analytics }) => {
             <EmptyState label="No nationality-linked ratings are available." />
           )}
           <p className="text-muted small mb-0 mt-3">
-            {formatNumber(ratings.linkedReservationResponses)} responses linked to reservation files; {" "}
+            {formatNumber(ratings.linkedReservationResponses)} evaluation files linked to reservation files;{" "}
             {formatNumber(ratings.linkedQuotationResponses)} linked to quotations.
           </p>
         </CardBody>
@@ -3725,7 +3725,19 @@ const TodayStatusTab = ({ analytics }) => {
         <Col xl={4}><RankingCard title="Saved Hotel Options" subtitle="Hotel rows active today from reservation files or linked accommodation records." rows={distribution.hotelOptions} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
       </Row>
       <Row className="g-4">
-        <Col xl={12}><RankingCard title="Today Itinerary Distribution" subtitle="Saved route text from today's reservation file or quotation day schedule." rows={distribution.itinerary} secondary={[{ label: "Files", field: "files" }, { label: "Pax", field: "pax" }]} /></Col>
+        <Col xl={12}>
+          <RankingCard
+            title="Today Itinerary Distribution"
+            subtitle="Saved route text from today's reservation file or quotation day schedule."
+            rows={distribution.itinerary}
+            secondary={[
+              { label: "File No.", field: "fileReferencesLabel", type: "text" },
+              { label: "Group", field: "groupNamesLabel", type: "text" },
+              { label: "Files", field: "files" },
+              { label: "Pax", field: "pax" },
+            ]}
+          />
+        </Col>
       </Row>
     </>
   );
