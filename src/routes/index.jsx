@@ -15,6 +15,7 @@ import Analytics from "../pages/Analytics";
 
 // System Settings
 import CompanyUsers from "../pages/Settings/CompanyUsers";
+import CompanyUserProfile from "../pages/Settings/CompanyUsers/Profile";
 import DynamicListsPage from "../pages/Settings/DynamicLists/index";
 import SystemInformation from "../pages/Settings/SystemInformation";
 import RoleProtected from "../components/Common/RoleProtected";
@@ -84,6 +85,14 @@ const authProtectedRoutes = [
     path: "/settings/users",
     component: <CompanyUsers />,
     roles: ["COMPANY_ADMIN"],
+  },
+  {
+    path: "/settings/users/:id",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN"]}>
+        <CompanyUserProfile />
+      </RoleProtected>
+    ),
   },
   {
     path: "/settings/system-information",
