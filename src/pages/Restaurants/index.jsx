@@ -21,6 +21,10 @@ import {
 import { Link } from "react-router-dom";
 
 import RoleProtected from "../../components/Common/RoleProtected";
+import {
+  PublishedReviewsCell,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 import {
@@ -48,6 +52,7 @@ const Restaurants = () => {
   const { items, loading, lookups, lookupsLoading } = useSelector((s) => s.Restaurants);
   const roles = useSelector((s) => s.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const publishedReviews = usePublishedReviews("RESTAURANT");
 
   const [searchName, setSearchName] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -282,6 +287,7 @@ const Restaurants = () => {
                         <th>Reservation Email</th>
                         <th>Phone</th>
                         <th>Website</th>
+                        <th>Published Reviews</th>
                         <th style={{ width: 160 }}>Actions</th>
                       </tr>
                     </thead>
@@ -293,6 +299,12 @@ const Restaurants = () => {
                           <td>{x.RESERVATION_EMAIL || "-"}</td>
                           <td>{x.REATAURANT_PHONE || "-"}</td>
                           <td>{x.REATAURANT_WEBSITE || "-"}</td>
+                          <td>
+                            <PublishedReviewsCell
+                              sourceName={x.REATAURANT_NAME || ""}
+                              reviewState={publishedReviews}
+                            />
+                          </td>
                           <td>
                             <div className="d-flex gap-2">
                               <Button color="info" size="sm" tag={Link} to={`/restaurants/${x._id}`}>

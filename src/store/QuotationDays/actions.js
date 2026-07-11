@@ -5,9 +5,9 @@ export const fetchQuotationDays = quotationId => ({
   type: T.FETCH_QUOTATION_DAYS,
   payload: { quotationId },
 });
-export const fetchQuotationDaysSuccess = items => ({
+export const fetchQuotationDaysSuccess = (quotationId, items) => ({
   type: T.FETCH_QUOTATION_DAYS_SUCCESS,
-  payload: items,
+  payload: { quotationId, items },
 });
 export const fetchQuotationDaysFail = error => ({
   type: T.FETCH_QUOTATION_DAYS_FAIL,
@@ -37,6 +37,45 @@ export const fetchRestaurantMealsSuccess = (restaurantId, items) => ({
 export const fetchRestaurantMealsFail = error => ({
   type: T.FETCH_RESTAURANT_MEALS_FAIL,
   payload: error,
+});
+
+export const fetchRestaurantsByCity = cityId => ({
+  type: T.FETCH_RESTAURANTS_BY_CITY,
+  payload: { cityId },
+});
+export const fetchRestaurantsByCitySuccess = (cityId, items) => ({
+  type: T.FETCH_RESTAURANTS_BY_CITY_SUCCESS,
+  payload: { cityId, items },
+});
+export const fetchRestaurantsByCityFail = (cityId, error) => ({
+  type: T.FETCH_RESTAURANTS_BY_CITY_FAIL,
+  payload: { cityId, error },
+});
+
+export const fetchRouteEntranceFeePlaces = (cityId, nationalityId) => ({
+  type: T.FETCH_ROUTE_ENTRANCE_FEE_PLACES,
+  payload: { cityId, nationalityId },
+});
+export const fetchRouteEntranceFeePlacesSuccess = (cityId, nationalityId, items) => ({
+  type: T.FETCH_ROUTE_ENTRANCE_FEE_PLACES_SUCCESS,
+  payload: { cityId, nationalityId, items },
+});
+export const fetchRouteEntranceFeePlacesFail = (cityId, nationalityId, error) => ({
+  type: T.FETCH_ROUTE_ENTRANCE_FEE_PLACES_FAIL,
+  payload: { cityId, nationalityId, error },
+});
+
+export const fetchTransportationBestRate = (typeId, pax, transportationCompanyId) => ({
+  type: T.FETCH_TRANSPORTATION_BEST_RATE,
+  payload: { typeId, pax, transportationCompanyId },
+});
+export const fetchTransportationBestRateSuccess = (typeId, pax, transportationCompanyId, data) => ({
+  type: T.FETCH_TRANSPORTATION_BEST_RATE_SUCCESS,
+  payload: { typeId, pax, transportationCompanyId, data },
+});
+export const fetchTransportationBestRateFail = (typeId, pax, transportationCompanyId, error) => ({
+  type: T.FETCH_TRANSPORTATION_BEST_RATE_FAIL,
+  payload: { typeId, pax, transportationCompanyId, error },
 });
 
 export const createQuotationDay = (data, onDone) => ({

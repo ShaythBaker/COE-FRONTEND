@@ -31,6 +31,11 @@ const SidebarContent = (props) => {
     "CONTRACTING",
   ]);
 
+  const canSeeQuotationsPricing = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "ACCOUNTING",
+  ]);
+
   const canManageHotels = hasAnyRole(roles, ["COMPANY_ADMIN", "CONTRACTING"]);
 
   const canManageRestaurants = hasAnyRole(roles, [
@@ -56,11 +61,34 @@ const SidebarContent = (props) => {
   const canManageQuotations = hasAnyRole(roles, [
     "COMPANY_ADMIN",
     "CONTRACTING",
+    "TOUR_OPERATION",
+  ]);
+
+  const canSeeReservationFiles = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "CONTRACTING",
+    "TOUR_OPERATION",
+    "OPERATION",
+    "USER",
+    "USER_COMPANY",
+    "ACCOUNTING",
   ]);
 
   const canManageExtraServices = hasAnyRole(roles, [
     "COMPANY_ADMIN",
     "CONTRACTING",
+  ]);
+
+  const canManageGuides = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "TOUR_OPERATION",
+    "OPERATION",
+  ]);
+  const canSeeEvaluations = hasAnyRole(roles, ["COMPANY_ADMIN", "QUALITY"]);
+  const canSeeTasks = hasAnyRole(roles, [
+    "QUALITY",
+    "OPERATION",
+    "COMPANY_ADMIN",
   ]);
 
   const canSeePlaces = roles.length > 0;
@@ -214,10 +242,31 @@ const SidebarContent = (props) => {
               <>
                 <li className="menu-title">System Settings</li>
 
+                <li
+                  className={
+                    isActive("/settings/system-information") ? "mm-active" : ""
+                  }
+                >
+                  <Link
+                    to="/settings/system-information"
+                    className="waves-effect"
+                  >
+                    <i className="bx bx-info-circle" />
+                    <span>System Information</span>
+                  </Link>
+                </li>
+
                 <li className={isActive("/settings/users") ? "mm-active" : ""}>
                   <Link to="/settings/users" className="waves-effect">
                     <i className="bx bx-user" />
                     <span>Users</span>
+                  </Link>
+                </li>
+
+                <li className={isActive("/analytics") ? "mm-active" : ""}>
+                  <Link to="/analytics" className="waves-effect">
+                    <i className="bx bx-bar-chart-alt-2" />
+                    <span>Analytics</span>
                   </Link>
                 </li>
               </>
@@ -234,6 +283,7 @@ const SidebarContent = (props) => {
                 </Link>
               </li>
             ) : null}
+
             {canManageTransportationSizes ? (
               <li>
                 <Link
@@ -276,6 +326,24 @@ const SidebarContent = (props) => {
                 <Link to="/hotels" className="waves-effect">
                   <i className="bx bx-hotel" />
                   <span>Hotels</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canManageGuides ? (
+              <li className={isActive("/guides") ? "mm-active" : ""}>
+                <Link to="/guides" className="waves-effect">
+                  <i className="bx bx-map-pin" />
+                  <span>Guides</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeQuotationsPricing ? (
+              <li className={isActive("/quotation-pricing") ? "mm-active" : ""}>
+                <Link to="/quotation-pricing" className="waves-effect">
+                  <i className="bx bx-dollar-circle" />
+                  <span>Quotation Prices</span>
                 </Link>
               </li>
             ) : null}
@@ -325,6 +393,33 @@ const SidebarContent = (props) => {
                 <Link to="/quotations" className="waves-effect">
                   <i className="bx bx-file" />
                   <span>Quotations</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeReservationFiles ? (
+              <li className={isActive("/reservation-files") ? "mm-active" : ""}>
+                <Link to="/reservation-files" className="waves-effect">
+                  <i className="bx bx-folder-open" />
+                  <span>Reservations File</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeTasks ? (
+              <li className={isActive("/tasks") ? "mm-active" : ""}>
+                <Link to="/tasks" className="waves-effect">
+                  <i className="bx bx-task" />
+                  <span>Tasks</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeEvaluations ? (
+              <li className={isActive("/evaluations") ? "mm-active" : ""}>
+                <Link to="/evaluations" className="waves-effect">
+                  <i className="bx bx-star" />
+                  <span>Evaluations</span>
                 </Link>
               </li>
             ) : null}

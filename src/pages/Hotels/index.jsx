@@ -23,6 +23,10 @@ import { Link } from "react-router-dom";
 import RoleProtected from "../../components/Common/RoleProtected"; // ✅ your guard :contentReference[oaicite:5]{index=5}
 import { hasAnyRole } from "../../helpers/coe_roles"; // ✅ your helper :contentReference[oaicite:6]{index=6}
 import { notifyError } from "../../helpers/notify";
+import {
+  PublishedReviewsCell,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
 
 import {
   fetchHotels,
@@ -52,6 +56,7 @@ const Hotels = () => {
   const roles = useSelector((s) => s.Login?.roles || []);
 
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const publishedReviews = usePublishedReviews("HOTEL");
 
   const [searchName, setSearchName] = useState("");
 
@@ -344,6 +349,7 @@ const Hotels = () => {
                         <th>Stars</th>
                         <th>Reservation Email</th>
                         <th>Phone</th>
+                        <th>Published Reviews</th>
                         <th style={{ width: 160 }}>Actions</th>
                       </tr>
                     </thead>
@@ -356,6 +362,12 @@ const Hotels = () => {
                           <td>{String(x.HOTEL_STARS ?? "-")}</td>
                           <td>{x.RESERVATION_EMAIL || "-"}</td>
                           <td>{x.HOTEL_PHONE || "-"}</td>
+                          <td>
+                            <PublishedReviewsCell
+                              sourceName={x.HOTEL_NAME || ""}
+                              reviewState={publishedReviews}
+                            />
+                          </td>
                           <td>
                             <div className="d-flex gap-2">
                               <Button color="info" size="sm" tag={Link} to={`/hotels/${x._id}`}>

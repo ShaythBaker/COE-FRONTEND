@@ -1,7 +1,6 @@
-// path: src/pages/Quotations/ExtraServices.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -22,12 +21,17 @@ import {
   fetchQuotationExtraServices,
   saveQuotationExtraServices,
 } from "../../store/QuotationExtraServices/actions";
+import {
+  isQuotationReadOnly,
+  getQuotationReadOnlyMessage,
+  canViewQuotationPrices,
+} from "../../helpers/quotation_pricing_helper";
 
 const ALLOWED_ROLES = ["COMPANY_ADMIN", "CONTRACTING"];
 
-const normalizeName = (value) => String(value || "").trim().toLowerCase();
+const normalizeName = value => String(value || "").trim().toLowerCase();
 
-const getQuotationDisplayName = (quotation) =>
+const getQuotationDisplayName = quotation =>
   quotation?.QUOTATION_NAME ||
   quotation?.TITLE ||
   quotation?.SUBJECT ||
@@ -41,7 +45,7 @@ const ExtraServicesQuotation = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
-  const quotationState = useSelector((state) => state.Quotations || {});
+  const quotationState = useSelector(state => state.Quotations || {});
   const quotation = quotationState?.selected;
 
   const {
@@ -49,17 +53,20 @@ const ExtraServicesQuotation = () => {
     quotationItems = [],
     loading,
     saving,
-  } = useSelector((state) => state.QuotationExtraServices || {});
+  } = useSelector(state => state.QuotationExtraServices || {});
 
-  const roles = useSelector((state) => state.Login?.roles || []);
+  const roles = useSelector(state => state.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
+  const canViewPrices = canViewQuotationPrices(roles);
+  const readOnly = isQuotationReadOnly(quotation);
+  const canEditQuotation = canMutate && !readOnly;
 
   const [selections, setSelections] = useState({});
   const [isDirty, setIsDirty] = useState(false);
 
   const selectedMap = useMemo(() => {
     const map = new Map();
-    quotationItems.forEach((item) => {
+    quotationItems.forEach(item => {
       map.set(normalizeName(item?.SERVICE_NAME), item);
     });
     return map;
@@ -74,7 +81,7 @@ const ExtraServicesQuotation = () => {
 
   useEffect(() => {
     const next = {};
-    availableItems.forEach((item) => {
+    availableItems.forEach(item => {
       const key = normalizeName(item?.SERVICE_NAME);
       next[key] = selectedMap.has(key);
     });
@@ -84,10 +91,16 @@ const ExtraServicesQuotation = () => {
 
   const selectedCount = Object.values(selections).filter(Boolean).length;
 
+  const formatMoney = value => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return number.toFixed(2);
+  };
+
   const selectedServicesPayload = useMemo(() => {
     return availableItems
-      .filter((item) => selections[normalizeName(item?.SERVICE_NAME)])
-      .map((item) => ({
+      .filter(item => selections[normalizeName(item?.SERVICE_NAME)])
+      .map(item => ({
         SERVICE_NAME: item?.SERVICE_NAME || "",
         SERVICE_DESCRIPTION: item?.SERVICE_DESCRIPTION || "",
         SERVICE_COST_PP: Number(item?.SERVICE_COST_PP || 0),
@@ -95,33 +108,41 @@ const ExtraServicesQuotation = () => {
   }, [availableItems, selections]);
 
   const handleToggle = (serviceName, nextValue) => {
+    if (!canEditQuotation) {
+      notifyError(
+        readOnly
+          ? getQuotationReadOnlyMessage(quotation)
+          : "Permission/role mismatch"
+      );
+      return;
+    }
+
     const key = normalizeName(serviceName);
-    setSelections((prev) => ({
+    setSelections(prev => ({
       ...prev,
       [key]: nextValue,
     }));
     setIsDirty(true);
   };
 
-  const handleReset = () => {
-    const next = {};
-    availableItems.forEach((item) => {
-      const key = normalizeName(item?.SERVICE_NAME);
-      next[key] = selectedMap.has(key);
-    });
-    setSelections(next);
-    setIsDirty(false);
-    notifyInfo("Extra services restored from backend.");
-  };
-
   const handleSave = () => {
-    if (!canMutate) {
-      notifyError("Permission/role mismatch");
+    if (!canEditQuotation) {
+      notifyError(
+        readOnly
+          ? getQuotationReadOnlyMessage(quotation)
+          : "Permission/role mismatch"
+      );
+      return;
+    }
+
+    if (!id) {
+      notifyError("Quotation id is missing.");
       return;
     }
 
     dispatch(
       saveQuotationExtraServices(id, selectedServicesPayload, () => {
+        notifyInfo("Extra services saved successfully.");
         setIsDirty(false);
       })
     );
@@ -133,78 +154,63 @@ const ExtraServicesQuotation = () => {
     <React.Fragment>
       <div className="page-content">
         <Container fluid>
-          <Breadcrumbs title="Quotations" breadcrumbItem="Extra Services" />
+          <Breadcrumbs
+            title="Quotations"
+            breadcrumbItem="Quotation Extra Services"
+          />
 
-          <Row className="mb-3">
-            <Col xl="8">
-              <Card>
-                <CardBody>
-                  <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <Row className="mb-4">
+            <Col lg="12">
+              <Card className="border-0 shadow-sm">
+                <CardBody className="p-4">
+                  <div className="d-flex flex-wrap justify-content-between align-items-start gap-3">
                     <div>
-                      <h4 className="card-title mb-1">Quotation Extra Services</h4>
-                      <p className="card-title-desc mb-0">
-                        Select which extra services should be added to this quotation.
+                      <h4 className="card-title mb-1">
+                        {getQuotationDisplayName(quotation)}
+                      </h4>
+                      <p className="text-muted mb-0">
+                        Reference: {quotation?.REFERANCE_NUMBER || "-"}
                       </p>
                     </div>
 
-                    <div className="d-flex align-items-center gap-2">
-                      <Badge color="primary" pill>
-                        {selectedCount} selected
-                      </Badge>
-                      <Badge color="light" className="text-dark" pill>
-                        {availableItems.length} available
-                      </Badge>
+                    <div className="d-flex flex-wrap gap-2">
+                      <Button
+                        color="primary"
+                        type="button"
+                        onClick={() => navigate(`/quotations/${id}/plan`)}
+                      >
+                        Plan
+                      </Button>
+
+                      <Button
+                        color="primary"
+                        type="button"
+                        onClick={() =>
+                          navigate(`/quotations/${id}/accommodation`)
+                        }
+                      >
+                        Accommodation
+                      </Button>
+
+                      <Button color="dark" type="button" disabled>
+                        Extra Services
+                      </Button>
+
+                      <Button
+                        color="light"
+                        type="button"
+                        onClick={() => navigate(`/quotations/${id}`)}
+                      >
+                        Summary
+                      </Button>
                     </div>
                   </div>
 
-              
-
-                  {!quotation?._id ? (
+                  {readOnly ? (
                     <Alert color="warning" className="mt-4 mb-0">
-                      Quotation not found.{" "}
-                      <Link to="/quotations" className="alert-link">
-                        Go back
-                      </Link>
+                      {getQuotationReadOnlyMessage(quotation)}
                     </Alert>
                   ) : null}
-                </CardBody>
-              </Card>
-            </Col>
-
-            <Col xl="4">
-              <Card>
-                <CardBody>
-                  <h4 className="card-title mb-3">Quick Access</h4>
-
-                  <div className="d-grid gap-2">
-                    <Button
-                      color="primary"
-                      type="button"
-                      onClick={() => navigate(`/quotations/${id}/plan`)}
-                    >
-                      Plan
-                    </Button>
-
-                    <Button
-                      color="primary"
-                      type="button"
-                      onClick={() => navigate(`/quotations/${id}/accommodation`)}
-                    >
-                      Accommodation
-                    </Button>
-
-                    <Button color="dark" type="button" disabled>
-                      Extra Services
-                    </Button>
-
-                    <Button
-                      color="light"
-                      type="button"
-                      onClick={() => navigate(`/quotations/${id}`)}
-                    >
-                      Summary
-                    </Button>
-                  </div>
                 </CardBody>
               </Card>
             </Col>
@@ -220,104 +226,126 @@ const ExtraServicesQuotation = () => {
             </Alert>
           ) : (
             <>
-              <Card>
-                <CardBody>
-                  <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+              <Card className="border-0 shadow-sm overflow-hidden">
+                <CardBody className="p-4">
+                  <div className="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
                     <div>
-                      <h4 className="card-title mb-1">Available Services</h4>
-                      <p className="card-title-desc mb-0">
-                        Use Yes or No to include each service in this quotation.
+                      <h4 className="card-title mb-1">Available Extra Services</h4>
+                      <p className="text-muted mb-0">
+                        Modern selection cards with clearer status and faster
+                        editing.
                       </p>
                     </div>
-
-                    <div className="d-flex gap-2">
-                      <Button
-                        color="light"
-                        type="button"
-                        onClick={handleReset}
-                        disabled={saving}
-                      >
-                        Reset
-                      </Button>
-                      <Button
-                        color="primary"
-                        type="button"
-                        onClick={handleSave}
-                        disabled={saving || !canMutate || !isDirty}
-                      >
-                        {saving ? <Spinner size="sm" className="me-2" /> : null}
-                        Save
-                      </Button>
+                    <div className="d-flex flex-wrap gap-2">
+                      <Badge color="light" className="rounded-pill px-3 py-2">
+                        Selected: {selectedCount}
+                      </Badge>
+                      {!canViewPrices ? (
+                        <Badge color="warning" className="rounded-pill px-3 py-2">
+                          Prices hidden for your role
+                        </Badge>
+                      ) : null}
                     </div>
                   </div>
 
-                  <Row className="g-3">
-                    {availableItems.map((item, index) => {
-                      const key = normalizeName(item?.SERVICE_NAME);
-                      const isSelected = !!selections[key];
-                      const existingItem = selectedMap.get(key);
+                  <fieldset disabled={saving}>
+                    <Row className="g-3">
+                      {availableItems.map(item => {
+                        const key = normalizeName(item?.SERVICE_NAME);
+                        const isSelected = !!selections[key];
 
-                      return (
-                        <Col lg="12" key={item?._id || `${item?.SERVICE_NAME}-${index}`}>
-                          <div className="border rounded p-3 h-100">
-                            <div className="d-flex flex-wrap justify-content-between align-items-start gap-3">
-                              <div>
-                                <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
-                                  <h5 className="mb-0">{item?.SERVICE_NAME || "-"}</h5>
+                        return (
+                          <Col lg="6" xl="4" key={item?._id || key}>
+                            <div
+                              className={`border rounded p-3 h-100 ${
+                                isSelected ? "border-primary bg-light" : ""
+                              }`}
+                            >
+                              <div className="d-flex justify-content-between align-items-start gap-3">
+                                <div className="flex-grow-1">
+                                  <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
+                                    <h5 className="mb-0">
+                                      {item?.SERVICE_NAME || "-"}
+                                    </h5>
+                                    {isSelected ? (
+                                      <Badge color="primary" pill>
+                                        Selected
+                                      </Badge>
+                                    ) : (
+                                      <Badge color="secondary" pill>
+                                        Not Selected
+                                      </Badge>
+                                    )}
+                                  </div>
 
-                                  {existingItem ? (
-                                    <Badge color="success" pill>
-                                      Added
-                                    </Badge>
+                                  <div className="text-muted mb-3">
+                                    {item?.SERVICE_DESCRIPTION ||
+                                      "No description provided."}
+                                  </div>
+
+                                  {canViewPrices ? (
+                                    <div className="small fw-semibold text-primary">
+                                      Cost per person:{" "}
+                                      {formatMoney(item?.SERVICE_COST_PP)}
+                                    </div>
                                   ) : (
-                                    <Badge color="light" className="text-dark" pill>
-                                      Not Added
-                                    </Badge>
+                                    <div className="small text-muted">
+                                      Price hidden
+                                    </div>
                                   )}
                                 </div>
 
-                                <div className="text-muted mb-2">
-                                  {item?.SERVICE_DESCRIPTION || "No description."}
+                                <div className="d-flex flex-column gap-2">
+                                  <Button
+                                    type="button"
+                                    color={isSelected ? "primary" : "light"}
+                                    onClick={() =>
+                                      handleToggle(item?.SERVICE_NAME, true)
+                                    }
+                                    disabled={!canEditQuotation || saving}
+                                  >
+                                    <i className="bx bx-check me-1" />
+                                    Yes
+                                  </Button>
+
+                                  <Button
+                                    type="button"
+                                    color={!isSelected ? "danger" : "light"}
+                                    onClick={() =>
+                                      handleToggle(item?.SERVICE_NAME, false)
+                                    }
+                                    disabled={!canEditQuotation || saving}
+                                  >
+                                    <i className="bx bx-x me-1" />
+                                    No
+                                  </Button>
                                 </div>
-
-                                <div className="small fw-semibold">
-                                  Cost per person: {Number(item?.SERVICE_COST_PP || 0)}
-                                </div>
-                              </div>
-
-                              <div className="d-flex flex-wrap gap-2">
-                                <Button
-                                  type="button"
-                                  color={isSelected ? "primary" : "light"}
-                                  onClick={() => handleToggle(item?.SERVICE_NAME, true)}
-                                  disabled={!canMutate || saving}
-                                >
-                                  <i className="bx bx-check me-1" />
-                                  Yes
-                                </Button>
-
-                                <Button
-                                  type="button"
-                                  color={!isSelected ? "danger" : "light"}
-                                  onClick={() => handleToggle(item?.SERVICE_NAME, false)}
-                                  disabled={!canMutate || saving}
-                                >
-                                  <i className="bx bx-x me-1" />
-                                  No
-                                </Button>
                               </div>
                             </div>
-                          </div>
-                        </Col>
-                      );
-                    })}
-                  </Row>
+                          </Col>
+                        );
+                      })}
+                    </Row>
+                  </fieldset>
                 </CardBody>
               </Card>
 
-              <Card>
-                <CardBody>
-                  <h4 className="card-title mb-3">Already Added To Quotation</h4>
+              <Card className="border-0 shadow-sm">
+                <CardBody className="p-4">
+                  <div className="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+                    <div>
+                      <h4 className="card-title mb-1">
+                        Saved On This Quotation
+                      </h4>
+                      <p className="text-muted mb-0">
+                        A simple clean summary of the currently attached extra
+                        services.
+                      </p>
+                    </div>
+                    <Badge color="success" className="rounded-pill px-3 py-2">
+                      {quotationItems.length} active service(s)
+                    </Badge>
+                  </div>
 
                   {quotationItems.length === 0 ? (
                     <div className="text-muted">
@@ -325,22 +353,29 @@ const ExtraServicesQuotation = () => {
                     </div>
                   ) : (
                     <Row className="g-3">
-                      {quotationItems.map((item) => (
-                        <Col lg="6" key={item?._id}>
+                      {quotationItems.map(item => (
+                        <Col lg="6" key={item?._id || item?.SERVICE_NAME}>
                           <div className="border rounded p-3 h-100">
-                            <div className="d-flex align-items-center gap-2 mb-2">
-                              <h5 className="mb-0">{item?.SERVICE_NAME || "-"}</h5>
-                              <Badge color="success" pill>
-                                Active
-                              </Badge>
-                            </div>
+                            <div className="d-flex justify-content-between align-items-start gap-3">
+                              <div>
+                                <div className="fw-semibold fs-6 mb-1">
+                                  {item?.SERVICE_NAME || "-"}
+                                </div>
+                                <div className="text-muted">
+                                  {item?.SERVICE_DESCRIPTION ||
+                                    "No description provided."}
+                                </div>
+                              </div>
 
-                            <div className="text-muted mb-2">
-                              {item?.SERVICE_DESCRIPTION || "No description."}
-                            </div>
-
-                            <div className="small fw-semibold">
-                              Cost per person: {Number(item?.SERVICE_COST_PP || 0)}
+                              {canViewPrices ? (
+                                <Badge color="primary" className="rounded-pill px-3 py-2">
+                                  {formatMoney(item?.SERVICE_COST_PP)}
+                                </Badge>
+                              ) : (
+                                <Badge color="light" className="rounded-pill px-3 py-2">
+                                  Hidden
+                                </Badge>
+                              )}
                             </div>
                           </div>
                         </Col>
@@ -349,6 +384,47 @@ const ExtraServicesQuotation = () => {
                   )}
                 </CardBody>
               </Card>
+
+              <div className="d-flex justify-content-between align-items-center flex-wrap gap-3 mt-4">
+                <Button
+                  color="light"
+                  type="button"
+                  onClick={() => navigate(`/quotations/${id}/accommodation`)}
+                >
+                  <i className="bx bx-left-arrow-alt me-1" />
+                  Back
+                </Button>
+
+                <div className="d-flex gap-2">
+                  <Button
+                    color="primary"
+                    type="button"
+                    onClick={handleSave}
+                    disabled={!canEditQuotation || !isDirty || saving}
+                  >
+                    {saving ? (
+                      <>
+                        <Spinner size="sm" className="me-2" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <i className="bx bx-save me-1" />
+                        Save Changes
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    color="success"
+                    type="button"
+                    onClick={() => navigate(`/quotations/${id}`)}
+                  >
+                    <i className="bx bx-check-circle me-1" />
+                    Finish
+                  </Button>
+                </div>
+              </div>
             </>
           )}
         </Container>

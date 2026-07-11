@@ -33,7 +33,7 @@ import {
   HOTEL_SEASON_RATE_BY_ID,
 } from "../../helpers/url_helper";
 
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
   return (
@@ -52,7 +52,6 @@ function* onFetchHotels({ payload }) {
     const params = payload?.params || {};
     const res = yield call(get, HOTELS, { params });
     yield put(fetchHotelsSuccess(res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(fetchHotelsFail(extractErrorMessage(e, "Error While fetching data")));
     notifyError("Error While fetching data");
@@ -63,7 +62,6 @@ function* onFetchHotel({ payload }) {
   try {
     const res = yield call(get, HOTEL_BY_ID(payload.id));
     yield put(fetchHotelSuccess(res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(fetchHotelFail(extractErrorMessage(e, "Error While fetching data")));
     notifyError("Error While fetching data");
@@ -135,7 +133,6 @@ function* onFetchSeasonRates({ payload }) {
   try {
     const res = yield call(get, HOTEL_SEASON_RATES(payload.hotelId));
     yield put(fetchSeasonRatesSuccess(payload.hotelId, res));
-    notifyInfo("Data Fetched");
   } catch (e) {
     yield put(fetchSeasonRatesFail(extractErrorMessage(e, "Error While fetching data")));
     notifyError("Error While fetching data");

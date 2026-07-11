@@ -77,3 +77,16 @@ export const fetchTravelAgentsLookupsFail = (error) => ({
   type: T.FETCH_TRAVEL_AGENTS_LOOKUPS_FAIL,
   payload: error,
 });
+
+export const fetchTravelAgentQuotations = (id) => ({
+  type: T.FETCH_TRAVEL_AGENT_QUOTATIONS,
+  payload: { id },
+});
+export const fetchTravelAgentQuotationsSuccess = (id, data) => ({
+  type: T.FETCH_TRAVEL_AGENT_QUOTATIONS_SUCCESS,
+  payload: { id, data },
+});
+export const fetchTravelAgentQuotationsFail = (error) => ({
+  type: T.FETCH_TRAVEL_AGENT_QUOTATIONS_FAIL,
+  payload: error,
+});

@@ -11,7 +11,8 @@ const initialState = {
   lookupsError: "",
   lookups: {
     travelAgents: [],
-    transportationCompanies: [],
+    COUNTRIES: [],
+    QUOTATION_TYPE: [],
   },
 };
 
@@ -58,7 +59,7 @@ const Quotations = (state = initialState, action) => {
         ...state,
         loading: false,
         error: "",
-        items: state.items.map((x) => (x?._id === updated?._id ? updated : x)),
+        items: state.items.map(x => (x?._id === updated?._id ? updated : x)),
         selected: state.selected?._id === updated?._id ? updated : state.selected,
       };
     }
@@ -69,7 +70,7 @@ const Quotations = (state = initialState, action) => {
         ...state,
         loading: false,
         error: "",
-        items: state.items.filter((x) => x?._id !== id),
+        items: state.items.filter(x => x?._id !== id),
         selected: state.selected?._id === id ? null : state.selected,
       };
     }

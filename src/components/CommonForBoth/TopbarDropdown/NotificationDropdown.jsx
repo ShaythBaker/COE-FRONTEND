@@ -1,163 +1,294 @@
-import React, { useState } from "react"
-import PropTypes from 'prop-types'
+import { useCallback, useEffect, useState } from "react"
+import PropTypes from "prop-types"
 import { Link } from "react-router-dom"
-import { Dropdown, DropdownToggle, DropdownMenu, Row, Col } from "reactstrap"
+import {
+  Button,
+  Col,
+  Dropdown,
+  DropdownMenu,
+  DropdownToggle,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  Row,
+  Spinner,
+} from "reactstrap"
 import SimpleBar from "simplebar-react"
-
-//Import images
-import avatar3 from "../../../assets/images/users/avatar-3.jpg"
-import avatar4 from "../../../assets/images/users/avatar-4.jpg"
-
-//i18n
 import { withTranslation } from "react-i18next"
+import { get, patch } from "../../../helpers/api_helper"
+import {
+  TASK_NOTIFICATIONS,
+  TASK_NOTIFICATION_READ,
+  TASK_NOTIFICATIONS_READ_ALL,
+} from "../../../helpers/url_helper"
+import {
+  notificationTimeAgo,
+  normalizeTaskNotifications,
+  taskNotificationLink,
+  taskNotificationMeta,
+  subscribeToNotificationRefresh,
+} from "../../../helpers/task_notifications"
 
 const NotificationDropdown = props => {
-  // Declare a new state variable, which we'll call "menu"
   const [menu, setMenu] = useState(false)
+  const [items, setItems] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [allOpen, setAllOpen] = useState(false)
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      setLoading(true)
+      setLoadError(false)
+      const data = normalizeTaskNotifications(await get(TASK_NOTIFICATIONS))
+      setItems(data.items)
+      setUnreadCount(data.unreadCount)
+    } catch {
+      setLoadError(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadNotifications()
+    return subscribeToNotificationRefresh(loadNotifications)
+  }, [loadNotifications])
+
+  useEffect(() => {
+    const openFromProfileMenu = () => {
+      setAllOpen(true)
+      loadNotifications()
+    }
+    const refreshFromProfile = () => loadNotifications()
+
+    window.addEventListener("open-task-notifications", openFromProfileMenu)
+    window.addEventListener("coe-notifications-updated", refreshFromProfile)
+    return () => {
+      window.removeEventListener("open-task-notifications", openFromProfileMenu)
+      window.removeEventListener("coe-notifications-updated", refreshFromProfile)
+    }
+  }, [loadNotifications])
+
+  const toggleMenu = () => {
+    const opening = !menu
+    setMenu(opening)
+    if (opening) loadNotifications()
+  }
+
+  const markRead = async notification => {
+    if (!notification?._id || notification.READ_ON) return
+    setItems(current =>
+      current.map(item =>
+        item._id === notification._id
+          ? { ...item, READ_ON: new Date().toISOString() }
+          : item
+      )
+    )
+    setUnreadCount(current => Math.max(0, current - 1))
+    try {
+      await patch(TASK_NOTIFICATION_READ(notification._id))
+    } catch {
+      loadNotifications()
+    }
+  }
+
+  const markAllRead = async () => {
+    if (!unreadCount) return
+
+    const readOn = new Date().toISOString()
+    setItems(current =>
+      current.map(item => (item.READ_ON ? item : { ...item, READ_ON: readOn }))
+    )
+    setUnreadCount(0)
+
+    try {
+      await patch(TASK_NOTIFICATIONS_READ_ALL)
+    } catch {
+      loadNotifications()
+    }
+  }
+
+  const openAllNotifications = () => {
+    setAllOpen(true)
+    loadNotifications()
+  }
 
   return (
-    <React.Fragment>
-      <Dropdown
-        isOpen={menu}
-        toggle={() => setMenu(!menu)}
-        className="dropdown d-inline-block"
-        tag="li"
+    <>
+    <Dropdown isOpen={menu} toggle={toggleMenu} className="dropdown d-inline-block" tag="li">
+      <DropdownToggle
+        className="btn header-item noti-icon position-relative"
+        tag="button"
+        id="page-header-notifications-dropdown"
       >
-        <DropdownToggle
-          className="btn header-item noti-icon position-relative"
-          tag="button"
-          id="page-header-notifications-dropdown"
-        >
-          <i className="bx bx-bell bx-tada" />
-          <span className="badge bg-danger rounded-pill">3</span>
-        </DropdownToggle>
+        <i className="bx bx-bell bx-tada" />
+        {unreadCount > 0 ? (
+          <span className="badge bg-danger rounded-pill">{unreadCount}</span>
+        ) : null}
+      </DropdownToggle>
 
-        <DropdownMenu className="dropdown-menu dropdown-menu-lg p-0 dropdown-menu-end">
-          <div className="p-3">
-            <Row className="align-items-center">
-              <Col>
-                <h6 className="m-0"> {props.t("Notifications")} </h6>
-              </Col>
-              <div className="col-auto">
-                <a href="#!" className="small">
-                  {" "}
-                  View All
-                </a>
-              </div>
-            </Row>
-          </div>
+      <DropdownMenu className="dropdown-menu dropdown-menu-lg p-0 dropdown-menu-end">
+        <div className="p-3">
+          <Row className="align-items-center">
+            <Col><h6 className="m-0">{props.t("Notifications")}</h6></Col>
+            <Col className="text-end">
+              <Button
+                color="link"
+                size="sm"
+                className="p-0"
+                disabled={!unreadCount}
+                onClick={markAllRead}
+              >
+                Mark all as read
+              </Button>
+            </Col>
+          </Row>
+        </div>
 
-          <SimpleBar style={{ height: "230px" }}>
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <div className="avatar-xs me-3">
-                  <span className="avatar-title bg-primary rounded-circle font-size-16">
-                    <i className="bx bx-cart" />
-                  </span>
-                </div>
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">
-                    {props.t("Your order is placed")}
-                  </h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t("If several languages coalesce the grammar")}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />{" "}
-                      {props.t("3 min ago")}{" "}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <img
-                  src={avatar3}
-                  className="me-3 rounded-circle avatar-xs"
-                  alt="user-pic"
-                />
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">James Lemire</h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t("It will seem like simplified English") + "."}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />
-                      {props.t("1 hours ago")}{" "}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <div className="avatar-xs me-3">
-                  <span className="avatar-title bg-success rounded-circle font-size-16">
-                    <i className="bx bx-badge-check" />
-                  </span>
-                </div>
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">
-                    {props.t("Your item is shipped")}
-                  </h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t("If several languages coalesce the grammar")}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />{" "}
-                      {props.t("3 min ago")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-
-            <Link to="" className="text-reset notification-item">
-              <div className="d-flex">
-                <img
-                  src={avatar4}
-                  className="me-3 rounded-circle avatar-xs"
-                  alt="user-pic"
-                />
-                <div className="flex-grow-1">
-                  <h6 className="mt-0 mb-1">Salena Layfield</h6>
-                  <div className="font-size-12 text-muted">
-                    <p className="mb-1">
-                      {props.t(
-                        "As a skeptical Cambridge friend of mine occidental"
-                      ) + "."}
-                    </p>
-                    <p className="mb-0">
-                      <i className="mdi mdi-clock-outline" />
-                      {props.t("1 hours ago")}{" "}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-          </SimpleBar>
-          <div className="p-2 border-top d-grid">
-            <Link
-              className="btn btn-sm btn-link font-size-14 btn-block text-center"
-              to="#"
+        <SimpleBar style={{ height: "230px" }}>
+          {loading && !items.length ? (
+            <div className="text-center py-5"><Spinner size="sm" color="primary" /></div>
+          ) : null}
+          {loadError && !items.length ? (
+            <div className="text-center text-muted p-4">Unable to load notifications.</div>
+          ) : null}
+          {!loading && !loadError && !items.length ? (
+            <div className="text-center text-muted p-4">No notifications.</div>
+          ) : null}
+          {items.slice(0, 5).map(notification => {
+            const meta = taskNotificationMeta(notification)
+            return (
+              <Link
+              key={notification._id}
+              to={taskNotificationLink(notification)}
+              className={`text-reset notification-item ${notification.READ_ON ? "" : "bg-light"}`}
+              onClick={() => markRead(notification)}
             >
-              <i className="mdi mdi-arrow-right-circle me-1"></i>
-              {" "}
-              {props.t("View all")}{" "}
+              <div className="d-flex">
+                <div className="avatar-xs me-3">
+                  <span className={`avatar-title bg-${meta.color} rounded-circle font-size-16`}>
+                    <i className={meta.icon} />
+                  </span>
+                </div>
+                <div className="flex-grow-1">
+                  <h6 className="mt-0 mb-1">{meta.title}</h6>
+                  <div className="font-size-12 text-muted">
+                    <p className="mb-1">{notification.MESSAGE}</p>
+                    {meta.showDate ? (
+                      <p className="mb-0">
+                        <i className="mdi mdi-calendar-clock me-1" />
+                        {notification.DUE_DATE_KEY}
+                      </p>
+                    ) : null}
+                    <p className="mb-0">
+                      <i className="mdi mdi-clock-outline me-1" />
+                      {notificationTimeAgo(notification.CREATED_ON)}
+                    </p>
+                  </div>
+                </div>
+                {!notification.READ_ON ? (
+                  <Button
+                    color="link"
+                    size="sm"
+                    className="p-0 ms-2 align-self-start"
+                    onClick={event => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      markRead(notification)
+                    }}
+                  >
+                    Read
+                  </Button>
+                ) : null}
+              </div>
+              </Link>
+            )
+          })}
+        </SimpleBar>
+        <div className="p-2 border-top d-grid">
+          <Button color="primary" size="sm" onClick={openAllNotifications}>
+            View all notifications
+          </Button>
+        </div>
+      </DropdownMenu>
+    </Dropdown>
+
+    <Modal isOpen={allOpen} toggle={() => setAllOpen(false)} size="lg" centered scrollable>
+      <ModalHeader toggle={() => setAllOpen(false)}>Notifications</ModalHeader>
+      <ModalBody className="p-0">
+        {loading && !items.length ? (
+          <div className="text-center py-5"><Spinner size="sm" color="primary" /></div>
+        ) : null}
+        {loadError && !items.length ? (
+          <div className="text-center text-muted p-4">Unable to load notifications.</div>
+        ) : null}
+        {!loading && !loadError && !items.length ? (
+          <div className="text-center text-muted p-4">No notifications.</div>
+        ) : null}
+        {items.map(notification => {
+          const meta = taskNotificationMeta(notification)
+          return (
+            <Link
+              key={notification._id}
+              to={taskNotificationLink(notification)}
+              className={`text-reset notification-item border-bottom ${notification.READ_ON ? "" : "bg-light"}`}
+              onClick={() => {
+                markRead(notification)
+                setAllOpen(false)
+              }}
+            >
+              <div className="d-flex">
+                <div className="avatar-xs me-3">
+                  <span className={`avatar-title bg-${meta.color} rounded-circle font-size-16`}>
+                    <i className={meta.icon} />
+                  </span>
+                </div>
+                <div className="flex-grow-1">
+                  <h6 className="mt-0 mb-1">{meta.title}</h6>
+                  <div className="font-size-12 text-muted">
+                    <p className="mb-1">{notification.MESSAGE}</p>
+                    {meta.showDate ? (
+                      <p className="mb-1">
+                        <i className="mdi mdi-calendar-clock me-1" />
+                        {notification.DUE_DATE_KEY}
+                      </p>
+                    ) : null}
+                    <p className="mb-0">
+                      <i className="mdi mdi-clock-outline me-1" />
+                      {notificationTimeAgo(notification.CREATED_ON)}
+                    </p>
+                  </div>
+                </div>
+                {!notification.READ_ON ? (
+                  <Button
+                    color="link"
+                    size="sm"
+                    className="p-0 ms-2 align-self-start"
+                    onClick={event => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      markRead(notification)
+                    }}
+                  >
+                    Read
+                  </Button>
+                ) : null}
+              </div>
             </Link>
-          </div>
-        </DropdownMenu>
-      </Dropdown>
-    </React.Fragment>
+          )
+        })}
+      </ModalBody>
+      <ModalFooter>
+        <Button color="light" onClick={() => setAllOpen(false)}>Close</Button>
+      </ModalFooter>
+    </Modal>
+    </>
   )
 }
 
-export default withTranslation()(NotificationDropdown)
+NotificationDropdown.propTypes = { t: PropTypes.func.isRequired }
 
-NotificationDropdown.propTypes = {
-  t: PropTypes.any
-}
+export default withTranslation()(NotificationDropdown)

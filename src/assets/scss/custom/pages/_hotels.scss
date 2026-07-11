@@ -1,0 +1,91 @@
+.hotel-details-page {
+  .hotel-season-chart {
+    padding: 1.25rem;
+    border: 1px solid rgba($gray-500, 0.14);
+    border-radius: 1rem;
+    background:
+      radial-gradient(circle at top right, rgba($primary, 0.07), transparent 24%),
+      linear-gradient(180deg, rgba($white, 0.98), rgba($primary, 0.015));
+  }
+
+  .hotel-season-chart__toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .hotel-season-chart__title {
+    color: $gray-900;
+  }
+
+  .hotel-season-chart__switch {
+    gap: 0.5rem;
+    background: rgba($primary, 0.06);
+    padding: 0.3rem;
+    border-radius: 999px;
+
+    .btn {
+      border-radius: 999px !important;
+      border: 0;
+      font-weight: 600;
+      padding-inline: 0.95rem;
+    }
+  }
+
+  .hotel-season-chart__insight {
+    height: 100%;
+    padding: 0.95rem 1rem;
+    border-radius: 0.95rem;
+    background: rgba($gray-100, 0.95);
+    border: 1px solid rgba($gray-500, 0.08);
+
+    strong {
+      display: block;
+      margin-bottom: 0.25rem;
+      color: $gray-900;
+      font-size: 1rem;
+    }
+
+    p {
+      color: $gray-700;
+    }
+  }
+
+  .hotel-season-chart__label {
+    display: inline-block;
+    margin-bottom: 0.45rem;
+    color: $gray-600;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .hotel-season-chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-top: 1rem;
+  }
+
+  .hotel-season-chart__season-badge {
+    padding: 0.5rem 0.7rem;
+    border-radius: 999px;
+    font-weight: 600;
+    color: $gray-700;
+  }
+
+  @media (max-width: 575.98px) {
+    .hotel-season-chart {
+      padding: 1rem;
+    }
+
+    .hotel-season-chart__toolbar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+}

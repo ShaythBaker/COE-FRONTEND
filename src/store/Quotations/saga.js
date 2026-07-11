@@ -17,13 +17,9 @@ import {
 } from "./actions";
 
 import { get, post, patch, del } from "../../helpers/api_helper";
-import {
-  QUOTATIONS,
-  QUOTATION_BY_ID,
-  TRAVEL_AGENTS,
-  TRANSPORTATION_COMPANIES,
-} from "../../helpers/url_helper";
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { getListItems } from "../../helpers/coe_backend_helper";
+import { QUOTATIONS, QUOTATION_BY_ID, TRAVEL_AGENTS } from "../../helpers/url_helper";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
   return (
@@ -46,24 +42,51 @@ const unwrapId = value => {
   return "";
 };
 
+const normalizeStatus = value => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  return String(value).trim();
+};
+
 const normalizeQuotation = item => {
   if (!item || typeof item !== "object") return item;
+
+  const normalizedStatus = normalizeStatus(
+    item?.STATUS ??
+      item?.status ??
+      item?.quotationStatus ??
+      item?.QUOTATION_STATUS
+  );
 
   return {
     ...item,
     _id: unwrapId(item?._id),
     TRAVEL_AGENT_ID: unwrapId(item?.TRAVEL_AGENT_ID),
-    TRANSPORTATION_COMPANY_ID: unwrapId(item?.TRANSPORTATION_COMPANY_ID),
+    NATIONALITY: unwrapId(item?.NATIONALITY),
+    QUOTATION_TYPE: unwrapId(item?.QUOTATION_TYPE),
+
+    // توحيد الحالة لدعم أي شاشة تقرأ STATUS أو status
+    STATUS: normalizedStatus,
+    status: normalizedStatus,
+    statusLabel: normalizedStatus,
   };
+};
+
+const extractQuotationRows = response => {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.items)) return response.items;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.results)) return response.results;
+  return [];
 };
 
 function* onFetchQuotations({ payload }) {
   try {
     const params = payload?.params || {};
     const res = yield call(get, QUOTATIONS, { params });
-    const rows = Array.isArray(res) ? res.map(normalizeQuotation) : [];
+    const rows = extractQuotationRows(res).map(normalizeQuotation);
+
     yield put(fetchQuotationsSuccess(rows));
-    notifyInfo("Quotations loaded successfully.");
   } catch (e) {
     const msg = extractErrorMessage(e, "Failed to fetch quotations.");
     yield put(fetchQuotationsFail(msg));
@@ -86,8 +109,10 @@ function* onCreateQuotation({ payload }) {
   try {
     const created = yield call(post, QUOTATIONS, payload.data);
     const normalized = normalizeQuotation(created);
+
     yield put(createQuotationSuccess(normalized));
     notifySuccess("Quotation created successfully.");
+
     if (typeof payload?.onDone === "function") {
       payload.onDone(normalized);
     }
@@ -102,8 +127,10 @@ function* onUpdateQuotation({ payload }) {
   try {
     const updated = yield call(patch, QUOTATION_BY_ID(payload.id), payload.data);
     const normalized = normalizeQuotation(updated);
+
     yield put(updateQuotationSuccess(normalized));
     notifySuccess("Quotation updated successfully.");
+
     if (typeof payload?.onDone === "function") {
       payload.onDone(normalized);
     }
@@ -119,6 +146,7 @@ function* onDeleteQuotation({ payload }) {
     yield call(del, QUOTATION_BY_ID(payload.id));
     yield put(deleteQuotationSuccess(payload.id));
     notifySuccess("Quotation deleted successfully.");
+
     if (typeof payload?.onDone === "function") {
       payload.onDone();
     }
@@ -131,17 +159,17 @@ function* onDeleteQuotation({ payload }) {
 
 function* onFetchQuotationsLookups() {
   try {
-    const [travelAgents, transportationCompanies] = yield all([
+    const [travelAgents, countries, quotationTypes] = yield all([
       call(get, TRAVEL_AGENTS),
-      call(get, TRANSPORTATION_COMPANIES),
+      call(getListItems, "COUNTRIES"),
+      call(getListItems, "QUOTATION_TYPE"),
     ]);
 
     yield put(
       fetchQuotationsLookupsSuccess({
         travelAgents: Array.isArray(travelAgents) ? travelAgents : [],
-        transportationCompanies: Array.isArray(transportationCompanies)
-          ? transportationCompanies
-          : [],
+        COUNTRIES: Array.isArray(countries) ? countries : [],
+        QUOTATION_TYPE: Array.isArray(quotationTypes) ? quotationTypes : [],
       })
     );
   } catch (e) {

@@ -1,5 +1,5 @@
-// path: src/pages/Users/DynamicLists/index.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import PropTypes from "prop-types";
 import {
   Badge,
   Button,
@@ -39,17 +39,31 @@ const ALLOWED_LIST_KEYS = [
   "HOTELSEASONS",
   "RESTAURANTS_MEALS",
   "GUIDE_TYPE",
+  "QUOTATION_TYPE",
 ];
 
-const DynamicListsPage = () => {
-  document.title = "Dynamic Lists | COE";
+const LIST_LABELS = {
+  GUIDE_TYPE: "Guide",
+};
+
+const DynamicListsPage = ({
+  defaultListKey = "CITIES",
+  lockListKey = false,
+  title = "Dynamic Lists",
+  breadcrumbTitle = "Users",
+  breadcrumbItem = "Dynamic Lists",
+}) => {
+  document.title = `${title} | COE`;
 
   const dispatch = useDispatch();
 
   const { items, loading, error, lastOp } = useSelector(
     (state) => state?.ListItems || {},
   );
-  const [listKey, setListKey] = useState("CITIES");
+  const [listKey, setListKey] = useState(
+    ALLOWED_LIST_KEYS.includes(defaultListKey) ? defaultListKey : "CITIES"
+  );
+  const itemLabel = LIST_LABELS[listKey] || "Item";
 
   // Create/Edit modal
   const [isUpsertOpen, setIsUpsertOpen] = useState(false);
@@ -81,6 +95,11 @@ const DynamicListsPage = () => {
     });
     return arr;
   }, [items]);
+
+  useEffect(() => {
+    if (!ALLOWED_LIST_KEYS.includes(defaultListKey)) return;
+    setListKey(defaultListKey);
+  }, [defaultListKey]);
 
   const openAdd = () => {
     setEditing(null);
@@ -191,30 +210,32 @@ const DynamicListsPage = () => {
     <React.Fragment>
       <div className="page-content">
         <Container fluid>
-          <Breadcrumbs title="Users" breadcrumbItem="Dynamic Lists" />
+          <Breadcrumbs title={breadcrumbTitle} breadcrumbItem={breadcrumbItem} />
 
           <Row>
             <Col lg="12">
               <Card>
                 <CardBody>
                   <Row className="align-items-end">
-                    <Col md="6">
-                      <div className="mb-3">
-                        <Label className="form-label">List Type</Label>
-                        <Input
-                          type="select"
-                          value={listKey}
-                          onChange={(e) => setListKey(e.target.value)}
-                        >
-                          {ALLOWED_LIST_KEYS.map((k) => (
-                            <option key={k} value={k}>
-                              {k}
-                            </option>
-                          ))}
-                        </Input>
-                      </div>
-                    </Col>
-                    <Col md="6" className="text-md-end">
+                    {lockListKey ? null : (
+                      <Col md="6">
+                        <div className="mb-3">
+                          <Label className="form-label">List Type</Label>
+                          <Input
+                            type="select"
+                            value={listKey}
+                            onChange={(e) => setListKey(e.target.value)}
+                          >
+                            {ALLOWED_LIST_KEYS.map((k) => (
+                              <option key={k} value={k}>
+                                {k}
+                              </option>
+                            ))}
+                          </Input>
+                        </div>
+                      </Col>
+                    )}
+                    <Col md={lockListKey ? "12" : "6"} className="text-md-end">
                       <div className="mb-3">
                         <Button
                           color="primary"
@@ -222,7 +243,7 @@ const DynamicListsPage = () => {
                           disabled={loading}
                         >
                           <i className="bx bx-plus me-1" />
-                          Add Item
+                          Add {itemLabel}
                         </Button>
                       </div>
                     </Col>
@@ -238,7 +259,7 @@ const DynamicListsPage = () => {
                       <Table className="table align-middle table-nowrap mb-0">
                         <thead className="table-light">
                           <tr>
-                            <th>Item Name</th>
+                            <th>{itemLabel} Name</th>
                             <th>Key</th>
                             <th>Order</th>
                             <th>Status</th>
@@ -315,7 +336,7 @@ const DynamicListsPage = () => {
           {/* Create/Edit Modal */}
           <Modal isOpen={isUpsertOpen} toggle={closeUpsert} centered>
             <ModalHeader toggle={closeUpsert}>
-              {editing ? "Edit Item" : "Add Item"}
+              {editing ? `Edit ${itemLabel}` : `Add ${itemLabel}`}
             </ModalHeader>
             <Form onSubmit={onSubmitUpsert}>
               <ModalBody>
@@ -333,7 +354,7 @@ const DynamicListsPage = () => {
                   <Col md="12">
                     <div className="mb-3">
                       <Label className="form-label">
-                        Item Name <span className="text-danger">*</span>
+                        {itemLabel} Name <span className="text-danger">*</span>
                       </Label>
                       <Input
                         type="text"
@@ -348,9 +369,9 @@ const DynamicListsPage = () => {
                         onChange={(e) =>
                           setForm((f) => ({ ...f, ITEM_VALUE: e.target.value }))
                         }
-                        placeholder="Enter item value"
+                        placeholder={`Enter ${itemLabel.toLowerCase()} name`}
                       />
-                      <FormFeedback>Item Name is required</FormFeedback>
+                      <FormFeedback>{itemLabel} Name is required</FormFeedback>
                     </div>
                   </Col>
 
@@ -453,6 +474,14 @@ const DynamicListsPage = () => {
       </div>
     </React.Fragment>
   );
+};
+
+DynamicListsPage.propTypes = {
+  defaultListKey: PropTypes.string,
+  lockListKey: PropTypes.bool,
+  title: PropTypes.string,
+  breadcrumbTitle: PropTypes.string,
+  breadcrumbItem: PropTypes.string,
 };
 
 export default DynamicListsPage;

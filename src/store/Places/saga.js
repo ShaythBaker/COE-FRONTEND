@@ -19,7 +19,7 @@ import {
 import { get, post, del, patch } from "../../helpers/api_helper";
 import { getListItems } from "../../helpers/coe_backend_helper";
 import { PLACES, PLACE_BY_ID } from "../../helpers/url_helper";
-import { notifySuccess, notifyError, notifyInfo } from "../../helpers/notify";
+import { notifySuccess, notifyError } from "../../helpers/notify";
 
 function extractErrorMessage(error, fallback) {
   return (
@@ -60,7 +60,6 @@ function* onFetchPlaces({ payload }) {
     const params = payload?.params || {};
     const res = yield call(get, PLACES, { params });
     yield put(fetchPlacesSuccess(normalizeArray(res)));
-    notifyInfo("Places loaded successfully");
   } catch (e) {
     const message = extractErrorMessage(e, "Error while fetching places");
     yield put(fetchPlacesFail(message));
@@ -72,7 +71,6 @@ function* onFetchPlace({ payload }) {
   try {
     const res = yield call(get, PLACE_BY_ID(payload.id));
     yield put(fetchPlaceSuccess(res || null));
-    notifyInfo("Place details loaded successfully");
   } catch (e) {
     const message = extractErrorMessage(e, "Error while fetching place");
     yield put(fetchPlaceFail(message));

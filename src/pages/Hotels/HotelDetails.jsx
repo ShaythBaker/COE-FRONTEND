@@ -3,7 +3,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  Badge,
   Button,
+  ButtonGroup,
   Card,
   CardBody,
   Col,
@@ -19,8 +21,13 @@ import {
   Spinner,
   Table,
 } from "reactstrap";
+import ReactEcharts from "echarts-for-react";
 
 import RoleProtected from "../../components/Common/RoleProtected";
+import {
+  PublishedReviewsPanel,
+  usePublishedReviews,
+} from "../../components/Common/PublishedReviews";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 
@@ -34,6 +41,21 @@ import {
 } from "../../store/Hotels/actions";
 
 const ALLOWED_ROLES = ["COMPANY_ADMIN", "CONTRACTING"];
+const RATE_CHART_VIEWS = [
+  { key: "all", label: "All Rates" },
+  { key: "boards", label: "Meal Plans" },
+  { key: "supplement", label: "Supplement" },
+];
+const RATE_SERIES_META = [
+  { key: "BB_RATE_AMOUNT", label: "BB", color: "#556ee6" },
+  { key: "HB_RATE_AMOUNT", label: "HB", color: "#34c38f" },
+  { key: "FB_RATE_AMOUNT", label: "FB", color: "#f1b44c" },
+  {
+    key: "SINGLE_SUPPLIMENT_AMOUNT",
+    label: "Single Supplement",
+    color: "#f46a6a",
+  },
+];
 
 const emptyRate = {
   SEASON_NAME: "",
@@ -45,7 +67,38 @@ const emptyRate = {
   END_DATE: "",
 };
 
+const toRateNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toDateValue = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatChartDate = (value) => {
+  const parsed = toDateValue(value);
+  if (!parsed) return "-";
+  return parsed.toLocaleDateString("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
+const formatMoney = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "-";
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(parsed);
+};
+
 const HotelDetails = () => {
+  const publishedReviews = usePublishedReviews("HOTEL");
   const { id } = useParams();
   const nav = useNavigate();
   const dispatch = useDispatch();
@@ -70,6 +123,7 @@ const HotelDetails = () => {
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [touched, setTouched] = useState({});
+  const [rateChartView, setRateChartView] = useState("all");
 
   useEffect(() => {
     dispatch(fetchHotelsLookups());
@@ -94,6 +148,246 @@ const HotelDetails = () => {
     (lookups?.HOTELSEASONS || []).forEach((x) => map.set(x._id, x.ITEM_VALUE));
     return map;
   }, [lookups?.HOTELSEASONS]);
+
+  const normalizedRates = useMemo(
+    () =>
+      [...rates]
+        .map((rate) => {
+          const startDate = toDateValue(rate?.START_DATE);
+          const endDate = toDateValue(rate?.END_DATE);
+
+          return {
+            ...rate,
+            seasonLabel: seasonMap.get(rate?.SEASON_NAME) || rate?.SEASON_NAME || "Season",
+            startDate,
+            endDate,
+            amounts: {
+              BB_RATE_AMOUNT: toRateNumber(rate?.BB_RATE_AMOUNT),
+              HB_RATE_AMOUNT: toRateNumber(rate?.HB_RATE_AMOUNT),
+              FB_RATE_AMOUNT: toRateNumber(rate?.FB_RATE_AMOUNT),
+              SINGLE_SUPPLIMENT_AMOUNT: toRateNumber(rate?.SINGLE_SUPPLIMENT_AMOUNT),
+            },
+          };
+        })
+        .filter((rate) => rate.startDate && rate.endDate)
+        .sort((a, b) => a.startDate - b.startDate),
+    [rates, seasonMap]
+  );
+
+  const visibleRateKeys = useMemo(() => {
+    if (rateChartView === "boards") {
+      return ["BB_RATE_AMOUNT", "HB_RATE_AMOUNT", "FB_RATE_AMOUNT"];
+    }
+    if (rateChartView === "supplement") {
+      return ["SINGLE_SUPPLIMENT_AMOUNT"];
+    }
+    return RATE_SERIES_META.map((item) => item.key);
+  }, [rateChartView]);
+
+  const seasonChartInsights = useMemo(() => {
+    if (!normalizedRates.length) return null;
+
+    const coverageStart = normalizedRates[0].startDate;
+    const coverageEnd = normalizedRates.reduce(
+      (latest, rate) => (rate.endDate > latest ? rate.endDate : latest),
+      normalizedRates[0].endDate
+    );
+
+    const allEntries = normalizedRates.flatMap((rate) =>
+      RATE_SERIES_META.map((series) => ({
+        key: series.key,
+        label: series.label,
+        seasonLabel: rate.seasonLabel,
+        value: rate.amounts[series.key],
+      })).filter((entry) => entry.value !== null)
+    );
+
+    const highestPoint = allEntries.reduce(
+      (top, entry) => (!top || entry.value > top.value ? entry : top),
+      null
+    );
+
+    const widestVariance = normalizedRates.reduce((top, rate) => {
+      const values = Object.values(rate.amounts).filter((value) => value !== null);
+      if (!values.length) return top;
+      const spread = Math.max(...values) - Math.min(...values);
+      if (!top || spread > top.spread) {
+        return { seasonLabel: rate.seasonLabel, spread };
+      }
+      return top;
+    }, null);
+
+    return {
+      coverageStart,
+      coverageEnd,
+      highestPoint,
+      widestVariance,
+      seasonsCount: normalizedRates.length,
+    };
+  }, [normalizedRates]);
+
+  const seasonRatesChartOption = useMemo(() => {
+    if (!normalizedRates.length) return null;
+
+    const activeSeriesMeta = RATE_SERIES_META.filter((series) =>
+      visibleRateKeys.includes(series.key)
+    );
+    const primarySeriesKey = activeSeriesMeta[0]?.key;
+
+    const activeSeries = activeSeriesMeta.map((series) => ({
+      name: series.label,
+      type: "line",
+      smooth: 0.25,
+      step: "end",
+      symbol: "circle",
+      symbolSize: 7,
+      showSymbol: true,
+      lineStyle: {
+        width: series.key === "SINGLE_SUPPLIMENT_AMOUNT" ? 2 : 3,
+        type: series.key === "SINGLE_SUPPLIMENT_AMOUNT" ? "dashed" : "solid",
+      },
+      emphasis: {
+        focus: "series",
+      },
+      areaStyle:
+        rateChartView === "supplement" && series.key === "SINGLE_SUPPLIMENT_AMOUNT"
+          ? { color: "rgba(244,106,106,0.10)" }
+          : rateChartView !== "supplement" && series.key === "BB_RATE_AMOUNT"
+            ? { color: "rgba(85,110,230,0.08)" }
+            : undefined,
+      data: normalizedRates.flatMap((rate) => {
+        const value = rate.amounts[series.key];
+        if (value === null) return [];
+        return [
+          [
+            rate.startDate.toISOString(),
+            value,
+            rate.seasonLabel,
+            rate.endDate.toISOString(),
+          ],
+          [
+            rate.endDate.toISOString(),
+            value,
+            rate.seasonLabel,
+            rate.endDate.toISOString(),
+          ],
+        ];
+      }),
+      markArea:
+        series.key === primarySeriesKey
+          ? {
+              silent: true,
+              itemStyle: {
+                color: "rgba(85,110,230,0.04)",
+              },
+              data: normalizedRates.map((rate) => [
+                {
+                  name: rate.seasonLabel,
+                  xAxis: rate.startDate.toISOString(),
+                },
+                {
+                  xAxis: rate.endDate.toISOString(),
+                },
+              ]),
+            }
+          : undefined,
+    }));
+
+    return {
+      color: activeSeries.map((series) => {
+        const meta = RATE_SERIES_META.find((item) => item.label === series.name);
+        return meta?.color;
+      }),
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "rgba(16,24,40,0.92)",
+        borderWidth: 0,
+        textStyle: { color: "#fff" },
+        formatter: (params) => {
+          const points = Array.isArray(params) ? params : [params];
+          const seasonNames = [
+            ...new Set(points.map((point) => point?.data?.[2]).filter(Boolean)),
+          ];
+          const title = formatChartDate(points[0]?.axisValue);
+          const lines = points.map((point) => {
+            const value = point?.data?.[1];
+            return `${point.marker}${point.seriesName}: ${formatMoney(value)}`;
+          });
+
+          return [
+            title,
+            seasonNames.length ? `Season: ${seasonNames.join(", ")}` : null,
+            ...lines,
+          ]
+            .filter(Boolean)
+            .join("<br/>");
+        },
+      },
+      legend: {
+        top: 0,
+        right: 0,
+        icon: "circle",
+        textStyle: {
+          color: "#6c757d",
+        },
+      },
+      grid: {
+        left: 18,
+        right: 18,
+        top: 56,
+        bottom: 72,
+        containLabel: true,
+      },
+      dataZoom: [
+        {
+          type: "inside",
+          xAxisIndex: 0,
+        },
+        {
+          type: "slider",
+          xAxisIndex: 0,
+          height: 24,
+          bottom: 18,
+          borderColor: "transparent",
+          backgroundColor: "rgba(166,176,207,0.12)",
+          fillerColor: "rgba(85,110,230,0.14)",
+          handleStyle: {
+            color: "#556ee6",
+          },
+        },
+      ],
+      xAxis: {
+        type: "time",
+        axisLine: {
+          lineStyle: {
+            color: "rgba(166,176,207,0.35)",
+          },
+        },
+        axisLabel: {
+          color: "#6c757d",
+          formatter: (value) =>
+            new Date(value).toLocaleDateString("en-GB", {
+              month: "short",
+              day: "numeric",
+            }),
+        },
+      },
+      yAxis: {
+        type: "value",
+        splitLine: {
+          lineStyle: {
+            color: "rgba(166,176,207,0.12)",
+          },
+        },
+        axisLine: { show: false },
+        axisLabel: {
+          color: "#6c757d",
+          formatter: (value) => formatMoney(value),
+        },
+      },
+      series: activeSeries,
+    };
+  }, [normalizedRates, rateChartView, visibleRateKeys]);
 
   const validateRate = (data) => {
     const e = {};
@@ -220,7 +514,7 @@ const HotelDetails = () => {
 
   return (
     <RoleProtected allowedRoles={ALLOWED_ROLES}>
-      <div className="page-content">
+      <div className="page-content hotel-details-page">
         <div className="container-fluid">
           <Row className="mb-3">
             <Col md={6}>
@@ -292,6 +586,11 @@ const HotelDetails = () => {
                 </CardBody>
               </Card>
 
+              <PublishedReviewsPanel
+                sourceName={selected?.HOTEL_NAME || ""}
+                reviewState={publishedReviews}
+              />
+
               <Card>
                 <CardBody>
                   <Row className="mb-3">
@@ -319,7 +618,117 @@ const HotelDetails = () => {
                       No season rates found.
                     </div>
                   ) : (
-                    <div className="table-responsive">
+                    <>
+                      {seasonChartInsights && seasonRatesChartOption ? (
+                        <div className="hotel-season-chart mb-4">
+                          <div className="hotel-season-chart__toolbar">
+                            <div>
+                              <h6 className="hotel-season-chart__title mb-1">
+                                Season Pricing Timeline
+                              </h6>
+                              <p className="text-muted mb-0">
+                                Seasonal pricing movement across time with rate
+                                variance by board basis.
+                              </p>
+                            </div>
+                            <ButtonGroup className="hotel-season-chart__switch">
+                              {RATE_CHART_VIEWS.map((view) => (
+                                <Button
+                                  key={view.key}
+                                  color={
+                                    rateChartView === view.key
+                                      ? "primary"
+                                      : "light"
+                                  }
+                                  onClick={() => setRateChartView(view.key)}
+                                >
+                                  {view.label}
+                                </Button>
+                              ))}
+                            </ButtonGroup>
+                          </div>
+
+                          <Row className="g-3 mb-3">
+                            <Col lg={4} md={6}>
+                              <div className="hotel-season-chart__insight">
+                                <span className="hotel-season-chart__label">
+                                  Coverage Window
+                                </span>
+                                <strong>
+                                  {formatChartDate(
+                                    seasonChartInsights.coverageStart
+                                  )}{" "}
+                                  to{" "}
+                                  {formatChartDate(
+                                    seasonChartInsights.coverageEnd
+                                  )}
+                                </strong>
+                                <p className="mb-0">
+                                  {seasonChartInsights.seasonsCount} configured
+                                  seasons
+                                </p>
+                              </div>
+                            </Col>
+                            <Col lg={4} md={6}>
+                              <div className="hotel-season-chart__insight">
+                                <span className="hotel-season-chart__label">
+                                  Highest Published Rate
+                                </span>
+                                <strong>
+                                  {seasonChartInsights.highestPoint
+                                    ? `${seasonChartInsights.highestPoint.label}: ${formatMoney(
+                                        seasonChartInsights.highestPoint.value
+                                      )}`
+                                    : "-"}
+                                </strong>
+                                <p className="mb-0">
+                                  {seasonChartInsights.highestPoint?.seasonLabel ||
+                                    "No season"}
+                                </p>
+                              </div>
+                            </Col>
+                            <Col lg={4} md={12}>
+                              <div className="hotel-season-chart__insight">
+                                <span className="hotel-season-chart__label">
+                                  Widest Variance
+                                </span>
+                                <strong>
+                                  {seasonChartInsights.widestVariance
+                                    ? formatMoney(
+                                        seasonChartInsights.widestVariance.spread
+                                      )
+                                    : "-"}
+                                </strong>
+                                <p className="mb-0">
+                                  {seasonChartInsights.widestVariance?.seasonLabel ||
+                                    "No season"}
+                                </p>
+                              </div>
+                            </Col>
+                          </Row>
+
+                          <ReactEcharts
+                            option={seasonRatesChartOption}
+                            style={{ height: 420 }}
+                          />
+
+                          <div className="hotel-season-chart__legend">
+                            {normalizedRates.map((rate) => (
+                              <Badge
+                                key={`${rate.seasonLabel}-${rate._id}`}
+                                color="light"
+                                className="hotel-season-chart__season-badge"
+                              >
+                                {rate.seasonLabel}:{" "}
+                                {formatChartDate(rate.startDate)} -{" "}
+                                {formatChartDate(rate.endDate)}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="table-responsive">
                       <Table className="table align-middle table-nowrap mb-0">
                         <thead className="table-light">
                           <tr>
@@ -367,7 +776,8 @@ const HotelDetails = () => {
                           ))}
                         </tbody>
                       </Table>
-                    </div>
+                      </div>
+                    </>
                   )}
                 </CardBody>
               </Card>

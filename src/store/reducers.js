@@ -1,3 +1,4 @@
+// path: src/store/reducers.js
 import { combineReducers } from "redux";
 
 // Front
@@ -27,9 +28,14 @@ import QuotationDays from "./QuotationDays/reducer";
 import QuotationAccumidation from "./QuotationAccumidation/reducer";
 import ExtraServices from "./ExtraServices/reducer";
 import QuotationExtraServices from "./QuotationExtraServices/reducer";
+import QuotationPricing from "./QuotationPricing/reducer";
+
+import ReservationFiles from "./ReservationFiles/reducer";
+
+import Guides from "./Guides/reducer";
+
 
 const rootReducer = combineReducers({
-  // public
   Layout,
   Login,
   Account,
@@ -37,6 +43,7 @@ const rootReducer = combineReducers({
   Profile,
   CompanyUsers,
   ListItems,
+  Guides,
   Hotels,
   Restaurants,
   TravelAgents,
@@ -49,6 +56,8 @@ const rootReducer = combineReducers({
   QuotationAccumidation,
   ExtraServices,
   QuotationExtraServices,
+  QuotationPricing,
+  ReservationFiles,
 });
 
 export default rootReducer;

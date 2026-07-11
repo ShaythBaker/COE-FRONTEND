@@ -20,10 +20,10 @@ let isRefreshing = false;
 let refreshQueue = [];
 let didShowSessionExpiredToast = false;
 
-const enqueue = cb => refreshQueue.push(cb);
+const enqueue = (cb) => refreshQueue.push(cb);
 
 const flushQueue = (err, newToken) => {
-  refreshQueue.forEach(cb => cb(err, newToken));
+  refreshQueue.forEach((cb) => cb(err, newToken));
   refreshQueue = [];
 };
 
@@ -32,11 +32,30 @@ const setLegacyAuthUserFromTokenPair = ({ accessToken, refreshToken }) => {
 
   if (!decoded) return;
 
+  const roles = Array.isArray(decoded?.ROLES) ? decoded.ROLES : [];
+  const primaryRole =
+    decoded?.PRIMARY_ROLE || decoded?.primaryRole || roles.find(Boolean) || null;
+
   const legacyUser = {
     id: decoded?.sub || null,
     email: decoded?.EMAIL || null,
+    firstName:
+      decoded?.FIRST_NAME || decoded?.firstName || decoded?.given_name || null,
+    lastName:
+      decoded?.LAST_NAME || decoded?.lastName || decoded?.family_name || null,
+    fullName:
+      decoded?.FULL_NAME ||
+      decoded?.fullName ||
+      decoded?.name ||
+      `${decoded?.FIRST_NAME || decoded?.firstName || decoded?.given_name || ""} ${
+        decoded?.LAST_NAME || decoded?.lastName || decoded?.family_name || ""
+      }`.trim() ||
+      null,
+    username:
+      decoded?.USERNAME || decoded?.username || primaryRole || null,
+    primaryRole,
     COMPANY_ID: decoded?.COMPANY_ID || null,
-    ROLES: Array.isArray(decoded?.ROLES) ? decoded.ROLES : [],
+    ROLES: roles,
     accessToken: accessToken || null,
     refreshToken: refreshToken || null,
   };
@@ -65,7 +84,7 @@ const redirectToLogin = () => {
   window.location.href = "/login";
 };
 
-axiosApi.interceptors.request.use(config => {
+axiosApi.interceptors.request.use((config) => {
   const token = getAccessToken();
 
   if (token) {
@@ -77,8 +96,8 @@ axiosApi.interceptors.request.use(config => {
 });
 
 axiosApi.interceptors.response.use(
-  response => response,
-  async error => {
+  (response) => response,
+  async (error) => {
     const original = error?.config;
 
     if (!error?.response || !original) {
@@ -153,7 +172,7 @@ axiosApi.interceptors.response.use(
   }
 );
 
-const normalizeRequestData = data => {
+const normalizeRequestData = (data) => {
   if (data === undefined) return {};
   if (data === null) return null;
 
@@ -177,29 +196,29 @@ const normalizeRequestData = data => {
 };
 
 export async function get(url, config = {}) {
-  return axiosApi.get(url, { ...config }).then(response => response.data);
+  return axiosApi.get(url, { ...config }).then((response) => response.data);
 }
 
 export async function post(url, data, config = {}) {
   return axiosApi
     .post(url, normalizeRequestData(data), { ...config })
-    .then(response => response.data);
+    .then((response) => response.data);
 }
 
 export async function put(url, data, config = {}) {
   return axiosApi
     .put(url, normalizeRequestData(data), { ...config })
-    .then(response => response.data);
+    .then((response) => response.data);
 }
 
 export async function patch(url, data, config = {}) {
   return axiosApi
     .patch(url, normalizeRequestData(data), { ...config })
-    .then(response => response.data);
+    .then((response) => response.data);
 }
 
 export async function del(url, config = {}) {
-  return axiosApi.delete(url, { ...config }).then(response => response.data);
+  return axiosApi.delete(url, { ...config }).then((response) => response.data);
 }
 
 export { axiosApi };

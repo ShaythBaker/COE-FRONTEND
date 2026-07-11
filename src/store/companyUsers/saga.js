@@ -41,7 +41,6 @@ function* onFetchUsers() {
   try {
     const res = yield call(get, USERS);
     yield put(fetchUsersSuccess(res));
-    notifySuccess("Data Fetched");
   } catch (error) {
     const msg = extractErrorMessage(error, "Error While fetching data");
     yield put(fetchUsersFail(msg));
