@@ -27,6 +27,7 @@ export const CHANGE_PASSWORD = "/auth/change-password";
 // ===========================
 // Company Users (REAL API)
 // ===========================
+export const CURRENT_COMPANY = "/companies/me";
 export const USERS = "/users";
 export const USER_BY_ID = id => `/users/${id}`;
 

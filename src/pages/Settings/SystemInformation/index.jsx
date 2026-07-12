@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Card,
@@ -10,47 +10,110 @@ import {
   Input,
   Label,
   Row,
+  Spinner,
 } from "reactstrap";
 
 import Breadcrumbs from "../../../components/Common/Breadcrumb";
 import { notifyError, notifySuccess } from "../../../helpers/notify";
-
-const STORAGE_KEY = "coeSystemInformation";
+import {
+  getCurrentCompany,
+  updateCurrentCompany,
+} from "../../../helpers/coe_backend_helper";
+import {
+  ATTACHMENT_TYPES,
+  getAttachmentDownloadUrl,
+  uploadAttachmentAndGetId,
+} from "../../../helpers/attachments_helper";
 
 const emptyForm = {
   systemName: "",
-  systemLogo: "",
+  systemLogoAttachmentId: "",
   systemEmail: "",
   systemCountry: "",
   phoneNumber: "",
 };
 
-const readSystemInformation = () => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    return { ...emptyForm, ...saved };
-  } catch {
-    return emptyForm;
-  }
-};
-
-const fileToDataUrl = file =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+const toForm = data => ({
+  systemName: data?.COMPANY_NAME || "",
+  systemLogoAttachmentId: data?.LOGO_ATTACHMENT_ID || "",
+  systemEmail: data?.SYSTEM_EMAIL || "",
+  systemCountry: data?.SYSTEM_COUNTRY || "",
+  phoneNumber: data?.PHONE_NUMBER || "",
+});
 
 const SystemInformation = () => {
   document.title = "System Information | COE";
 
   const [form, setForm] = useState(emptyForm);
   const [touched, setTouched] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
 
   useEffect(() => {
-    setForm(readSystemInformation());
+    let mounted = true;
+
+    setLoading(true);
+    getCurrentCompany()
+      .then(data => {
+        if (mounted) setForm(toForm(data));
+      })
+      .catch(error => {
+        if (mounted) {
+          notifyError(
+            error?.response?.data?.message ||
+              error?.message ||
+              "Failed to load system information.",
+          );
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (!form.systemLogoAttachmentId || logoPreview) {
+      setLogoUrl("");
+      return () => {
+        mounted = false;
+      };
+    }
+
+    getAttachmentDownloadUrl(form.systemLogoAttachmentId)
+      .then(downloadUrl => {
+        if (mounted) setLogoUrl(downloadUrl || "");
+      })
+      .catch(() => {
+        if (mounted) setLogoUrl("");
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [form.systemLogoAttachmentId, logoPreview]);
+
+  useEffect(() => {
+    return () => {
+      if (logoPreview) URL.revokeObjectURL(logoPreview);
+    };
+  }, [logoPreview]);
+
+  const displayedLogo = logoPreview || logoUrl;
+
+  const resetLogoPreview = () => {
+    if (logoPreview) URL.revokeObjectURL(logoPreview);
+    setLogoPreview("");
+    setLogoFile(null);
+  };
 
   const errors = useMemo(() => {
     const next = {};
@@ -88,11 +151,18 @@ const SystemInformation = () => {
       return;
     }
 
-    const dataUrl = await fileToDataUrl(file);
-    setField("systemLogo", dataUrl);
+    resetLogoPreview();
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
   };
 
-  const handleSubmit = event => {
+  const handleRemoveLogo = () => {
+    resetLogoPreview();
+    setField("systemLogoAttachmentId", "");
+    setLogoUrl("");
+  };
+
+  const handleSubmit = async event => {
     event.preventDefault();
     setTouched({
       systemName: true,
@@ -106,8 +176,38 @@ const SystemInformation = () => {
       return;
     }
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
-    notifySuccess("System information saved successfully.");
+    setSaving(true);
+    try {
+      let logoAttachmentId = form.systemLogoAttachmentId;
+
+      if (logoFile) {
+        logoAttachmentId = await uploadAttachmentAndGetId({
+          file: logoFile,
+          ATTACHMENT_TYPE: ATTACHMENT_TYPES.COMPANY_LOGO,
+          META: { COMPANY_NAME: form.systemName },
+        });
+      }
+
+      const saved = await updateCurrentCompany({
+        COMPANY_NAME: form.systemName,
+        SYSTEM_EMAIL: form.systemEmail,
+        SYSTEM_COUNTRY: form.systemCountry,
+        PHONE_NUMBER: form.phoneNumber,
+        LOGO_ATTACHMENT_ID: logoAttachmentId || null,
+      });
+
+      resetLogoPreview();
+      setForm(toForm(saved));
+      notifySuccess("System information saved successfully.");
+    } catch (error) {
+      notifyError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save system information.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -119,7 +219,12 @@ const SystemInformation = () => {
           <Col xl="8">
             <Card>
               <CardBody>
-                <Form onSubmit={handleSubmit}>
+                {loading ? (
+                  <div className="text-center py-5">
+                    <Spinner />
+                  </div>
+                ) : (
+                  <Form onSubmit={handleSubmit}>
                   <Row>
                     <Col md="6">
                       <div className="mb-3">
@@ -201,20 +306,22 @@ const SystemInformation = () => {
                   </Row>
 
                   <div className="d-flex justify-content-end gap-2">
-                    {form.systemLogo ? (
+                    {displayedLogo ? (
                       <Button
                         color="light"
                         type="button"
-                        onClick={() => setField("systemLogo", "")}
+                        onClick={handleRemoveLogo}
+                        disabled={saving}
                       >
                         Remove Logo
                       </Button>
                     ) : null}
-                    <Button color="primary" type="submit">
+                    <Button color="primary" type="submit" disabled={saving}>
                       Save
                     </Button>
                   </div>
-                </Form>
+                  </Form>
+                )}
               </CardBody>
             </Card>
           </Col>
@@ -223,9 +330,9 @@ const SystemInformation = () => {
             <Card>
               <CardBody>
                 <div className="d-flex align-items-center gap-3 mb-4">
-                  {form.systemLogo ? (
+                  {displayedLogo ? (
                     <img
-                      src={form.systemLogo}
+                      src={displayedLogo}
                       alt="System Logo"
                       className="rounded border"
                       style={{

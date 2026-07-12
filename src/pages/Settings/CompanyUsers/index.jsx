@@ -1,7 +1,8 @@
 // path: src/pages/Settings/CompanyUsers/index.jsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { Link } from "react-router-dom";
 import {
   Button,
   Card,
@@ -27,9 +28,9 @@ import {
   createUser,
   updateUser,
   deleteUser,
-  fetchUser,
 } from "../../../store/companyUsers/actions";
 import { notifyError, notifyInfo } from "../../../helpers/notify";
+import { companyUserProfilePath } from "./routes";
 
 const REQUIRED_ROLE = "COMPANY_ADMIN";
 
@@ -67,7 +68,7 @@ const ensureArray = (v) => (Array.isArray(v) ? v : []);
 const CompanyUsers = () => {
   const dispatch = useDispatch();
 
-  const { items, selected, loading } = useSelector((s) => s.CompanyUsers || {});
+  const { items, loading } = useSelector((s) => s.CompanyUsers || {});
   const authRoles = useSelector((s) => s.Login?.roles || []);
 
   const allowed = authRoles.includes(REQUIRED_ROLE);
@@ -77,7 +78,6 @@ const CompanyUsers = () => {
   // modals
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [activeRow, setActiveRow] = useState(null);
@@ -156,12 +156,6 @@ const CompanyUsers = () => {
     setEditOpen(true);
   };
 
-  const openDetails = (row) => {
-    setActiveRow(row);
-    if (row?._id) dispatch(fetchUser(row._id));
-    setDetailsOpen(true);
-  };
-
   const openDelete = (row) => {
     setActiveRow(row);
     setDeleteOpen(true);
@@ -222,8 +216,8 @@ const CompanyUsers = () => {
     return errs;
   };
 
-  const createErrors = useMemo(() => validateCreate(), [createForm]);
-  const editErrors = useMemo(() => validateEdit(), [editForm]);
+  const createErrors = validateCreate();
+  const editErrors = validateEdit();
 
   const markAllTouched = (fields) => {
     const t = {};
@@ -373,7 +367,7 @@ const CompanyUsers = () => {
                     <i className="bx bx-user-circle display-4 text-muted" />
                     <h5 className="mt-3">No users found</h5>
                     <p className="text-muted mb-3">
-                      No users found. Click 'New User' to create one.
+                      No users found. Click &apos;New User&apos; to create one.
                     </p>
                     <Button color="primary" onClick={openCreate}>
                       <i className="bx bx-plus me-1" />
@@ -435,7 +429,8 @@ const CompanyUsers = () => {
                               <Button
                                 color="link"
                                 className="text-primary p-0 me-3"
-                                onClick={() => openDetails(u)}
+                                tag={Link}
+                                to={companyUserProfilePath(u?._id)}
                               >
                                 View
                               </Button>
@@ -758,90 +753,6 @@ const CompanyUsers = () => {
             </Button>
           </ModalFooter>
         </Form>
-      </Modal>
-
-      {/* Details Modal */}
-      <Modal
-        isOpen={detailsOpen}
-        toggle={() => setDetailsOpen(!detailsOpen)}
-        centered
-      >
-        <ModalHeader toggle={() => setDetailsOpen(!detailsOpen)}>
-          User Details
-        </ModalHeader>
-        <ModalBody>
-          {selected && selected?._id === activeRow?._id ? (
-            <div>
-              <Row className="mb-2">
-                <Col sm={4} className="text-muted">
-                  Name
-                </Col>
-                <Col sm={8}>
-                  {`${selected.FIRST_NAME || ""} ${selected.LAST_NAME || ""}`.trim() ||
-                    "-"}
-                </Col>
-              </Row>
-              <Row className="mb-2">
-                <Col sm={4} className="text-muted">
-                  Email
-                </Col>
-                <Col sm={8}>{selected.EMAIL || "-"}</Col>
-              </Row>
-              <Row className="mb-2">
-                <Col sm={4} className="text-muted">
-                  Roles
-                </Col>
-                <Col sm={8}>
-                  {(selected.ROLES || []).length
-                    ? (selected.ROLES || []).map((r) => (
-                        <Badge
-                          key={r}
-                          color="light"
-                          className="text-dark border me-1"
-                        >
-                          {r}
-                        </Badge>
-                      ))
-                    : "-"}
-                </Col>
-              </Row>
-              <Row className="mb-2">
-                <Col sm={4} className="text-muted">
-                  Status
-                </Col>
-                <Col sm={8}>
-                  {selected.ACTIVE_STATUS ? (
-                    <Badge className="text-success" color="soft-success">Active</Badge>
-                  ) : (
-                    <Badge className="text-danger" color="soft-danger">Inactive</Badge>
-                  )}
-                </Col>
-              </Row>
-              <Row className="mb-2">
-                <Col sm={4} className="text-muted">
-                  Created
-                </Col>
-                <Col sm={8}>{formatDate(selected.CREATED_ON)}</Col>
-              </Row>
-              <Row className="mb-0">
-                <Col sm={4} className="text-muted">
-                  Updated
-                </Col>
-                <Col sm={8}>{formatDate(selected.UPDATED_ON)}</Col>
-              </Row>
-            </div>
-          ) : (
-            <div className="text-muted">
-              <Spinner size="sm" className="me-2" />
-              Loading details...
-            </div>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button color="light" onClick={() => setDetailsOpen(false)}>
-            Close
-          </Button>
-        </ModalFooter>
       </Modal>
 
       {/* Delete Confirm */}
