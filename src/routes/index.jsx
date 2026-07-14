@@ -67,6 +67,7 @@ import ReservationFileDetails from "../pages/ReservationFiles/Details";
 import EvaluationsPage from "../pages/Evaluations";
 import TasksPage from "../pages/Tasks";
 import EvaluationReviewsPage from "../pages/Evaluations/Reviews";
+import ArrivalDepartureReport from "../pages/Evaluations/ArrivalDepartureReport";
 import PublicEvaluationPage from "../pages/Evaluations/PublicEvaluation";
 
 const authProtectedRoutes = [
@@ -187,6 +188,14 @@ const authProtectedRoutes = [
     component: (
       <RoleProtected allowedRoles={["COMPANY_ADMIN", "QUALITY"]}>
         <EvaluationsPage />
+      </RoleProtected>
+    ),
+  },
+  {
+    path: "/evaluations/arrival-departure-report",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN", "QUALITY"]}>
+        <ArrivalDepartureReport />
       </RoleProtected>
     ),
   },
