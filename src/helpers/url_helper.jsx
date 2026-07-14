@@ -183,6 +183,8 @@ export const QUOTATION_FINAL_PRICING = quotationId =>
 
 // RESERVATION FILES
 export const RESERVATION_FILES = "/reservation-files";
+export const ARRIVAL_DEPARTURE_REPORT =
+  "/reservation-files/arrival-departure-report";
 export const RESERVATION_FILE_BY_ID = id => `/reservation-files/${id}`;
 export const RESERVATION_FILE_STATUS = id => `/reservation-files/${id}/status`;
 export const RESERVATION_FILE_FROM_QUOTATION = quotationId =>
