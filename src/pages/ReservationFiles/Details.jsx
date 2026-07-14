@@ -994,6 +994,12 @@ const SectionHeader = ({ title, fileReference, children }) => (
   </div>
 );
 
+const SaveChangesButton = ({ onClick, disabled }) => (
+  <Button color="primary" onClick={onClick} disabled={disabled}>
+    Save Changes
+  </Button>
+);
+
 const RowPanel = ({ row, children, onRemove, removeLabel }) => (
   <div className="rounded border bg-light p-3 p-lg-4 mb-4">
     <div className="d-flex justify-content-end mb-2">
@@ -1789,6 +1795,37 @@ const ReservationFileDetails = () => {
     }));
   };
 
+  const handleApplyGuideForAllDays = () => {
+    const guides = asArray(draft?.guides);
+    if (guides.length < 2) {
+      notifyError("Add another guide row first.");
+      return;
+    }
+
+    const sourceGuide = guides[0] || {};
+    setDraft(prev => ({
+      ...prev,
+      guides: asArray(prev?.guides).map((row, index) =>
+        index === 0
+          ? row
+          : {
+              ...row,
+              guideName: sourceGuide.guideName || "",
+              language: sourceGuide.language || "",
+              notes: sourceGuide.notes || "",
+              specialRates: sourceGuide.specialRates || "",
+              fromDate: sourceGuide.fromDate || "",
+              toDate: sourceGuide.toDate || "",
+              status: sourceGuide.status || "",
+              days: sourceGuide.days || "",
+              overnight: sourceGuide.overnight || "",
+              invoiceReceived: sourceGuide.invoiceReceived || "",
+            }
+      ),
+    }));
+    notifySuccess("Guide information applied to all remaining guide rows.");
+  };
+
   const addRow = section => {
     setDraft(prev => ({
       ...prev,
@@ -2185,8 +2222,10 @@ const ReservationFileDetails = () => {
 
   const renderResDetails = () => (
     <>
+      <SectionHeader title="Reservation Details" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 p-lg-4 mb-4">
-        <h4 className="mb-3">Reservation Details</h4>
         <Row className="g-3">
           <Col md="4">
             <div>File No.</div>
@@ -2246,7 +2285,9 @@ const ReservationFileDetails = () => {
 
   const renderGeneral = () => (
     <>
-      <SectionHeader title="General" fileReference={referenceTitle} />
+      <SectionHeader title="General" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 p-lg-4" style={{ maxWidth: 760 }}>
         <Field label="Group Name" value={draft?.general?.groupName} onChange={v => updateGeneral("groupName", v)} />
         <Field label="Agent Name" value={draft?.general?.agentName} readOnly />
@@ -2295,9 +2336,6 @@ const ReservationFileDetails = () => {
           onChange={v => updateGeneral("tips", v)}
         />
         <div className="d-flex gap-2">
-          <Button color="primary" onClick={handleSave} disabled={saving}>
-            Save General Data
-          </Button>
           <Button color="success" onClick={() => updateGeneral("groupName", draft?.general?.groupName || referenceTitle)}>
             Set Group Name
           </Button>
@@ -2310,9 +2348,7 @@ const ReservationFileDetails = () => {
   const renderArrDep = () => (
     <>
       <SectionHeader title="Arrival / Departure" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>
-          Save Changes
-        </Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       <div className="table-responsive">
         <Table bordered className="align-middle bg-light">
@@ -2364,7 +2400,9 @@ const ReservationFileDetails = () => {
 
   const renderHotels = () => (
     <>
-      <SectionHeader title="Hotels" fileReference={referenceTitle} />
+      <SectionHeader title="Hotels" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.hotels?.length ? <EmptySection label="hotel" /> : null}
       {asArray(draft?.hotels).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Hotel" onRemove={() => removeRow("hotels", index)}>
@@ -2401,7 +2439,7 @@ const ReservationFileDetails = () => {
   const renderTransportation = () => (
     <>
       <SectionHeader title="Transportation" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       {!draft?.transportation?.length ? <EmptySection label="transportation" /> : null}
       {asArray(draft?.transportation).map((row, index) => (
@@ -2429,7 +2467,16 @@ const ReservationFileDetails = () => {
 
   const renderGuides = () => (
     <>
-      <SectionHeader title="Guides" fileReference={referenceTitle} />
+      <SectionHeader title="Guides" fileReference={referenceTitle}>
+        <Button
+          color="info"
+          onClick={handleApplyGuideForAllDays}
+          disabled={asArray(draft?.guides).length < 2}
+        >
+          Guides for all days
+        </Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.guides?.length ? <EmptySection label="guide" /> : null}
       {asArray(draft?.guides).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Guide" onRemove={() => removeRow("guides", index)}>
@@ -2464,7 +2511,9 @@ const ReservationFileDetails = () => {
 
   const renderEntrance = () => (
     <>
-      <SectionHeader title="Entrance" fileReference={referenceTitle} />
+      <SectionHeader title="Entrance" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.entrance?.length ? <EmptySection label="entrance" /> : null}
       {asArray(draft?.entrance).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Entrance" onRemove={() => removeRow("entrance", index)}>
@@ -2481,14 +2530,13 @@ const ReservationFileDetails = () => {
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("entrance")}>Add Another Entrance</Button>
-      <Button color="primary" className="ms-2" onClick={handleSave} disabled={saving}>Save Entrance Data</Button>
     </>
   );
 
   const renderRestaurants = () => (
     <>
       <SectionHeader title="Restaurants" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       {!draft?.restaurants?.length ? <EmptySection label="restaurant/meal" /> : null}
       {asArray(draft?.restaurants).map((row, index) => (
@@ -2519,7 +2567,9 @@ const ReservationFileDetails = () => {
 
   const renderExtras = () => (
     <>
-      <SectionHeader title="Extras" fileReference={referenceTitle} />
+      <SectionHeader title="Extras" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.extras?.length ? <EmptySection label="extra service" /> : null}
       {asArray(draft?.extras).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Extra" onRemove={() => removeRow("extras", index)}>
@@ -2548,7 +2598,7 @@ const ReservationFileDetails = () => {
   const renderInclusions = () => (
     <>
       <SectionHeader title="Inclusions" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       <div className="table-responsive">
         <Table bordered className="align-middle bg-light">
@@ -2581,7 +2631,9 @@ const ReservationFileDetails = () => {
 
     return (
     <>
-      <SectionHeader title="Clients" fileReference={referenceTitle} />
+      <SectionHeader title="Clients" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-4 mb-3">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div>
@@ -2755,7 +2807,9 @@ const ReservationFileDetails = () => {
 
   const renderAttach = () => (
     <>
-      <SectionHeader title="Attach" fileReference={referenceTitle} />
+      <SectionHeader title="Attach" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 mb-3">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
           <h5 className="mb-0">Updated/Attached Offers</h5>
@@ -2884,7 +2938,9 @@ const ReservationFileDetails = () => {
 
   const renderReminder = () => (
     <>
-      <SectionHeader title="Reminder" fileReference={referenceTitle} />
+      <SectionHeader title="Reminder" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-4">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div className="text-muted">
@@ -2966,7 +3022,9 @@ const ReservationFileDetails = () => {
 
     return (
       <>
-        <SectionHeader title="Activity Log" fileReference={referenceTitle} />
+        <SectionHeader title="Activity Log" fileReference={referenceTitle}>
+          <SaveChangesButton onClick={handleSave} disabled={saving} />
+        </SectionHeader>
         <div className="rounded border bg-light p-3">
           <Row className="g-3 mb-3">
             <Col md="3">
