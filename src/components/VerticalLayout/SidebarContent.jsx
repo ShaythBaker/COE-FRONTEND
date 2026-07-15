@@ -99,6 +99,7 @@ const SidebarContent = (props) => {
 
   const isActive = (path) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`);
+  const isEvaluationsActive = location.pathname === "/evaluations";
 
   const ref = useRef();
   const path = useLocation();
@@ -194,12 +195,20 @@ const SidebarContent = (props) => {
     removeActivation(items);
 
     for (let i = 0; i < items.length; ++i) {
+      const itemPath = items[i].pathname;
+      if (!itemPath) continue;
+
+      const isEvaluationsLink = itemPath === "/evaluations";
+      const isMatch = isEvaluationsLink
+        ? pathName === itemPath
+        : pathName === itemPath || pathName.startsWith(`${itemPath}/`);
+
       if (
-        pathName === items[i].pathname ||
-        (items[i].pathname && pathName.startsWith(`${items[i].pathname}/`))
+        isMatch &&
+        (!matchingMenuItem ||
+          itemPath.length > String(matchingMenuItem.pathname || "").length)
       ) {
         matchingMenuItem = items[i];
-        break;
       }
     }
 
@@ -429,10 +438,28 @@ const SidebarContent = (props) => {
             ) : null}
 
             {canSeeEvaluations ? (
-              <li className={isActive("/evaluations") ? "mm-active" : ""}>
+              <li className={isEvaluationsActive ? "mm-active" : ""}>
                 <Link to="/evaluations" className="waves-effect">
                   <i className="bx bx-star" />
                   <span>Evaluations</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canSeeEvaluations ? (
+              <li
+                className={
+                  isActive("/evaluations/arrival-departure-report")
+                    ? "mm-active"
+                    : ""
+                }
+              >
+                <Link
+                  to="/evaluations/arrival-departure-report"
+                  className="waves-effect"
+                >
+                  <i className="bx bx-transfer-alt" />
+                  <span>Arrival and Departure Report</span>
                 </Link>
               </li>
             ) : null}

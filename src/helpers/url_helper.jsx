@@ -27,6 +27,7 @@ export const CHANGE_PASSWORD = "/auth/change-password";
 // ===========================
 // Company Users (REAL API)
 // ===========================
+export const CURRENT_COMPANY = "/companies/me";
 export const USERS = "/users";
 export const USER_BY_ID = id => `/users/${id}`;
 
@@ -188,8 +189,16 @@ export const QUOTATION_FINAL_PRICING = quotationId =>
 
 // RESERVATION FILES
 export const RESERVATION_FILES = "/reservation-files";
+export const ARRIVAL_DEPARTURE_REPORT =
+  "/reservation-files/arrival-departure-report";
 export const RESERVATION_FILE_BY_ID = id => `/reservation-files/${id}`;
 export const RESERVATION_FILE_STATUS = id => `/reservation-files/${id}/status`;
+export const RESERVATION_FILE_SUPPLIER_CONFIRMATION_EMAIL = id =>
+  `/reservation-files/${id}/supplier-confirmation-email`;
+export const PUBLIC_RESERVATION_SUPPLIER_CONFIRMATION = token =>
+  `/reservation-files/public/supplier-confirmations/${token}`;
+export const PUBLIC_RESERVATION_SUPPLIER_CONFIRMATION_SUBMIT = token =>
+  `/reservation-files/public/supplier-confirmations/${token}/submit`;
 export const RESERVATION_FILE_FROM_QUOTATION = quotationId =>
   `/reservation-files/from-quotation/${quotationId}`;
 

@@ -21,6 +21,13 @@ export const getMyProfile = () => get(url.MY_PROFILE);
 export const updateMyProfile = (data) => patch(url.MY_PROFILE, data);
 export const changePassword = (data) => post(url.CHANGE_PASSWORD, data);
 
+// ===========================
+// Current Company / System Information
+// ===========================
+
+export const getCurrentCompany = () => get(url.CURRENT_COMPANY);
+export const updateCurrentCompany = (data) => patch(url.CURRENT_COMPANY, data);
+
 // =====================
 // Quotation Pricing
 // =====================
