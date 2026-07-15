@@ -23,7 +23,7 @@ import {
   Table,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
-import { get, patch } from "../../helpers/api_helper";
+import { get, patch, post } from "../../helpers/api_helper";
 import { decodeJwt } from "../../helpers/coe_jwt";
 import { getAccessToken } from "../../helpers/coe_token_storage";
 import {
@@ -51,6 +51,7 @@ import {
 import {
   RESERVATION_FILE_BY_ID,
   RESERVATION_FILE_STATUS as RESERVATION_FILE_STATUS_URL,
+  RESERVATION_FILE_SUPPLIER_CONFIRMATION_EMAIL,
   USER_BY_ID,
   USERS,
 } from "../../helpers/url_helper";
@@ -984,6 +985,7 @@ const emptyRow = {
     bookedBy: "",
     pax: "",
     confirmationNo: "",
+    ref: "",
     invoiceReceived: false,
   }),
   extras: () => ({
@@ -1907,6 +1909,7 @@ const ReservationFileDetails = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmDeleting, setConfirmDeleting] = useState(false);
   const [specialRatesUploads, setSpecialRatesUploads] = useState({});
+  const [supplierEmailSending, setSupplierEmailSending] = useState({});
   const specialRatesUploadRefs = useRef({});
   const [offerUploadFile, setOfferUploadFile] = useState(null);
   const [offerUploadSaving, setOfferUploadSaving] = useState(false);
@@ -2406,6 +2409,76 @@ const ReservationFileDetails = () => {
     );
   };
 
+  const getSupplierEmailKey = (section, row, index) =>
+    `${section}:${row?._sourceKey || index}`;
+
+  const handleSendSupplierEmail = async (section, row, index) => {
+    if (!id) return;
+
+    if (!hasSpecialRatesFile(row)) {
+      notifyError("Upload the Special Rates file before sending the email.");
+      return;
+    }
+
+    const key = getSupplierEmailKey(section, row, index);
+    if (supplierEmailSending[key]) return;
+
+    const saved = await handleSave({ validateSpecialRates: false });
+    if (!saved) return;
+
+    setSupplierEmailSending(current => ({ ...current, [key]: true }));
+    try {
+      const response = await post(RESERVATION_FILE_SUPPLIER_CONFIRMATION_EMAIL(id), {
+        section,
+        rowKey: row?._sourceKey || "",
+        rowIndex: index,
+      });
+      updateRowFields(section, index, {
+        supplierConfirmation: {
+          ...(row?.supplierConfirmation || {}),
+          token: response?.token || row?.supplierConfirmation?.token || "",
+          code: response?.code || "",
+          status: "sent",
+          sentTo: response?.sentTo || "",
+          sentOn: new Date().toISOString(),
+        },
+      });
+      notifySuccess(`Email sent to ${response?.sentTo || "supplier"}.`);
+    } catch (error) {
+      notifyError(error?.response?.data?.message || "Failed to send email.");
+    } finally {
+      setSupplierEmailSending(current => ({ ...current, [key]: false }));
+    }
+  };
+
+  const renderSupplierEmailControls = (section, row, index) => {
+    const key = getSupplierEmailKey(section, row, index);
+    const confirmation = row?.supplierConfirmation || {};
+    const status = confirmation?.status || "";
+
+    return (
+      <div className="d-flex align-items-center flex-wrap gap-2 mt-3">
+        <Button
+          color="info"
+          type="button"
+          onClick={() => handleSendSupplierEmail(section, row, index)}
+          disabled={!!supplierEmailSending[key] || !hasSpecialRatesFile(row)}
+        >
+          {supplierEmailSending[key] ? <Spinner size="sm" className="me-2" /> : null}
+          Send Email
+        </Button>
+        {status ? (
+          <Badge color={status === "submitted" ? "success" : "info"} pill>
+            {status === "submitted" ? "Submitted" : "Email Sent"}
+          </Badge>
+        ) : null}
+        {confirmation?.sentTo ? (
+          <span className="text-muted small">To: {confirmation.sentTo}</span>
+        ) : null}
+      </div>
+    );
+  };
+
   const handleGuideNameChange = (index, guideName) => {
     const firstLanguage = getFirstGuideLanguage(guideDirectory, guideName);
 
@@ -2520,7 +2593,7 @@ const ReservationFileDetails = () => {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (options = {}) => {
     if (!draft || !id) return false;
 
     const reservationDateError = validateReservationDates({
@@ -2532,14 +2605,16 @@ const ReservationFileDetails = () => {
       return false;
     }
 
-    const specialRatesError = validateSpecialRatesFilesForSave(draft);
-    if (specialRatesError) {
-      setSpecialRatesUploadState(specialRatesError.key, {
-        error: specialRatesError.message,
-      });
-      notifyError(specialRatesError.message);
-      focusSpecialRatesUpload(specialRatesError.key);
-      return false;
+    if (options?.validateSpecialRates !== false) {
+      const specialRatesError = validateSpecialRatesFilesForSave(draft);
+      if (specialRatesError) {
+        setSpecialRatesUploadState(specialRatesError.key, {
+          error: specialRatesError.message,
+        });
+        notifyError(specialRatesError.message);
+        focusSpecialRatesUpload(specialRatesError.key);
+        return false;
+      }
     }
 
     const roomingListResult = validateAndNormalizeRoomingList(draft?.roomingList);
@@ -3260,6 +3335,7 @@ const ReservationFileDetails = () => {
             <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Conf. No." value={row.confirmationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "confirmationNo", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Ref" value={row.ref} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "ref", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("hotels", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("hotels")}>Add Another Hotel</Button>
@@ -3290,6 +3366,7 @@ const ReservationFileDetails = () => {
             <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("transportation", index, "invoiceReceived", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Resv. No." value={row.reservationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("transportation", index, "reservationNo", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("transportation", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("transportation")}>Add Another Transportation</Button>
@@ -3389,8 +3466,10 @@ const ReservationFileDetails = () => {
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Booked By" value={row.bookedBy} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "bookedBy", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Pax" type="number" value={row.pax} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "pax", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Conf. No." value={row.confirmationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "confirmationNo", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Ref. No." value={row.ref} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "ref", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("restaurants", index, "invoiceReceived", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("restaurants", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("restaurants")}>Add Another Restaurant</Button>

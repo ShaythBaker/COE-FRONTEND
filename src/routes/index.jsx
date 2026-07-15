@@ -64,6 +64,7 @@ import QuotationPricingDetails from "../pages/QuotationPricing/Details";
 // Reservation Files
 import ReservationFilesList from "../pages/ReservationFiles/List";
 import ReservationFileDetails from "../pages/ReservationFiles/Details";
+import PublicSupplierConfirmation from "../pages/ReservationFiles/PublicSupplierConfirmation";
 import EvaluationsPage from "../pages/Evaluations";
 import TasksPage from "../pages/Tasks";
 import EvaluationReviewsPage from "../pages/Evaluations/Reviews";
@@ -235,6 +236,10 @@ const publicRoutes = [
   { path: "/register", component: <Register /> },
   { path: "/not-authorized", component: <NotAuthorized /> },
   { path: "/public/evaluations/:token", component: <PublicEvaluationPage /> },
+  {
+    path: "/public/reservation-confirmations/:token",
+    component: <PublicSupplierConfirmation />,
+  },
 ];
 
 export { authProtectedRoutes, publicRoutes };
