@@ -63,6 +63,48 @@ const emptyForm = {
   NUMBER_OF_PAX: "",
 };
 
+const parsePaxExpression = value => {
+  const expression = String(value || "").trim();
+  if (!expression) {
+    return { valid: false, message: "Required", groups: [] };
+  }
+
+  const groups = [];
+  const parts = expression.split(",").map(part => part.trim()).filter(Boolean);
+
+  if (!parts.length) {
+    return { valid: false, message: "Required", groups: [] };
+  }
+
+  for (const part of parts) {
+    const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    const numberMatch = part.match(/^\d+$/);
+
+    if (!rangeMatch && !numberMatch) {
+      return {
+        valid: false,
+        message: "Use numbers or ranges like 1, 2-3, 6-7",
+        groups: [],
+      };
+    }
+
+    const min = rangeMatch ? Number(rangeMatch[1]) : Number(part);
+    const max = rangeMatch ? Number(rangeMatch[2]) : Number(part);
+
+    if (min < 1 || max < 1 || min > max) {
+      return {
+        valid: false,
+        message: "Ranges must be positive and from must be <= to",
+        groups: [],
+      };
+    }
+
+    groups.push({ min, max, label: min === max ? String(min) : `${min}-${max}` });
+  }
+
+  return { valid: true, expression, groups };
+};
+
 const unwrapId = value => {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -379,10 +421,9 @@ const QuotationsList = () => {
       next.NUMBER_OF_NIGHTS = "Nights must be trip days minus 1";
     }
 
-    if (!String(form.NUMBER_OF_PAX || "").trim()) {
-      next.NUMBER_OF_PAX = "Required";
-    } else if (Number(form.NUMBER_OF_PAX) <= 0) {
-      next.NUMBER_OF_PAX = "Number of Pax must be greater than 0";
+    const paxValidation = parsePaxExpression(form.NUMBER_OF_PAX);
+    if (!paxValidation.valid) {
+      next.NUMBER_OF_PAX = paxValidation.message;
     }
 
     if (
@@ -447,7 +488,7 @@ const QuotationsList = () => {
             row?.NUMBER_OF_DAYS ?? row?.TRIP_DAYS ?? row?.DURATION_IN_DAYS
           )
       ),
-      NUMBER_OF_PAX: String(row?.NUMBER_OF_PAX ?? ""),
+      NUMBER_OF_PAX: String(row?.NUMBER_OF_PAX_TEXT || row?.NUMBER_OF_PAX || ""),
     });
     setTouched({});
     setEditOpen(true);
@@ -538,7 +579,7 @@ const QuotationsList = () => {
     DURATION_IN_DAYS: Number(form.QUOTATION_DURATION_DAYS),
     NUMBER_OF_DAYS: Number(form.NUMBER_OF_DAYS),
     NUMBER_OF_NIGHTS: Number(form.NUMBER_OF_NIGHTS),
-    NUMBER_OF_PAX: Number(form.NUMBER_OF_PAX),
+    NUMBER_OF_PAX: form.NUMBER_OF_PAX.trim(),
   });
 
   const handleCreate = e => {
@@ -985,12 +1026,11 @@ const QuotationsList = () => {
                 <div className="mb-0">
                   <Label className="form-label">Number of Pax</Label>
                   <Input
-                    type="number"
-                    min="1"
-                    step="1"
+                    type="text"
                     name="NUMBER_OF_PAX"
                     value={form.NUMBER_OF_PAX}
                     onChange={handleChange}
+                    placeholder="Example: 1, 2-3, 6-7"
                     invalid={!!(touched.NUMBER_OF_PAX && errors.NUMBER_OF_PAX)}
                   />
                   <FormFeedback>{errors.NUMBER_OF_PAX}</FormFeedback>
@@ -1173,12 +1213,11 @@ const QuotationsList = () => {
                 <div className="mb-0">
                   <Label className="form-label">Number of Pax</Label>
                   <Input
-                    type="number"
-                    min="1"
-                    step="1"
+                    type="text"
                     name="NUMBER_OF_PAX"
                     value={form.NUMBER_OF_PAX}
                     onChange={handleChange}
+                    placeholder="Example: 1, 2-3, 6-7"
                     invalid={!!(touched.NUMBER_OF_PAX && errors.NUMBER_OF_PAX)}
                   />
                   <FormFeedback>{errors.NUMBER_OF_PAX}</FormFeedback>

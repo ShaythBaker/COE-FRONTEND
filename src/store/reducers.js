@@ -33,6 +33,7 @@ import QuotationPricing from "./QuotationPricing/reducer";
 import ReservationFiles from "./ReservationFiles/reducer";
 
 import Guides from "./Guides/reducer";
+import Templates from "./Templates/reducer";
 
 
 const rootReducer = combineReducers({
@@ -44,6 +45,7 @@ const rootReducer = combineReducers({
   CompanyUsers,
   ListItems,
   Guides,
+  Templates,
   Hotels,
   Restaurants,
   TravelAgents,

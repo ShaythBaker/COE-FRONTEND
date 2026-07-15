@@ -18,6 +18,7 @@ import CompanyUsers from "../pages/Settings/CompanyUsers";
 import DynamicListsPage from "../pages/Settings/DynamicLists/index";
 import SystemInformation from "../pages/Settings/SystemInformation";
 import RoleProtected from "../components/Common/RoleProtected";
+import TemplatesPage from "../pages/Templates";
 
 // Guides
 import GuidesPage from "../pages/Guides/index.jsx";
@@ -98,6 +99,14 @@ const authProtectedRoutes = [
     component: (
       <RoleProtected allowedRoles={["COMPANY_ADMIN", "CONTRACTING"]}>
         <DynamicListsPage />
+      </RoleProtected>
+    ),
+  },
+  {
+    path: "/templates",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN", "CONTRACTING"]}>
+        <TemplatesPage />
       </RoleProtected>
     ),
   },

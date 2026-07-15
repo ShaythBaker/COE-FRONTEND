@@ -86,6 +86,12 @@ export const GUIDE_BY_ID = id => `/guides/${id}`;
 export const GUIDE_LANGUAGES = "/guides/languages";
 
 // =====================
+// Templates
+// =====================
+export const TEMPLATES = "/templates";
+export const TEMPLATE_BY_ID = id => `/templates/${id}`;
+
+// =====================
 // Tasks
 // =====================
 export const TASKS = "/tasks";
