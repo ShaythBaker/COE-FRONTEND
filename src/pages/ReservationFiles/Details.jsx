@@ -48,6 +48,7 @@ import {
   mergeReservationMetadata,
   withCurrentOption,
 } from "../../helpers/reservation_options";
+import { buildReservationSaveValidationPlan } from "../../helpers/reservation_save_validation";
 import {
   RESERVATION_FILE_BY_ID,
   RESERVATION_FILE_STATUS as RESERVATION_FILE_STATUS_URL,
@@ -1458,8 +1459,9 @@ const buildSpecialRatesFileMeta = attachment => ({
   uploadedOn: attachment?.CREATED_ON || new Date().toISOString(),
 });
 
-const validateReservationDates = ({ draft, quotation }) => {
-  if (!draft) return null;
+const validateReservationDates = ({ draft, quotation, sections }) => {
+  const validationSections = new Set(asArray(sections));
+  if (!draft || !validationSections.size) return null;
 
   const quotationStartDate = toDateInput(quotation?.QUOTATION_START_DATE);
   const quotationEndDate = toDateInput(quotation?.QUOTATION_END_DATE);
@@ -1474,109 +1476,126 @@ const validateReservationDates = ({ draft, quotation }) => {
     type: scheduleType,
   });
 
-  if (!quotationStartDate || !quotationEndDate) {
-    return "Quotation dates are missing or invalid.";
-  }
-
-  if (scheduleType === ARR_DEP_SCHEDULE_TYPES.SINGLE) {
-    const arrivalRows = arrDepRows.filter(
-      (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
-    );
-    const departureRows = arrDepRows.filter(
-      (row, index) => getArrDepLabel(row, index).toLowerCase() === "departure"
-    );
-
-    if (arrivalRows.length !== 1 || departureRows.length !== 1) {
-      return "Single Period must contain exactly one Arrival row and one Departure row.";
+  if (validationSections.has("arrDep")) {
+    if (!quotationStartDate || !quotationEndDate) {
+      return "Quotation dates are missing or invalid.";
     }
-  }
 
-  if (scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE && !arrDepRows.length) {
-    return "At least one Arrival / Departure row is required for Multiple Dates.";
-  }
+    if (scheduleType === ARR_DEP_SCHEDULE_TYPES.SINGLE) {
+      const arrivalRows = arrDepRows.filter(
+        (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
+      );
+      const departureRows = arrDepRows.filter(
+        (row, index) => getArrDepLabel(row, index).toLowerCase() === "departure"
+      );
 
-  if (scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) {
-    if (!toDateInput(schedule?.repeatFrom)) {
-      return "Weekly Repeat From date is required.";
+      if (arrivalRows.length !== 1 || departureRows.length !== 1) {
+        return "Single Period must contain exactly one Arrival row and one Departure row.";
+      }
     }
-    if (!toDateInput(schedule?.repeatUntil)) {
-      return "Weekly Repeat Until date is required.";
+
+    if (scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE && !arrDepRows.length) {
+      return "At least one Arrival / Departure row is required for Multiple Dates.";
     }
+
+    if (scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) {
+      if (!toDateInput(schedule?.repeatFrom)) {
+        return "Weekly Repeat From date is required.";
+      }
+      if (!toDateInput(schedule?.repeatUntil)) {
+        return "Weekly Repeat Until date is required.";
+      }
+      if (
+        dateToUtcMs(toDateInput(schedule.repeatFrom)) >
+        dateToUtcMs(toDateInput(schedule.repeatUntil))
+      ) {
+        return "Weekly Repeat From date must not be after Repeat Until date.";
+      }
+      if (!arrDepRows.length) {
+        return "At least one weekly Arrival / Departure row is required.";
+      }
+    }
+
+    for (const [index, row] of arrDepRows.entries()) {
+      const rowLabel = getArrDepLabel(row, index);
+      if (!["arrival", "departure"].includes(rowLabel.toLowerCase())) {
+        return `Type is required for Arrival / Departure row ${index + 1}.`;
+      }
+      if (!isNonNegativeIntegerValue(row?.pax)) {
+        return `Pax must be a valid non-negative integer in Arrival / Departure (${rowLabel}).`;
+      }
+      if (
+        scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE &&
+        !toDateInput(row?.date)
+      ) {
+        return `Date is required for Arrival / Departure (${rowLabel}).`;
+      }
+      if (
+        scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY &&
+        !String(row?.weekday || "").trim()
+      ) {
+        return `Weekday is required for weekly Arrival / Departure (${rowLabel}).`;
+      }
+    }
+
+    if (!arrivalDate) {
+      return scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE
+        ? "At least one valid movement date is required."
+        : "Arrival date is required.";
+    }
+
+    if (!departureDate) {
+      return scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY
+        ? "Weekly Repeat Until date is required."
+        : "Departure date is required.";
+    }
+
+    if (dateToUtcMs(departureDate) < dateToUtcMs(arrivalDate)) {
+      return "Departure date cannot be before arrival date.";
+    }
+
     if (
-      dateToUtcMs(toDateInput(schedule.repeatFrom)) >
-      dateToUtcMs(toDateInput(schedule.repeatUntil))
+      dateToUtcMs(arrivalDate) < dateToUtcMs(quotationStartDate) ||
+      dateToUtcMs(arrivalDate) > dateToUtcMs(quotationEndDate)
     ) {
-      return "Weekly Repeat From date must not be after Repeat Until date.";
+      return "Arrival date is not within the quotation period.";
     }
-    if (!arrDepRows.length) {
-      return "At least one weekly Arrival / Departure row is required.";
-    }
-  }
 
-  for (const [index, row] of arrDepRows.entries()) {
-    const rowLabel = getArrDepLabel(row, index);
-    if (!["arrival", "departure"].includes(rowLabel.toLowerCase())) {
-      return `Type is required for Arrival / Departure row ${index + 1}.`;
-    }
-    if (!isNonNegativeIntegerValue(row?.pax)) {
-      return `Pax must be a valid non-negative integer in Arrival / Departure (${rowLabel}).`;
-    }
     if (
-      scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE &&
-      !toDateInput(row?.date)
+      dateToUtcMs(departureDate) < dateToUtcMs(quotationStartDate) ||
+      dateToUtcMs(departureDate) > dateToUtcMs(quotationEndDate)
     ) {
-      return `Date is required for Arrival / Departure (${rowLabel}).`;
+      return "Departure date is not within the quotation period.";
     }
-    if (
-      scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY &&
-      !String(row?.weekday || "").trim()
-    ) {
-      return `Weekday is required for weekly Arrival / Departure (${rowLabel}).`;
+
+    const selectedTripDays = diffDaysInclusive(arrivalDate, departureDate);
+    if (quotationTripDays > 0 && selectedTripDays > quotationTripDays) {
+      return `Arrival and departure dates cannot exceed the quotation trip length (${quotationTripDays} day${quotationTripDays === 1 ? "" : "s"}).`;
     }
   }
 
-  if (!arrivalDate) {
-    return scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE
-      ? "At least one valid movement date is required."
-      : "Arrival date is required.";
-  }
-
-  if (!departureDate) {
-    return scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY
-      ? "Weekly Repeat Until date is required."
-      : "Departure date is required.";
-  }
-
-  if (dateToUtcMs(departureDate) < dateToUtcMs(arrivalDate)) {
-    return "Departure date cannot be before arrival date.";
-  }
-
-  if (
-    dateToUtcMs(arrivalDate) < dateToUtcMs(quotationStartDate) ||
-    dateToUtcMs(arrivalDate) > dateToUtcMs(quotationEndDate)
-  ) {
-    return "Arrival date is not within the quotation period.";
-  }
-
-  if (
-    dateToUtcMs(departureDate) < dateToUtcMs(quotationStartDate) ||
-    dateToUtcMs(departureDate) > dateToUtcMs(quotationEndDate)
-  ) {
-    return "Departure date is not within the quotation period.";
-  }
-
-  const selectedTripDays = diffDaysInclusive(arrivalDate, departureDate);
-  if (quotationTripDays > 0 && selectedTripDays > quotationTripDays) {
-    return `Arrival and departure dates cannot exceed the quotation trip length (${quotationTripDays} day${quotationTripDays === 1 ? "" : "s"}).`;
-  }
+  const hasUsableArrDepRange =
+    arrivalDate &&
+    departureDate &&
+    dateToUtcMs(departureDate) >= dateToUtcMs(arrivalDate) &&
+    (!quotationStartDate ||
+      dateToUtcMs(arrivalDate) >= dateToUtcMs(quotationStartDate)) &&
+    (!quotationEndDate ||
+      dateToUtcMs(departureDate) <= dateToUtcMs(quotationEndDate));
+  const validationStartDate = hasUsableArrDepRange
+    ? arrivalDate
+    : quotationStartDate;
+  const validationEndDate = hasUsableArrDepRange
+    ? departureDate
+    : quotationEndDate;
 
   const validateSingleDate = (sectionLabel, rowLabel, fieldLabel, value) => {
     const dateStr = toDateInput(value);
-    if (!dateStr) return null;
+    if (!dateStr || !validationStartDate || !validationEndDate) return null;
 
     if (
-      dateToUtcMs(dateStr) < dateToUtcMs(arrivalDate) ||
-      dateToUtcMs(dateStr) > dateToUtcMs(departureDate)
+      dateToUtcMs(dateStr) < dateToUtcMs(validationStartDate) ||
+      dateToUtcMs(dateStr) > dateToUtcMs(validationEndDate)
     ) {
       return `${fieldLabel} in ${sectionLabel} (${rowLabel}) is not within the arrival/departure period.`;
     }
@@ -1618,91 +1637,105 @@ const validateReservationDates = ({ draft, quotation }) => {
     return null;
   };
 
-  for (const [index, row] of asArray(draft?.arrDep).entries()) {
-    if (scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) continue;
-    const rowLabel = getArrDepLabel(row, index);
-    const rangeError = validateSingleDate("Arrival / Departure", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("arrDep")) {
+    for (const [index, row] of asArray(draft?.arrDep).entries()) {
+      if (scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) continue;
+      const rowLabel = getArrDepLabel(row, index);
+      const rangeError = validateSingleDate("Arrival / Departure", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.hotels).entries()) {
-    const rowLabel = row?.hotelName || `Hotel ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Hotels",
-      rowLabel,
-      "Check In",
-      row?.checkIn,
-      "Check Out",
-      row?.checkOut
-    );
-    if (rangeError) return rangeError;
-
-    const checkIn = toDateInput(row?.checkIn);
-    const checkOut = toDateInput(row?.checkOut);
-    const nights = String(row?.nights || "").trim();
-    if (checkIn && checkOut && nights) {
-      const actualNights = Math.max(
-        0,
-        Math.floor((dateToUtcMs(checkOut) - dateToUtcMs(checkIn)) / 86400000)
+  if (validationSections.has("hotels")) {
+    for (const [index, row] of asArray(draft?.hotels).entries()) {
+      const rowLabel = row?.hotelName || `Hotel ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Hotels",
+        rowLabel,
+        "Check In",
+        row?.checkIn,
+        "Check Out",
+        row?.checkOut
       );
-      if (toNumber(nights) !== actualNights) {
-        return `Nights in Hotels (${rowLabel}) must match the difference between Check In and Check Out.`;
+      if (rangeError) return rangeError;
+
+      const checkIn = toDateInput(row?.checkIn);
+      const checkOut = toDateInput(row?.checkOut);
+      const nights = String(row?.nights || "").trim();
+      if (checkIn && checkOut && nights) {
+        const actualNights = Math.max(
+          0,
+          Math.floor((dateToUtcMs(checkOut) - dateToUtcMs(checkIn)) / 86400000)
+        );
+        if (toNumber(nights) !== actualNights) {
+          return `Nights in Hotels (${rowLabel}) must match the difference between Check In and Check Out.`;
+        }
       }
     }
   }
 
-  for (const [index, row] of asArray(draft?.transportation).entries()) {
-    const rowLabel = row?.companyName || `Transportation ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Transportation",
-      rowLabel,
-      "From Date",
-      row?.fromDate,
-      "To Date",
-      row?.toDate
-    );
-    if (rangeError) return rangeError;
+  if (validationSections.has("transportation")) {
+    for (const [index, row] of asArray(draft?.transportation).entries()) {
+      const rowLabel = row?.companyName || `Transportation ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Transportation",
+        rowLabel,
+        "From Date",
+        row?.fromDate,
+        "To Date",
+        row?.toDate
+      );
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.guides).entries()) {
-    const rowLabel = row?.guideName || `Guide ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Guides",
-      rowLabel,
-      "From Date",
-      row?.fromDate,
-      "To Date",
-      row?.toDate
-    );
-    if (rangeError) return rangeError;
+  if (validationSections.has("guides")) {
+    for (const [index, row] of asArray(draft?.guides).entries()) {
+      const rowLabel = row?.guideName || `Guide ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Guides",
+        rowLabel,
+        "From Date",
+        row?.fromDate,
+        "To Date",
+        row?.toDate
+      );
+      if (rangeError) return rangeError;
 
-    const fromDate = toDateInput(row?.fromDate);
-    const toDate = toDateInput(row?.toDate);
-    const days = String(row?.days || "").trim();
-    if (fromDate && toDate && days) {
-      const actualDays = diffDaysInclusive(fromDate, toDate);
-      if (actualDays !== null && toNumber(days) !== actualDays) {
-        return `Days in Guides (${rowLabel}) must match the number of days between From Date and To Date.`;
+      const fromDate = toDateInput(row?.fromDate);
+      const toDate = toDateInput(row?.toDate);
+      const days = String(row?.days || "").trim();
+      if (fromDate && toDate && days) {
+        const actualDays = diffDaysInclusive(fromDate, toDate);
+        if (actualDays !== null && toNumber(days) !== actualDays) {
+          return `Days in Guides (${rowLabel}) must match the number of days between From Date and To Date.`;
+        }
       }
     }
   }
 
-  for (const [index, row] of asArray(draft?.entrance).entries()) {
-    const rowLabel = row?.entrance || `Entrance ${index + 1}`;
-    const rangeError = validateSingleDate("Entrance", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("entrance")) {
+    for (const [index, row] of asArray(draft?.entrance).entries()) {
+      const rowLabel = row?.entrance || `Entrance ${index + 1}`;
+      const rangeError = validateSingleDate("Entrance", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.restaurants).entries()) {
-    const rowLabel = row?.restaurantName || row?.meal || `Restaurant ${index + 1}`;
-    const rangeError = validateSingleDate("Restaurants", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("restaurants")) {
+    for (const [index, row] of asArray(draft?.restaurants).entries()) {
+      const rowLabel = row?.restaurantName || row?.meal || `Restaurant ${index + 1}`;
+      const rangeError = validateSingleDate("Restaurants", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.extras).entries()) {
-    const rowLabel = row?.serviceName || `Extra ${index + 1}`;
-    const rangeError = validateSingleDate("Extras", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("extras")) {
+    for (const [index, row] of asArray(draft?.extras).entries()) {
+      const rowLabel = row?.serviceName || `Extra ${index + 1}`;
+      const rangeError = validateSingleDate("Extras", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
   return null;
@@ -2284,8 +2317,11 @@ const ReservationFileDetails = () => {
     }
   };
 
-  const validateSpecialRatesFilesForSave = reservationDraft => {
-    for (const section of SPECIAL_RATES_SECTIONS) {
+  const validateSpecialRatesFilesForSave = (
+    reservationDraft,
+    sections = SPECIAL_RATES_SECTIONS
+  ) => {
+    for (const section of sections) {
       for (const [index, row] of asArray(reservationDraft?.[section]).entries()) {
         if (!hasSpecialRatesFile(row)) {
           const key = getSpecialRatesRowKey(section, row, index);
@@ -2596,17 +2632,30 @@ const ReservationFileDetails = () => {
   const handleSave = async (options = {}) => {
     if (!draft || !id) return false;
 
+    const validationPlan = buildReservationSaveValidationPlan({
+      activeSection: options?.activeSection || activeSection,
+      activeClientsTab: options?.activeClientsTab || activeClientsTab,
+      fullReservation: options?.fullReservation === true,
+    });
+
     const reservationDateError = validateReservationDates({
       draft,
       quotation,
+      sections: validationPlan.dateSections,
     });
     if (reservationDateError) {
       notifyError(reservationDateError);
       return false;
     }
 
-    if (options?.validateSpecialRates !== false) {
-      const specialRatesError = validateSpecialRatesFilesForSave(draft);
+    if (
+      options?.validateSpecialRates !== false &&
+      validationPlan.specialRatesSections.length
+    ) {
+      const specialRatesError = validateSpecialRatesFilesForSave(
+        draft,
+        validationPlan.specialRatesSections
+      );
       if (specialRatesError) {
         setSpecialRatesUploadState(specialRatesError.key, {
           error: specialRatesError.message,
@@ -2617,15 +2666,19 @@ const ReservationFileDetails = () => {
       }
     }
 
-    const roomingListResult = validateAndNormalizeRoomingList(draft?.roomingList);
-    if (roomingListResult.error) {
-      notifyError(roomingListResult.error);
-      return false;
+    let roomingList = draft?.roomingList;
+    if (validationPlan.validateRoomingList) {
+      const roomingListResult = validateAndNormalizeRoomingList(roomingList);
+      if (roomingListResult.error) {
+        notifyError(roomingListResult.error);
+        return false;
+      }
+      roomingList = roomingListResult.rows;
     }
 
     const draftForSave = {
       ...draft,
-      roomingList: roomingListResult.rows,
+      roomingList,
     };
 
     setSaving(true);
@@ -2642,6 +2695,7 @@ const ReservationFileDetails = () => {
 
       await patch(RESERVATION_FILE_BY_ID(id), {
         RESERVATION_DATA: nextDraft,
+        VALIDATION_SCOPE: validationPlan.validationScope,
       });
       setDraft(nextDraft);
       notifySuccess(
@@ -2685,11 +2739,17 @@ const ReservationFileDetails = () => {
   };
 
   const handleSaveManifest = async () => {
-    await handleSave();
+    await handleSave({
+      activeSection: "Clients",
+      activeClientsTab: CLIENTS_INTERNAL_TABS.MANIFEST,
+    });
   };
 
   const handleSaveRoomingList = async () => {
-    await handleSave();
+    await handleSave({
+      activeSection: "Clients",
+      activeClientsTab: CLIENTS_INTERNAL_TABS.ROOMING_LIST,
+    });
   };
 
   const handleApplyAccommodationOption = async () => {
@@ -4350,7 +4410,11 @@ const ReservationFileDetails = () => {
                   Approve
                 </Button>
               ) : null}
-              <Button color="success" onClick={handleSave} disabled={saving || loading || !draft}>
+              <Button
+                color="success"
+                onClick={() => handleSave({ fullReservation: true })}
+                disabled={saving || loading || !draft}
+              >
                 {saving ? <Spinner size="sm" className="me-2" /> : null}
                 Save Full Reservation
               </Button>

@@ -2,7 +2,10 @@ import { jsPDF } from "jspdf";
 import { get } from "./api_helper";
 import { getAttachmentBlob } from "./attachments_helper";
 import {
+  buildPdfOptionColumns,
   buildTravcoPackageTitle,
+  chunkPdfOptionColumns,
+  getPdfOptionsForColumn,
   getTravcoPageDecoration,
   getUniquePdfImages,
   renderQuotationPdfSections,
@@ -1404,13 +1407,6 @@ const getQuotationTitle = quotationInfo =>
     quotationInfo.nationalityName
   )} * Code ${safeText(quotationInfo.referenceNumber)}`;
 
-const getOptionLabel = option => {
-  const name = safeText(option?.optionName || option?.name || "Option");
-  const stars = Number(option?.optionStars || option?.stars || 0);
-  if (stars > 0 && !name.includes("*")) return `${stars}*`;
-  return name;
-};
-
 const normalizePriceMatrixLabel = value =>
   safeText(value)
     .toLowerCase()
@@ -1443,13 +1439,8 @@ const getPaxSortValue = value => {
   return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
 };
 
-const getOptionLabels = options => {
-  const labels = asArray(options)
-    .map(getOptionLabel)
-    .filter(label => label && label !== "-");
-
-  return Array.from(new Set(labels));
-};
+const getOptionLabels = options =>
+  buildPdfOptionColumns(options).map(column => column.label);
 
 const drawLogo = (
   doc,
@@ -2460,20 +2451,12 @@ const validateTravcoPdfData = ({
     if (!getDayStops(day).length) errors.push(`${dayLabel} route locations are missing.`);
   });
 
-  const hotelRowsByOptionLabel = new Map();
-  asArray(approvedFinalOptions).forEach(option => {
-    const label = getOptionLabel(option);
-    if (!label || label === "-") return;
-
-    const hasRows = asArray(option?.hotelRows).some(
-      row => Number(row?.nights) > 0
+  buildPdfOptionColumns(approvedFinalOptions).forEach(column => {
+    const hasRows = getPdfOptionsForColumn(approvedFinalOptions, column).some(
+      option => asArray(option?.hotelRows).some(row => Number(row?.nights) > 0)
     );
-    hotelRowsByOptionLabel.set(label, hotelRowsByOptionLabel.get(label) || hasRows);
-  });
-
-  hotelRowsByOptionLabel.forEach((hasRows, label) => {
     if (!hasRows) {
-      errors.push(`Selected hotels are missing for ${label}.`);
+      errors.push(`Selected hotels are missing for ${column.label}.`);
     }
   });
 
@@ -2548,18 +2531,15 @@ const addSuggestedHotelsPage = (
   const widths = [58, 27, 17, 43, 14, 28];
   const board = String(finalPricing?.BOARD_BASIS || "HB").toUpperCase();
 
-  const seenOptionLabels = new Set();
-
-  asArray(approvedFinalOptions).forEach(option => {
-    const optionLabel = getOptionLabel(option);
-    if (seenOptionLabels.has(optionLabel)) return;
-
-    const rows = asArray(option.hotelRows).filter(row => Number(row?.nights) > 0);
+  buildPdfOptionColumns(approvedFinalOptions).forEach(column => {
+    const option = getPdfOptionsForColumn(approvedFinalOptions, column).find(item =>
+      asArray(item?.hotelRows).some(row => Number(row?.nights) > 0)
+    );
+    const rows = asArray(option?.hotelRows).filter(row => Number(row?.nights) > 0);
     if (!rows.length) return;
 
-    seenOptionLabels.add(optionLabel);
     y = addPageIfNeeded(doc, y, 22, pageBreak);
-    const title = `${optionLabel} Property`;
+    const title = `${column.label} Property`;
     y = addSmallTable(
       doc,
       [
@@ -2623,8 +2603,8 @@ const getCoachLabel = (daysRoutes, paxLabel = "") => {
   return findCoachLabel(daysRoutes, paxLabel) || "-";
 };
 
-const findPriceMatrixOption = (options, optionLabel, paxLabel) => {
-  const sameOption = asArray(options).filter(option => getOptionLabel(option) === optionLabel);
+const findPriceMatrixOption = (options, optionColumn, paxLabel) => {
+  const sameOption = getPdfOptionsForColumn(options, optionColumn);
   const wantedPax = normalizePriceMatrixLabel(paxLabel);
   return (
     sameOption.find(option => normalizePriceMatrixLabel(getOptionPaxLabel(option)) === wantedPax) ||
@@ -2803,96 +2783,108 @@ const addPackagePricePage = (
   addTravcoPage(doc, quotationInfo, systemInformation, images);
 
   const paxRows = getPriceMatrixPaxRows(quotationInfo, approvedFinalOptions);
-  const optionLabels = getOptionLabels(approvedFinalOptions).slice(0, 4);
+  const optionBatches = chunkPdfOptionColumns(
+    buildPdfOptionColumns(approvedFinalOptions),
+    4
+  );
   const tableX = 18;
   const tableW = 174;
   const descriptionW = 38;
   const coachW = 31;
   const guideW = 25;
-  const optionW =
-    optionLabels.length > 0
-      ? (tableW - descriptionW - coachW - guideW) / optionLabels.length
-      : 0;
-  const widths = [
-    descriptionW,
-    ...optionLabels.map(() => optionW),
-    coachW,
-    guideW,
-  ];
-  const headers = ["Number of guests", ...optionLabels, "coach", "Guide"];
-
-  const rateRows = [
-    headers,
-    ...paxRows.map(paxLabel => [
-      paxLabel,
-      ...optionLabels.map((_, optionIndex) => {
-        const option = findPriceMatrixOption(
-          approvedFinalOptions,
-          optionLabels[optionIndex],
-          paxLabel
-        );
-        if (!option) return "-";
-        return Number.isFinite(Number(option.finalPerPerson))
-          ? `USD ${Number(option.finalPerPerson).toFixed(2)}`
-          : "-";
-      }),
-      getCoachLabel(daysRoutes, paxLabel),
-      getPackageGuideLabel(daysRoutes, paxLabel),
-    ]),
-  ];
-  const supplementRows = buildPackageSupplementRows(
-    approvedFinalOptions,
-    optionLabels
-  );
-
-  const drawPageChrome = () => {
-    drawPackagePriceHeading(doc, quotationInfo);
-    return drawPackageIntroRows(
-      doc,
-      tableX,
-      88,
-      tableW,
-      approvedFinalOptions
-    );
-  };
-
-  let y = drawPageChrome();
-  const pageBreak = {
-    newY: 106,
-    onNewPage: () => {
-      setColor(doc, GRAY.white, true);
-      doc.rect(0, 0, PAGE.width, PAGE.height, "F");
-      drawTravcoHeader(doc, quotationInfo, systemInformation, images);
-      drawPageChrome();
-    },
-  };
-
-  y = drawPackageRateTable(
-    doc,
-    tableX,
-    y,
-    widths,
-    rateRows,
-    supplementRows,
-    pageBreak
-  );
-
   const seasonRows = getPackageSeasonRows(approvedFinalOptions);
-  if (seasonRows.length) {
-    addSmallTable(
-      doc,
-      [["Seasons", "From", "To"], ...seasonRows],
-      tableX,
-      y + 2,
-      [58, 58, 58],
-      {
-        size: 5.3,
-        minHeight: 6,
-        headerRows: [0],
-        pageBreak,
-      }
+
+  optionBatches.forEach((optionColumns, batchIndex) => {
+    if (batchIndex > 0) {
+      addTravcoPage(doc, quotationInfo, systemInformation, images);
+    }
+
+    const optionW =
+      (tableW - descriptionW - coachW - guideW) / optionColumns.length;
+    const widths = [
+      descriptionW,
+      ...optionColumns.map(() => optionW),
+      coachW,
+      guideW,
+    ];
+    const headers = [
+      "Number of guests",
+      ...optionColumns.map(column => column.label),
+      "coach",
+      "Guide",
+    ];
+    const rateRows = [
+      headers,
+      ...paxRows.map(paxLabel => [
+        paxLabel,
+        ...optionColumns.map(optionColumn => {
+          const option = findPriceMatrixOption(
+            approvedFinalOptions,
+            optionColumn,
+            paxLabel
+          );
+          if (!option) return "-";
+          return Number.isFinite(Number(option.finalPerPerson))
+            ? `USD ${Number(option.finalPerPerson).toFixed(2)}`
+            : "-";
+        }),
+        getCoachLabel(daysRoutes, paxLabel),
+        getPackageGuideLabel(daysRoutes, paxLabel),
+      ]),
+    ];
+    const supplementRows = buildPackageSupplementRows(
+      approvedFinalOptions,
+      optionColumns
     );
-  }
+
+    const drawPageChrome = () => {
+      drawPackagePriceHeading(doc, quotationInfo);
+      return drawPackageIntroRows(
+        doc,
+        tableX,
+        88,
+        tableW,
+        approvedFinalOptions
+      );
+    };
+
+    let y = drawPageChrome();
+    const pageBreak = {
+      newY: 106,
+      onNewPage: () => {
+        setColor(doc, GRAY.white, true);
+        doc.rect(0, 0, PAGE.width, PAGE.height, "F");
+        drawTravcoHeader(doc, quotationInfo, systemInformation, images);
+        drawPageChrome();
+      },
+    };
+
+    y = drawPackageRateTable(
+      doc,
+      tableX,
+      y,
+      widths,
+      rateRows,
+      supplementRows,
+      pageBreak
+    );
+
+    if (batchIndex === optionBatches.length - 1 && seasonRows.length) {
+      addSmallTable(
+        doc,
+        [["Seasons", "From", "To"], ...seasonRows],
+        tableX,
+        y + 2,
+        [58, 58, 58],
+        {
+          size: 5.3,
+          minHeight: 6,
+          headerRows: [0],
+          pageBreak,
+        }
+      );
+    }
+  });
 };
 
 const addBankAccountPage = (

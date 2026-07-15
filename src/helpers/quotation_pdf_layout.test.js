@@ -95,3 +95,53 @@ test("the final thank-you message is centered near the bottom of the page", () =
     }
   );
 });
+
+test("PDF option columns keep separate quotation options with the same stars", () => {
+  const columns = pdfLayout.buildPdfOptionColumns?.([
+    {
+      optionBaseKey: "option-a",
+      optionName: "Option 1",
+      optionStars: "5*",
+      paxLabel: "1 Pax",
+    },
+    {
+      optionBaseKey: "option-a",
+      optionName: "Option 1",
+      optionStars: "5*",
+      paxLabel: "2 Pax",
+    },
+    {
+      optionBaseKey: "option-b",
+      optionName: "Option 2",
+      optionStars: "5*",
+      paxLabel: "1 Pax",
+    },
+  ]);
+
+  assert.deepEqual(columns, [
+    {
+      key: "base:option-a",
+      label: "Option 1 - 5*",
+      optionName: "Option 1",
+      stars: "5*",
+    },
+    {
+      key: "base:option-b",
+      label: "Option 2 - 5*",
+      optionName: "Option 2",
+      stars: "5*",
+    },
+  ]);
+});
+
+test("PDF option columns are split across pages without dropping options", () => {
+  const columns = Array.from({ length: 6 }, (_, index) => ({
+    key: `option-${index + 1}`,
+    label: `Option ${index + 1}`,
+  }));
+
+  assert.deepEqual(pdfLayout.chunkPdfOptionColumns?.(columns, 4), [
+    columns.slice(0, 4),
+    columns.slice(4),
+  ]);
+});

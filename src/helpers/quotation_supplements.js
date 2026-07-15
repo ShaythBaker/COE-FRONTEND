@@ -1,3 +1,5 @@
+import { getPdfOptionsForColumn } from "./quotation_pdf_layout.js";
+
 const asArray = value => (Array.isArray(value) ? value : []);
 
 const toAmount = value => {
@@ -71,6 +73,11 @@ const getOptionLabels = option => {
 };
 
 const findOptionForLabel = (options, optionLabel) => {
+  if (optionLabel && typeof optionLabel === "object" && optionLabel.key) {
+    const matching = getPdfOptionsForColumn(options, optionLabel);
+    return matching.find(option => option?.supplementTotals) || matching[0] || null;
+  }
+
   const wanted = String(optionLabel || "").trim().toLowerCase();
   const matching = asArray(options).filter(option => getOptionLabels(option).includes(wanted));
   return matching.find(option => option?.supplementTotals) || matching[0] || null;

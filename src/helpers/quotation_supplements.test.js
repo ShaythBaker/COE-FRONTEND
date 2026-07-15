@@ -114,3 +114,35 @@ test("guide column shows a dash when the pax bracket has no selected guide", () 
   assert.equal(getPackageGuideLabel(days, "1 Pax"), "-");
   assert.equal(getPackageGuideLabel(days, "6-7 Pax"), "Local Guide");
 });
+
+test("supplements stay attached to separate options that share one star rating", () => {
+  const rows = buildPackageSupplementRows(
+    [
+      {
+        optionBaseKey: "option-a",
+        optionName: "Option 1",
+        optionStars: "5*",
+        supplementTotals: { ss: 100, hb: 50, fb: 75 },
+      },
+      {
+        optionBaseKey: "option-b",
+        optionName: "Option 2",
+        optionStars: "5*",
+        supplementTotals: { ss: 200, hb: 80, fb: 120 },
+      },
+    ],
+    [
+      { key: "base:option-a", label: "Option 1 - 5*" },
+      { key: "base:option-b", label: "Option 2 - 5*" },
+    ]
+  );
+
+  assert.deepEqual(
+    rows.map(row => row.prices),
+    [
+      ["USD 100.00", "USD 200.00"],
+      ["USD 50.00", "USD 80.00"],
+      ["USD 75.00", "USD 120.00"],
+    ]
+  );
+});
