@@ -204,6 +204,7 @@ const TransportationSizes = () => {
 
     const payload = editingItem
       ? {
+          TRANSPORTATION_TYPE: formValues.TRANSPORTATION_TYPE.trim().toUpperCase(),
           MINIMUM_CAPACITY: Number(formValues.MINIMUM_CAPACITY),
           MAXIMUM_CAPACITY: Number(formValues.MAXIMUM_CAPACITY),
           ACTIVE_STATUS: !!formValues.ACTIVE_STATUS,
@@ -377,7 +378,6 @@ const TransportationSizes = () => {
                   value={formValues.TRANSPORTATION_TYPE}
                   onChange={handleInputChange}
                   invalid={!!formErrors.TRANSPORTATION_TYPE}
-                  disabled={!!editingItem}
                   placeholder="Example: CAR"
                 />
                 {formErrors.TRANSPORTATION_TYPE ? (

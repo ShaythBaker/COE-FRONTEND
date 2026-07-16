@@ -33,6 +33,8 @@ import { notifyError } from "../../../helpers/notify";
 
 const emptyForm = {
   TRANSPORTATION_TYPE_NAME: "",
+  DISTANCE_FROM: "",
+  DISTANCE_TO: "",
   TRANSPORTATION_TYPE_STATUS: true,
   ACTIVE_STATUS: true,
 };
@@ -106,8 +108,20 @@ const TransportationTypes = () => {
     }
 
     setEditingItem(item);
+    const fallbackDistance =
+      item?.DISTANCE === null || item?.DISTANCE === undefined
+        ? ""
+        : String(item.DISTANCE);
     setFormValues({
       TRANSPORTATION_TYPE_NAME: item?.TRANSPORTATION_TYPE_NAME || "",
+      DISTANCE_FROM:
+        item?.DISTANCE_FROM === null || item?.DISTANCE_FROM === undefined
+          ? fallbackDistance
+          : String(item.DISTANCE_FROM),
+      DISTANCE_TO:
+        item?.DISTANCE_TO === null || item?.DISTANCE_TO === undefined
+          ? fallbackDistance
+          : String(item.DISTANCE_TO),
       TRANSPORTATION_TYPE_STATUS:
         typeof item?.TRANSPORTATION_TYPE_STATUS === "boolean"
           ? item.TRANSPORTATION_TYPE_STATUS
@@ -141,6 +155,31 @@ const TransportationTypes = () => {
         "Transportation type name is required.";
     }
 
+    if (formValues.DISTANCE_FROM !== "") {
+      const distanceFromValue = Number(formValues.DISTANCE_FROM);
+      if (Number.isNaN(distanceFromValue) || distanceFromValue < 0) {
+        nextErrors.DISTANCE_FROM = "Distance from must be a non-negative number.";
+      }
+    }
+
+    if (formValues.DISTANCE_TO !== "") {
+      const distanceToValue = Number(formValues.DISTANCE_TO);
+      if (Number.isNaN(distanceToValue) || distanceToValue < 0) {
+        nextErrors.DISTANCE_TO = "Distance to must be a non-negative number.";
+      }
+    }
+
+    if (
+      formValues.DISTANCE_FROM !== "" &&
+      formValues.DISTANCE_TO !== "" &&
+      !Number.isNaN(Number(formValues.DISTANCE_FROM)) &&
+      !Number.isNaN(Number(formValues.DISTANCE_TO)) &&
+      Number(formValues.DISTANCE_FROM) > Number(formValues.DISTANCE_TO)
+    ) {
+      nextErrors.DISTANCE_TO =
+        "Distance to must be greater than or equal to distance from.";
+    }
+
     setFormErrors(nextErrors);
 
     if (Object.keys(nextErrors).length > 0) {
@@ -165,6 +204,14 @@ const TransportationTypes = () => {
       TRANSPORTATION_TYPE_NAME: formValues.TRANSPORTATION_TYPE_NAME
         .trim()
         .toUpperCase(),
+      DISTANCE_FROM:
+        formValues.DISTANCE_FROM === ""
+          ? null
+          : Number(formValues.DISTANCE_FROM),
+      DISTANCE_TO:
+        formValues.DISTANCE_TO === ""
+          ? null
+          : Number(formValues.DISTANCE_TO),
       TRANSPORTATION_TYPE_STATUS: !!formValues.TRANSPORTATION_TYPE_STATUS,
     };
 
@@ -214,7 +261,7 @@ const TransportationTypes = () => {
                 <div>
                   <h4 className="card-title mb-1">Transportation Types</h4>
                   <p className="text-muted mb-0">
-                    Manage transportation type names, enabled status, and active status.
+                    Manage transportation type names, distance, enabled status, and active status.
                   </p>
                 </div>
 
@@ -267,6 +314,7 @@ const TransportationTypes = () => {
                       <tr>
                         <th style={{ width: "80px" }}>#</th>
                         <th>Transportation Type Name</th>
+                        <th>Distance</th>
                         <th>Type Status</th>
                         <th>Record Status</th>
                         <th className="text-end">Actions</th>
@@ -275,7 +323,7 @@ const TransportationTypes = () => {
                     <tbody>
                       {loading ? (
                         <tr>
-                          <td colSpan="5" className="text-center py-4">
+                          <td colSpan="6" className="text-center py-4">
                             <Spinner size="sm" className="me-2" />
                             Loading transportation types...
                           </td>
@@ -285,6 +333,17 @@ const TransportationTypes = () => {
                           <tr key={item?._id || index}>
                             <td>{index + 1}</td>
                             <td>{item?.TRANSPORTATION_TYPE_NAME || "-"}</td>
+                            <td>
+                              {item?.DISTANCE_FROM !== null &&
+                              item?.DISTANCE_FROM !== undefined &&
+                              item?.DISTANCE_TO !== null &&
+                              item?.DISTANCE_TO !== undefined
+                                ? `${item.DISTANCE_FROM} - ${item.DISTANCE_TO}`
+                                : item?.DISTANCE !== null &&
+                                    item?.DISTANCE !== undefined
+                                  ? `${item.DISTANCE} - ${item.DISTANCE}`
+                                  : "-"}
+                            </td>
                             <td>
                               {item?.TRANSPORTATION_TYPE_STATUS ? (
                                 <span className="badge bg-success">Enabled</span>
@@ -325,7 +384,7 @@ const TransportationTypes = () => {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="5" className="text-center py-4">
+                          <td colSpan="6" className="text-center py-4">
                             No transportation types found.
                           </td>
                         </tr>
@@ -358,6 +417,46 @@ const TransportationTypes = () => {
                 {formErrors.TRANSPORTATION_TYPE_NAME ? (
                   <FormFeedback>{formErrors.TRANSPORTATION_TYPE_NAME}</FormFeedback>
                 ) : null}
+              </div>
+
+              <div className="mb-3">
+                <Label className="form-label d-block">
+                  Distance
+                </Label>
+                <Row className="g-2">
+                  <Col md="6">
+                    <Input
+                      id="DISTANCE_FROM"
+                      name="DISTANCE_FROM"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={formValues.DISTANCE_FROM}
+                      onChange={handleInputChange}
+                      invalid={!!formErrors.DISTANCE_FROM}
+                      placeholder="From"
+                    />
+                    {formErrors.DISTANCE_FROM ? (
+                      <FormFeedback>{formErrors.DISTANCE_FROM}</FormFeedback>
+                    ) : null}
+                  </Col>
+                  <Col md="6">
+                    <Input
+                      id="DISTANCE_TO"
+                      name="DISTANCE_TO"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={formValues.DISTANCE_TO}
+                      onChange={handleInputChange}
+                      invalid={!!formErrors.DISTANCE_TO}
+                      placeholder="To"
+                    />
+                    {formErrors.DISTANCE_TO ? (
+                      <FormFeedback>{formErrors.DISTANCE_TO}</FormFeedback>
+                    ) : null}
+                  </Col>
+                </Row>
               </div>
 
               <div className="mb-3">

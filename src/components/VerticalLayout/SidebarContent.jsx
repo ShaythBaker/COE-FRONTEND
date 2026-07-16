@@ -26,6 +26,10 @@ const SidebarContent = (props) => {
     "COMPANY_ADMIN",
     "CONTRACTING",
   ]);
+  const canManageTemplates = hasAnyRole(roles, [
+    "COMPANY_ADMIN",
+    "CONTRACTING",
+  ]);
   const canManageTransportationSizes = hasAnyRole(roles, [
     "COMPANY_ADMIN",
     "CONTRACTING",
@@ -289,6 +293,15 @@ const SidebarContent = (props) => {
                 >
                   <i className="bx bx-list-ul" />
                   <span>Dynamic Lists</span>
+                </Link>
+              </li>
+            ) : null}
+
+            {canManageTemplates ? (
+              <li className={isActive("/templates") ? "mm-active" : ""}>
+                <Link to="/templates" className="waves-effect">
+                  <i className="bx bx-layout" />
+                  <span>Templates</span>
                 </Link>
               </li>
             ) : null}

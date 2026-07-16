@@ -19,6 +19,7 @@ import CompanyUserProfile from "../pages/Settings/CompanyUsers/Profile";
 import DynamicListsPage from "../pages/Settings/DynamicLists/index";
 import SystemInformation from "../pages/Settings/SystemInformation";
 import RoleProtected from "../components/Common/RoleProtected";
+import TemplatesPage from "../pages/Templates";
 
 // Guides
 import GuidesPage from "../pages/Guides/index.jsx";
@@ -64,6 +65,7 @@ import QuotationPricingDetails from "../pages/QuotationPricing/Details";
 // Reservation Files
 import ReservationFilesList from "../pages/ReservationFiles/List";
 import ReservationFileDetails from "../pages/ReservationFiles/Details";
+import PublicSupplierConfirmation from "../pages/ReservationFiles/PublicSupplierConfirmation";
 import EvaluationsPage from "../pages/Evaluations";
 import TasksPage from "../pages/Tasks";
 import EvaluationReviewsPage from "../pages/Evaluations/Reviews";
@@ -108,6 +110,14 @@ const authProtectedRoutes = [
     component: (
       <RoleProtected allowedRoles={["COMPANY_ADMIN", "CONTRACTING"]}>
         <DynamicListsPage />
+      </RoleProtected>
+    ),
+  },
+  {
+    path: "/templates",
+    component: (
+      <RoleProtected allowedRoles={["COMPANY_ADMIN", "CONTRACTING"]}>
+        <TemplatesPage />
       </RoleProtected>
     ),
   },
@@ -235,6 +245,10 @@ const publicRoutes = [
   { path: "/register", component: <Register /> },
   { path: "/not-authorized", component: <NotAuthorized /> },
   { path: "/public/evaluations/:token", component: <PublicEvaluationPage /> },
+  {
+    path: "/public/reservation-confirmations/:token",
+    component: <PublicSupplierConfirmation />,
+  },
 ];
 
 export { authProtectedRoutes, publicRoutes };

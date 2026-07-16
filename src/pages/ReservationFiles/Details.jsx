@@ -23,7 +23,7 @@ import {
   Table,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
-import { get, patch } from "../../helpers/api_helper";
+import { get, patch, post } from "../../helpers/api_helper";
 import { decodeJwt } from "../../helpers/coe_jwt";
 import { getAccessToken } from "../../helpers/coe_token_storage";
 import {
@@ -48,9 +48,11 @@ import {
   mergeReservationMetadata,
   withCurrentOption,
 } from "../../helpers/reservation_options";
+import { buildReservationSaveValidationPlan } from "../../helpers/reservation_save_validation";
 import {
   RESERVATION_FILE_BY_ID,
   RESERVATION_FILE_STATUS as RESERVATION_FILE_STATUS_URL,
+  RESERVATION_FILE_SUPPLIER_CONFIRMATION_EMAIL,
   USER_BY_ID,
   USERS,
 } from "../../helpers/url_helper";
@@ -1089,6 +1091,7 @@ const emptyRow = {
     bookedBy: "",
     pax: "",
     confirmationNo: "",
+    ref: "",
     invoiceReceived: false,
   }),
   extras: () => ({
@@ -1229,6 +1232,12 @@ const SectionHeader = ({ title, fileReference, children }) => (
     </h4>
     {children ? <div className="d-flex gap-2">{children}</div> : null}
   </div>
+);
+
+const SaveChangesButton = ({ onClick, disabled }) => (
+  <Button color="primary" onClick={onClick} disabled={disabled}>
+    Save Changes
+  </Button>
 );
 
 const RowPanel = ({ row, children, onRemove, removeLabel }) => (
@@ -1555,8 +1564,14 @@ const buildSpecialRatesFileMeta = attachment => ({
   uploadedOn: attachment?.CREATED_ON || new Date().toISOString(),
 });
 
-const validateReservationDates = ({ draft, quotation, selectedScheduleTypes }) => {
-  if (!draft) return null;
+const validateReservationDates = ({
+  draft,
+  quotation,
+  selectedScheduleTypes,
+  sections,
+}) => {
+  const validationSections = new Set(asArray(sections));
+  if (!draft || !validationSections.size) return null;
 
   const quotationStartDate = toDateInput(quotation?.QUOTATION_START_DATE);
   const quotationEndDate = toDateInput(quotation?.QUOTATION_END_DATE);
@@ -1582,113 +1597,133 @@ const validateReservationDates = ({ draft, quotation, selectedScheduleTypes }) =
   const arrivalDate = arrivalDates[0] || "";
   const departureDate = departureDates[departureDates.length - 1] || "";
 
-  if (!quotationStartDate || !quotationEndDate) {
-    return "Quotation dates are missing or invalid.";
-  }
-
-  if (!selectedTypes.length) {
-    return null;
-  }
-
-  if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.SINGLE)) {
-    const singleRows = getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.SINGLE);
-    const arrivalRows = singleRows.filter(
-      (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
-    );
-    const departureRows = singleRows.filter(
-      (row, index) => getArrDepLabel(row, index).toLowerCase() === "departure"
-    );
-
-    if (arrivalRows.length !== 1 || departureRows.length !== 1) {
-      return "Single Period must contain exactly one Arrival row and one Departure row.";
+  if (validationSections.has("arrDep")) {
+    if (!quotationStartDate || !quotationEndDate) {
+      return "Quotation dates are missing or invalid.";
     }
-  }
 
-  if (
-    selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.MULTIPLE) &&
-    !getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.MULTIPLE).length
-  ) {
-    return "At least one Arrival / Departure row is required for Multiple Dates.";
-  }
+    if (!selectedTypes.length) {
+      return null;
+    }
 
-  if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.WEEKLY)) {
-    if (!toDateInput(schedule?.repeatFrom)) {
-      return "Weekly Repeat From date is required.";
+    if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.SINGLE)) {
+      const singleRows = getArrDepRowsForType(
+        draft,
+        ARR_DEP_SCHEDULE_TYPES.SINGLE
+      );
+      const arrivalRows = singleRows.filter(
+        (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
+      );
+      const departureRows = singleRows.filter(
+        (row, index) => getArrDepLabel(row, index).toLowerCase() === "departure"
+      );
+
+      if (arrivalRows.length !== 1 || departureRows.length !== 1) {
+        return "Single Period must contain exactly one Arrival row and one Departure row.";
+      }
     }
-    if (!toDateInput(schedule?.repeatUntil)) {
-      return "Weekly Repeat Until date is required.";
-    }
+
     if (
-      dateToUtcMs(toDateInput(schedule.repeatFrom)) >
-      dateToUtcMs(toDateInput(schedule.repeatUntil))
+      selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.MULTIPLE) &&
+      !getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.MULTIPLE).length
     ) {
-      return "Weekly Repeat From date must not be after Repeat Until date.";
+      return "At least one Arrival / Departure row is required for Multiple Dates.";
     }
-    if (!getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.WEEKLY).length) {
-      return "At least one weekly Arrival / Departure row is required.";
-    }
-  }
 
-  for (const [index, row] of combinedRows.entries()) {
-    const rowLabel = getArrDepLabel(row, index);
-    if (!["arrival", "departure"].includes(rowLabel.toLowerCase())) {
-      return `Type is required for Arrival / Departure row ${index + 1}.`;
+    if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.WEEKLY)) {
+      if (!toDateInput(schedule?.repeatFrom)) {
+        return "Weekly Repeat From date is required.";
+      }
+      if (!toDateInput(schedule?.repeatUntil)) {
+        return "Weekly Repeat Until date is required.";
+      }
+      if (
+        dateToUtcMs(toDateInput(schedule.repeatFrom)) >
+        dateToUtcMs(toDateInput(schedule.repeatUntil))
+      ) {
+        return "Weekly Repeat From date must not be after Repeat Until date.";
+      }
+      if (!getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.WEEKLY).length) {
+        return "At least one weekly Arrival / Departure row is required.";
+      }
     }
-    if (!isNonNegativeIntegerValue(row?.pax)) {
-      return `Pax must be a valid non-negative integer in Arrival / Departure (${rowLabel}).`;
+
+    for (const [index, row] of combinedRows.entries()) {
+      const rowLabel = getArrDepLabel(row, index);
+      if (!["arrival", "departure"].includes(rowLabel.toLowerCase())) {
+        return `Type is required for Arrival / Departure row ${index + 1}.`;
+      }
+      if (!isNonNegativeIntegerValue(row?.pax)) {
+        return `Pax must be a valid non-negative integer in Arrival / Departure (${rowLabel}).`;
+      }
+      if (
+        row.scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE &&
+        !toDateInput(row?.date)
+      ) {
+        return `Date is required for Arrival / Departure (${rowLabel}).`;
+      }
+      if (
+        row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY &&
+        !String(row?.weekday || "").trim()
+      ) {
+        return `Weekday is required for weekly Arrival / Departure (${rowLabel}).`;
+      }
     }
+
+    if (!arrivalDate) {
+      return "At least one valid arrival / departure date is required.";
+    }
+
+    if (!departureDate) {
+      return "At least one valid departure / schedule end date is required.";
+    }
+
+    if (dateToUtcMs(departureDate) < dateToUtcMs(arrivalDate)) {
+      return "Departure date cannot be before arrival date.";
+    }
+
     if (
-      row.scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE &&
-      !toDateInput(row?.date)
+      dateToUtcMs(arrivalDate) < dateToUtcMs(quotationStartDate) ||
+      dateToUtcMs(arrivalDate) > dateToUtcMs(quotationEndDate)
     ) {
-      return `Date is required for Arrival / Departure (${rowLabel}).`;
+      return "Arrival date is not within the quotation period.";
     }
+
     if (
-      row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY &&
-      !String(row?.weekday || "").trim()
+      dateToUtcMs(departureDate) < dateToUtcMs(quotationStartDate) ||
+      dateToUtcMs(departureDate) > dateToUtcMs(quotationEndDate)
     ) {
-      return `Weekday is required for weekly Arrival / Departure (${rowLabel}).`;
+      return "Departure date is not within the quotation period.";
+    }
+
+    const selectedTripDays = diffDaysInclusive(arrivalDate, departureDate);
+    if (quotationTripDays > 0 && selectedTripDays > quotationTripDays) {
+      return `Arrival and departure dates cannot exceed the quotation trip length (${quotationTripDays} day${quotationTripDays === 1 ? "" : "s"}).`;
     }
   }
 
-  if (!arrivalDate) {
-    return "At least one valid arrival / departure date is required.";
-  }
-
-  if (!departureDate) {
-    return "At least one valid departure / schedule end date is required.";
-  }
-
-  if (dateToUtcMs(departureDate) < dateToUtcMs(arrivalDate)) {
-    return "Departure date cannot be before arrival date.";
-  }
-
-  if (
-    dateToUtcMs(arrivalDate) < dateToUtcMs(quotationStartDate) ||
-    dateToUtcMs(arrivalDate) > dateToUtcMs(quotationEndDate)
-  ) {
-    return "Arrival date is not within the quotation period.";
-  }
-
-  if (
-    dateToUtcMs(departureDate) < dateToUtcMs(quotationStartDate) ||
-    dateToUtcMs(departureDate) > dateToUtcMs(quotationEndDate)
-  ) {
-    return "Departure date is not within the quotation period.";
-  }
-
-  const selectedTripDays = diffDaysInclusive(arrivalDate, departureDate);
-  if (quotationTripDays > 0 && selectedTripDays > quotationTripDays) {
-    return `Arrival and departure dates cannot exceed the quotation trip length (${quotationTripDays} day${quotationTripDays === 1 ? "" : "s"}).`;
-  }
+  const hasUsableArrDepRange =
+    arrivalDate &&
+    departureDate &&
+    dateToUtcMs(departureDate) >= dateToUtcMs(arrivalDate) &&
+    (!quotationStartDate ||
+      dateToUtcMs(arrivalDate) >= dateToUtcMs(quotationStartDate)) &&
+    (!quotationEndDate ||
+      dateToUtcMs(departureDate) <= dateToUtcMs(quotationEndDate));
+  const validationStartDate = hasUsableArrDepRange
+    ? arrivalDate
+    : quotationStartDate;
+  const validationEndDate = hasUsableArrDepRange
+    ? departureDate
+    : quotationEndDate;
 
   const validateSingleDate = (sectionLabel, rowLabel, fieldLabel, value) => {
     const dateStr = toDateInput(value);
-    if (!dateStr) return null;
+    if (!dateStr || !validationStartDate || !validationEndDate) return null;
 
     if (
-      dateToUtcMs(dateStr) < dateToUtcMs(arrivalDate) ||
-      dateToUtcMs(dateStr) > dateToUtcMs(departureDate)
+      dateToUtcMs(dateStr) < dateToUtcMs(validationStartDate) ||
+      dateToUtcMs(dateStr) > dateToUtcMs(validationEndDate)
     ) {
       return `${fieldLabel} in ${sectionLabel} (${rowLabel}) is not within the arrival/departure period.`;
     }
@@ -1730,91 +1765,105 @@ const validateReservationDates = ({ draft, quotation, selectedScheduleTypes }) =
     return null;
   };
 
-  for (const [index, row] of combinedRows.entries()) {
-    if (row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) continue;
-    const rowLabel = getArrDepLabel(row, index);
-    const rangeError = validateSingleDate("Arrival / Departure", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("arrDep")) {
+    for (const [index, row] of combinedRows.entries()) {
+      if (row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) continue;
+      const rowLabel = getArrDepLabel(row, index);
+      const rangeError = validateSingleDate("Arrival / Departure", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.hotels).entries()) {
-    const rowLabel = row?.hotelName || `Hotel ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Hotels",
-      rowLabel,
-      "Check In",
-      row?.checkIn,
-      "Check Out",
-      row?.checkOut
-    );
-    if (rangeError) return rangeError;
-
-    const checkIn = toDateInput(row?.checkIn);
-    const checkOut = toDateInput(row?.checkOut);
-    const nights = String(row?.nights || "").trim();
-    if (checkIn && checkOut && nights) {
-      const actualNights = Math.max(
-        0,
-        Math.floor((dateToUtcMs(checkOut) - dateToUtcMs(checkIn)) / 86400000)
+  if (validationSections.has("hotels")) {
+    for (const [index, row] of asArray(draft?.hotels).entries()) {
+      const rowLabel = row?.hotelName || `Hotel ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Hotels",
+        rowLabel,
+        "Check In",
+        row?.checkIn,
+        "Check Out",
+        row?.checkOut
       );
-      if (toNumber(nights) !== actualNights) {
-        return `Nights in Hotels (${rowLabel}) must match the difference between Check In and Check Out.`;
+      if (rangeError) return rangeError;
+
+      const checkIn = toDateInput(row?.checkIn);
+      const checkOut = toDateInput(row?.checkOut);
+      const nights = String(row?.nights || "").trim();
+      if (checkIn && checkOut && nights) {
+        const actualNights = Math.max(
+          0,
+          Math.floor((dateToUtcMs(checkOut) - dateToUtcMs(checkIn)) / 86400000)
+        );
+        if (toNumber(nights) !== actualNights) {
+          return `Nights in Hotels (${rowLabel}) must match the difference between Check In and Check Out.`;
+        }
       }
     }
   }
 
-  for (const [index, row] of asArray(draft?.transportation).entries()) {
-    const rowLabel = row?.companyName || `Transportation ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Transportation",
-      rowLabel,
-      "From Date",
-      row?.fromDate,
-      "To Date",
-      row?.toDate
-    );
-    if (rangeError) return rangeError;
+  if (validationSections.has("transportation")) {
+    for (const [index, row] of asArray(draft?.transportation).entries()) {
+      const rowLabel = row?.companyName || `Transportation ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Transportation",
+        rowLabel,
+        "From Date",
+        row?.fromDate,
+        "To Date",
+        row?.toDate
+      );
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.guides).entries()) {
-    const rowLabel = row?.guideName || `Guide ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Guides",
-      rowLabel,
-      "From Date",
-      row?.fromDate,
-      "To Date",
-      row?.toDate
-    );
-    if (rangeError) return rangeError;
+  if (validationSections.has("guides")) {
+    for (const [index, row] of asArray(draft?.guides).entries()) {
+      const rowLabel = row?.guideName || `Guide ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Guides",
+        rowLabel,
+        "From Date",
+        row?.fromDate,
+        "To Date",
+        row?.toDate
+      );
+      if (rangeError) return rangeError;
 
-    const fromDate = toDateInput(row?.fromDate);
-    const toDate = toDateInput(row?.toDate);
-    const days = String(row?.days || "").trim();
-    if (fromDate && toDate && days) {
-      const actualDays = diffDaysInclusive(fromDate, toDate);
-      if (actualDays !== null && toNumber(days) !== actualDays) {
-        return `Days in Guides (${rowLabel}) must match the number of days between From Date and To Date.`;
+      const fromDate = toDateInput(row?.fromDate);
+      const toDate = toDateInput(row?.toDate);
+      const days = String(row?.days || "").trim();
+      if (fromDate && toDate && days) {
+        const actualDays = diffDaysInclusive(fromDate, toDate);
+        if (actualDays !== null && toNumber(days) !== actualDays) {
+          return `Days in Guides (${rowLabel}) must match the number of days between From Date and To Date.`;
+        }
       }
     }
   }
 
-  for (const [index, row] of asArray(draft?.entrance).entries()) {
-    const rowLabel = row?.entrance || `Entrance ${index + 1}`;
-    const rangeError = validateSingleDate("Entrance", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("entrance")) {
+    for (const [index, row] of asArray(draft?.entrance).entries()) {
+      const rowLabel = row?.entrance || `Entrance ${index + 1}`;
+      const rangeError = validateSingleDate("Entrance", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.restaurants).entries()) {
-    const rowLabel = row?.restaurantName || row?.meal || `Restaurant ${index + 1}`;
-    const rangeError = validateSingleDate("Restaurants", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("restaurants")) {
+    for (const [index, row] of asArray(draft?.restaurants).entries()) {
+      const rowLabel = row?.restaurantName || row?.meal || `Restaurant ${index + 1}`;
+      const rangeError = validateSingleDate("Restaurants", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.extras).entries()) {
-    const rowLabel = row?.serviceName || `Extra ${index + 1}`;
-    const rangeError = validateSingleDate("Extras", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("extras")) {
+    for (const [index, row] of asArray(draft?.extras).entries()) {
+      const rowLabel = row?.serviceName || `Extra ${index + 1}`;
+      const rangeError = validateSingleDate("Extras", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
   return null;
@@ -2022,6 +2071,7 @@ const ReservationFileDetails = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmDeleting, setConfirmDeleting] = useState(false);
   const [specialRatesUploads, setSpecialRatesUploads] = useState({});
+  const [supplierEmailSending, setSupplierEmailSending] = useState({});
   const specialRatesUploadRefs = useRef({});
   const [offerUploadFile, setOfferUploadFile] = useState(null);
   const [offerUploadSaving, setOfferUploadSaving] = useState(false);
@@ -2495,8 +2545,11 @@ const ReservationFileDetails = () => {
     }
   };
 
-  const validateSpecialRatesFilesForSave = reservationDraft => {
-    for (const section of SPECIAL_RATES_SECTIONS) {
+  const validateSpecialRatesFilesForSave = (
+    reservationDraft,
+    sections = SPECIAL_RATES_SECTIONS
+  ) => {
+    for (const section of sections) {
       for (const [index, row] of asArray(reservationDraft?.[section]).entries()) {
         if (!hasSpecialRatesFile(row)) {
           const key = getSpecialRatesRowKey(section, row, index);
@@ -2620,6 +2673,76 @@ const ReservationFileDetails = () => {
     );
   };
 
+  const getSupplierEmailKey = (section, row, index) =>
+    `${section}:${row?._sourceKey || index}`;
+
+  const handleSendSupplierEmail = async (section, row, index) => {
+    if (!id) return;
+
+    if (!hasSpecialRatesFile(row)) {
+      notifyError("Upload the Special Rates file before sending the email.");
+      return;
+    }
+
+    const key = getSupplierEmailKey(section, row, index);
+    if (supplierEmailSending[key]) return;
+
+    const saved = await handleSave({ validateSpecialRates: false });
+    if (!saved) return;
+
+    setSupplierEmailSending(current => ({ ...current, [key]: true }));
+    try {
+      const response = await post(RESERVATION_FILE_SUPPLIER_CONFIRMATION_EMAIL(id), {
+        section,
+        rowKey: row?._sourceKey || "",
+        rowIndex: index,
+      });
+      updateRowFields(section, index, {
+        supplierConfirmation: {
+          ...(row?.supplierConfirmation || {}),
+          token: response?.token || row?.supplierConfirmation?.token || "",
+          code: response?.code || "",
+          status: "sent",
+          sentTo: response?.sentTo || "",
+          sentOn: new Date().toISOString(),
+        },
+      });
+      notifySuccess(`Email sent to ${response?.sentTo || "supplier"}.`);
+    } catch (error) {
+      notifyError(error?.response?.data?.message || "Failed to send email.");
+    } finally {
+      setSupplierEmailSending(current => ({ ...current, [key]: false }));
+    }
+  };
+
+  const renderSupplierEmailControls = (section, row, index) => {
+    const key = getSupplierEmailKey(section, row, index);
+    const confirmation = row?.supplierConfirmation || {};
+    const status = confirmation?.status || "";
+
+    return (
+      <div className="d-flex align-items-center flex-wrap gap-2 mt-3">
+        <Button
+          color="info"
+          type="button"
+          onClick={() => handleSendSupplierEmail(section, row, index)}
+          disabled={!!supplierEmailSending[key] || !hasSpecialRatesFile(row)}
+        >
+          {supplierEmailSending[key] ? <Spinner size="sm" className="me-2" /> : null}
+          Send Email
+        </Button>
+        {status ? (
+          <Badge color={status === "submitted" ? "success" : "info"} pill>
+            {status === "submitted" ? "Submitted" : "Email Sent"}
+          </Badge>
+        ) : null}
+        {confirmation?.sentTo ? (
+          <span className="text-muted small">To: {confirmation.sentTo}</span>
+        ) : null}
+      </div>
+    );
+  };
+
   const handleGuideNameChange = (index, guideName) => {
     const firstLanguage = getFirstGuideLanguage(guideDirectory, guideName);
 
@@ -2649,6 +2772,37 @@ const ReservationFileDetails = () => {
         };
       }),
     }));
+  };
+
+  const handleApplyGuideForAllDays = () => {
+    const guides = asArray(draft?.guides);
+    if (guides.length < 2) {
+      notifyError("Add another guide row first.");
+      return;
+    }
+
+    const sourceGuide = guides[0] || {};
+    setDraft(prev => ({
+      ...prev,
+      guides: asArray(prev?.guides).map((row, index) =>
+        index === 0
+          ? row
+          : {
+              ...row,
+              guideName: sourceGuide.guideName || "",
+              language: sourceGuide.language || "",
+              notes: sourceGuide.notes || "",
+              specialRates: sourceGuide.specialRates || "",
+              fromDate: sourceGuide.fromDate || "",
+              toDate: sourceGuide.toDate || "",
+              status: sourceGuide.status || "",
+              days: sourceGuide.days || "",
+              overnight: sourceGuide.overnight || "",
+              invoiceReceived: sourceGuide.invoiceReceived || "",
+            }
+      ),
+    }));
+    notifySuccess("Guide information applied to all remaining guide rows.");
   };
 
   const addRow = section => {
@@ -2703,33 +2857,52 @@ const ReservationFileDetails = () => {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (options = {}) => {
     if (!draft || !id) return false;
+
+    const validationPlan = buildReservationSaveValidationPlan({
+      activeSection: options?.activeSection || activeSection,
+      activeClientsTab: options?.activeClientsTab || activeClientsTab,
+      fullReservation: options?.fullReservation === true,
+    });
 
     const reservationDateError = validateReservationDates({
       draft,
       quotation,
       selectedScheduleTypes,
+      sections: validationPlan.dateSections,
     });
     if (reservationDateError) {
       notifyError(reservationDateError);
       return false;
     }
 
-    const specialRatesError = validateSpecialRatesFilesForSave(draft);
-    if (specialRatesError) {
-      setSpecialRatesUploadState(specialRatesError.key, {
-        error: specialRatesError.message,
-      });
-      notifyError(specialRatesError.message);
-      focusSpecialRatesUpload(specialRatesError.key);
-      return false;
+    if (
+      options?.validateSpecialRates !== false &&
+      validationPlan.specialRatesSections.length
+    ) {
+      const specialRatesError = validateSpecialRatesFilesForSave(
+        draft,
+        validationPlan.specialRatesSections
+      );
+      if (specialRatesError) {
+        setSpecialRatesUploadState(specialRatesError.key, {
+          error: specialRatesError.message,
+        });
+        notifyError(specialRatesError.message);
+        focusSpecialRatesUpload(specialRatesError.key);
+        return false;
+      }
     }
 
-    const roomingListResult = validateAndNormalizeRoomingList(draft?.roomingList);
-    if (roomingListResult.error) {
-      notifyError(roomingListResult.error);
-      return false;
+    let roomingList = draft?.roomingList;
+    if (validationPlan.validateRoomingList) {
+      const roomingListResult = validateAndNormalizeRoomingList(roomingList);
+      if (roomingListResult.error) {
+        notifyError(roomingListResult.error);
+        return false;
+      }
+      roomingList = roomingListResult.rows;
     }
     const draftForSave = {
       ...draft,
@@ -2742,7 +2915,7 @@ const ReservationFileDetails = () => {
         draft?.arrDepSchedule?.rowsByType || {},
         selectedScheduleTypes
       ),
-      roomingList: roomingListResult.rows,
+      roomingList,
     };
 
     setSaving(true);
@@ -2759,6 +2932,7 @@ const ReservationFileDetails = () => {
 
       await patch(RESERVATION_FILE_BY_ID(id), {
         RESERVATION_DATA: nextDraft,
+        VALIDATION_SCOPE: validationPlan.validationScope,
       });
       setDraft(nextDraft);
       notifySuccess(
@@ -2802,11 +2976,17 @@ const ReservationFileDetails = () => {
   };
 
   const handleSaveManifest = async () => {
-    await handleSave();
+    await handleSave({
+      activeSection: "Clients",
+      activeClientsTab: CLIENTS_INTERNAL_TABS.MANIFEST,
+    });
   };
 
   const handleSaveRoomingList = async () => {
-    await handleSave();
+    await handleSave({
+      activeSection: "Clients",
+      activeClientsTab: CLIENTS_INTERNAL_TABS.ROOMING_LIST,
+    });
   };
 
   const handleApplyAccommodationOption = async () => {
@@ -3113,8 +3293,10 @@ const ReservationFileDetails = () => {
 
   const renderResDetails = () => (
     <>
+      <SectionHeader title="Reservation Details" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 p-lg-4 mb-4">
-        <h4 className="mb-3">Reservation Details</h4>
         <Row className="g-3">
           <Col md="4">
             <div>File No.</div>
@@ -3174,7 +3356,9 @@ const ReservationFileDetails = () => {
 
   const renderGeneral = () => (
     <>
-      <SectionHeader title="General" fileReference={referenceTitle} />
+      <SectionHeader title="General" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 p-lg-4" style={{ maxWidth: 760 }}>
         <Field label="Group Name" value={draft?.general?.groupName} onChange={v => updateGeneral("groupName", v)} />
         <Field label="Agent Name" value={draft?.general?.agentName} readOnly />
@@ -3223,9 +3407,6 @@ const ReservationFileDetails = () => {
           onChange={v => updateGeneral("tips", v)}
         />
         <div className="d-flex gap-2">
-          <Button color="primary" onClick={handleSave} disabled={saving}>
-            Save General Data
-          </Button>
           <Button color="success" onClick={() => updateGeneral("groupName", draft?.general?.groupName || referenceTitle)}>
             Set Group Name
           </Button>
@@ -3466,7 +3647,9 @@ const ReservationFileDetails = () => {
 
   const renderHotels = () => (
     <>
-      <SectionHeader title="Hotels" fileReference={referenceTitle} />
+      <SectionHeader title="Hotels" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.hotels?.length ? <EmptySection label="hotel" /> : null}
       {asArray(draft?.hotels).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Hotel" onRemove={() => removeRow("hotels", index)}>
@@ -3494,6 +3677,7 @@ const ReservationFileDetails = () => {
             <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Conf. No." value={row.confirmationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "confirmationNo", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Ref" value={row.ref} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "ref", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("hotels", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("hotels")}>Add Another Hotel</Button>
@@ -3503,7 +3687,7 @@ const ReservationFileDetails = () => {
   const renderTransportation = () => (
     <>
       <SectionHeader title="Transportation" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       {!draft?.transportation?.length ? <EmptySection label="transportation" /> : null}
       {asArray(draft?.transportation).map((row, index) => (
@@ -3524,6 +3708,7 @@ const ReservationFileDetails = () => {
             <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("transportation", index, "invoiceReceived", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Resv. No." value={row.reservationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("transportation", index, "reservationNo", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("transportation", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("transportation")}>Add Another Transportation</Button>
@@ -3532,7 +3717,16 @@ const ReservationFileDetails = () => {
 
   const renderGuides = () => (
     <>
-      <SectionHeader title="Guides" fileReference={referenceTitle} />
+      <SectionHeader title="Guides" fileReference={referenceTitle}>
+        <Button
+          color="info"
+          onClick={handleApplyGuideForAllDays}
+          disabled={asArray(draft?.guides).length < 2}
+        >
+          Guides for all days
+        </Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.guides?.length ? <EmptySection label="guide" /> : null}
       {asArray(draft?.guides).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Guide" onRemove={() => removeRow("guides", index)}>
@@ -3568,7 +3762,9 @@ const ReservationFileDetails = () => {
 
   const renderEntrance = () => (
     <>
-      <SectionHeader title="Entrance" fileReference={referenceTitle} />
+      <SectionHeader title="Entrance" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.entrance?.length ? <EmptySection label="entrance" /> : null}
       {asArray(draft?.entrance).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Entrance" onRemove={() => removeRow("entrance", index)}>
@@ -3585,14 +3781,13 @@ const ReservationFileDetails = () => {
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("entrance")}>Add Another Entrance</Button>
-      <Button color="primary" className="ms-2" onClick={handleSave} disabled={saving}>Save Entrance Data</Button>
     </>
   );
 
   const renderRestaurants = () => (
     <>
       <SectionHeader title="Restaurants" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       {!draft?.restaurants?.length ? <EmptySection label="restaurant/meal" /> : null}
       {asArray(draft?.restaurants).map((row, index) => (
@@ -3613,8 +3808,10 @@ const ReservationFileDetails = () => {
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Booked By" value={row.bookedBy} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "bookedBy", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Pax" type="number" value={row.pax} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "pax", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Conf. No." value={row.confirmationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "confirmationNo", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Ref. No." value={row.ref} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "ref", v)} /></Col>
             <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("restaurants", index, "invoiceReceived", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("restaurants", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("restaurants")}>Add Another Restaurant</Button>
@@ -3623,7 +3820,9 @@ const ReservationFileDetails = () => {
 
   const renderExtras = () => (
     <>
-      <SectionHeader title="Extras" fileReference={referenceTitle} />
+      <SectionHeader title="Extras" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.extras?.length ? <EmptySection label="extra service" /> : null}
       {asArray(draft?.extras).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Extra" onRemove={() => removeRow("extras", index)}>
@@ -3652,7 +3851,7 @@ const ReservationFileDetails = () => {
   const renderInclusions = () => (
     <>
       <SectionHeader title="Inclusions" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       <div className="table-responsive">
         <Table bordered className="align-middle bg-light">
@@ -3681,57 +3880,59 @@ const ReservationFileDetails = () => {
   );
 
   const renderClients = () => (
-      <>
-        <SectionHeader title="Clients" fileReference={referenceTitle} />
+    <>
+      <SectionHeader title="Clients" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
 
-        <Nav tabs className="mb-3">
-          <NavItem>
-            <NavLink
-              href="#"
-              className={
-                activeClientsTab === CLIENTS_INTERNAL_TABS.MANIFEST
-                  ? "active"
-                  : ""
-              }
-              onClick={event => {
-                event.preventDefault();
-                setActiveClientsTab(CLIENTS_INTERNAL_TABS.MANIFEST);
-              }}
-            >
-              Manifest
-            </NavLink>
-          </NavItem>
-          <NavItem>
-            <NavLink
-              href="#"
-              className={
-                activeClientsTab === CLIENTS_INTERNAL_TABS.ROOMING_LIST
-                  ? "active"
-                  : ""
-              }
-              onClick={event => {
-                event.preventDefault();
-                setActiveClientsTab(CLIENTS_INTERNAL_TABS.ROOMING_LIST);
-              }}
-            >
-              Rooming List
-            </NavLink>
-          </NavItem>
-        </Nav>
+      <Nav tabs className="mb-3">
+        <NavItem>
+          <NavLink
+            href="#"
+            className={
+              activeClientsTab === CLIENTS_INTERNAL_TABS.MANIFEST
+                ? "active"
+                : ""
+            }
+            onClick={event => {
+              event.preventDefault();
+              setActiveClientsTab(CLIENTS_INTERNAL_TABS.MANIFEST);
+            }}
+          >
+            Manifest
+          </NavLink>
+        </NavItem>
+        <NavItem>
+          <NavLink
+            href="#"
+            className={
+              activeClientsTab === CLIENTS_INTERNAL_TABS.ROOMING_LIST
+                ? "active"
+                : ""
+            }
+            onClick={event => {
+              event.preventDefault();
+              setActiveClientsTab(CLIENTS_INTERNAL_TABS.ROOMING_LIST);
+            }}
+          >
+            Rooming List
+          </NavLink>
+        </NavItem>
+      </Nav>
 
-        {activeClientsTab === CLIENTS_INTERNAL_TABS.MANIFEST ? (
-          <div className="rounded border bg-light p-3">
-            <div className="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
-              <div>
-                <h5 className="mb-1">Manifest</h5>
-                <div className="text-muted">
-                  Passport and identity details saved for this reservation.
-                </div>
+      {activeClientsTab === CLIENTS_INTERNAL_TABS.MANIFEST ? (
+        <div className="rounded border bg-light p-3">
+          <div className="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+            <div>
+              <h5 className="mb-1">Manifest</h5>
+              <div className="text-muted">
+                Passport and identity details saved for this reservation.
               </div>
-              <Badge color="info" pill>
-                {asArray(draft?.clients).length} client{asArray(draft?.clients).length === 1 ? "" : "s"}
-              </Badge>
             </div>
+            <Badge color="info" pill>
+              {asArray(draft?.clients).length} client{asArray(draft?.clients).length === 1 ? "" : "s"}
+            </Badge>
+          </div>
 
           <div className="table-responsive">
             <Table bordered className="align-middle bg-light">
@@ -3804,251 +4005,253 @@ const ReservationFileDetails = () => {
             </Table>
           </div>
 
-            <div className="d-flex justify-content-between flex-wrap gap-2 mt-3">
-              <Button color="success" onClick={() => addRow("clients")}>
-                Add Another Client
-              </Button>
-              <Button color="primary" onClick={handleSaveManifest} disabled={saving}>
-                {saving ? <Spinner size="sm" className="me-2" /> : null}
-                Save Manifest
-              </Button>
-            </div>
+          <div className="d-flex justify-content-between flex-wrap gap-2 mt-3">
+            <Button color="success" onClick={() => addRow("clients")}>
+              Add Another Client
+            </Button>
+            <Button color="primary" onClick={handleSaveManifest} disabled={saving}>
+              {saving ? <Spinner size="sm" className="me-2" /> : null}
+              Save Manifest
+            </Button>
           </div>
-        ) : (
-          <div className="rounded border bg-light p-3">
-            <div className="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
-              <div>
-                <h5 className="mb-1">Rooming List</h5>
-                <div className="text-muted">
-                  Manage rooming details independently from Manifest passport data.
-                </div>
+        </div>
+      ) : (
+        <div className="rounded border bg-light p-3">
+          <div className="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+            <div>
+              <h5 className="mb-1">Rooming List</h5>
+              <div className="text-muted">
+                Manage rooming details independently from Manifest passport data.
               </div>
-              <Button color="success" onClick={() => addRow("roomingList")}>
-                Add Client / Add Row
-              </Button>
             </div>
+            <Button color="success" onClick={() => addRow("roomingList")}>
+              Add Client / Add Row
+            </Button>
+          </div>
 
-            <div className="table-responsive">
-              <Table bordered className="align-middle bg-light">
-                <thead>
-                  <tr>
-                    {[
-                      "Show",
-                      "Title",
-                      "Client Name",
-                      "Age",
-                      "Room",
-                      "R No.",
-                      "Meal",
-                      "Code 1",
-                      "Code 2",
-                      "Code 3",
-                      "Comments",
-                      "Is MN",
-                      "Remove",
-                    ].map(head => (
-                      <th key={head}>{head}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {asArray(draft?.roomingList).map((row, index) => {
-                    const isNonEmpty = !isRoomingRowEmpty(row);
-                    const missingName = isNonEmpty && !text(row.clientName);
+          <div className="table-responsive">
+            <Table bordered className="align-middle bg-light">
+              <thead>
+                <tr>
+                  {[
+                    "Show",
+                    "Title",
+                    "Client Name",
+                    "Age",
+                    "Room",
+                    "R No.",
+                    "Meal",
+                    "Code 1",
+                    "Code 2",
+                    "Code 3",
+                    "Comments",
+                    "Is MN",
+                    "Remove",
+                  ].map(head => (
+                    <th key={head}>{head}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {asArray(draft?.roomingList).map((row, index) => {
+                  const isNonEmpty = !isRoomingRowEmpty(row);
+                  const missingName = isNonEmpty && !text(row.clientName);
 
-                    return (
-                      <tr key={row._sourceKey || index}>
-                        <td>
-                          <TableCheckbox
-                            checked={normalizeBoolean(row.show)}
-                            onChange={value =>
-                              updateRow("roomingList", index, "show", value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <Input
-                            type="select"
-                            value={text(row.title)}
-                            onChange={e =>
-                              updateRow("roomingList", index, "title", e.target.value)
-                            }
-                          >
-                            <option value="">Select</option>
-                            {CLIENT_TITLE_OPTIONS.map(option => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </Input>
-                        </td>
-                        <td>
-                          <Input
-                            value={text(row.clientName)}
-                            invalid={missingName}
-                            onChange={e =>
-                              updateRow(
-                                "roomingList",
-                                index,
-                                "clientName",
-                                e.target.value
-                              )
-                            }
-                          />
-                          {missingName ? (
-                            <div className="text-danger small mt-1">
-                              Client Name is required.
-                            </div>
-                          ) : null}
-                        </td>
-                        <td>
-                          <Input
-                            type="select"
-                            value={text(row.ageCategory)}
-                            onChange={e =>
-                              updateRow(
-                                "roomingList",
-                                index,
-                                "ageCategory",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="">Select</option>
-                            {ROOMING_AGE_OPTIONS.map(option => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </Input>
-                        </td>
-                        <td>
-                          <Input
-                            type="select"
-                            value={text(row.roomType)}
-                            onChange={e =>
-                              updateRow(
-                                "roomingList",
-                                index,
-                                "roomType",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="">Select</option>
-                            {ROOMING_ROOM_OPTIONS.map(option => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </Input>
-                        </td>
-                        <td>
-                          <Input
-                            value={text(row.roomNo)}
-                            onChange={e =>
-                              updateRow("roomingList", index, "roomNo", e.target.value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <Input
-                            value={text(row.meal)}
-                            onChange={e =>
-                              updateRow("roomingList", index, "meal", e.target.value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <Input
-                            value={text(row.code1)}
-                            onChange={e =>
-                              updateRow("roomingList", index, "code1", e.target.value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <Input
-                            value={text(row.code2)}
-                            onChange={e =>
-                              updateRow("roomingList", index, "code2", e.target.value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <Input
-                            value={text(row.code3)}
-                            onChange={e =>
-                              updateRow("roomingList", index, "code3", e.target.value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <Input
-                            type="textarea"
-                            value={text(row.comments)}
-                            onChange={e =>
-                              updateRow(
-                                "roomingList",
-                                index,
-                                "comments",
-                                e.target.value
-                              )
-                            }
-                          />
-                        </td>
-                        <td>
-                          <TableCheckbox
-                            checked={normalizeBoolean(row.isMN)}
-                            onChange={value =>
-                              updateRow("roomingList", index, "isMN", value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <Button
-                            color="danger"
-                            size="sm"
-                            onClick={() => removeRow("roomingList", index)}
-                          >
-                            Remove
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {!asArray(draft?.roomingList).length ? (
-                    <tr>
-                      <td colSpan="13" className="text-center text-muted py-4">
-                        No rooming list rows have been added yet.
+                  return (
+                    <tr key={row._sourceKey || index}>
+                      <td>
+                        <TableCheckbox
+                          checked={normalizeBoolean(row.show)}
+                          onChange={value =>
+                            updateRow("roomingList", index, "show", value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          type="select"
+                          value={text(row.title)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "title", e.target.value)
+                          }
+                        >
+                          <option value="">Select</option>
+                          {CLIENT_TITLE_OPTIONS.map(option => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Input>
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.clientName)}
+                          invalid={missingName}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "clientName",
+                              e.target.value
+                            )
+                          }
+                        />
+                        {missingName ? (
+                          <div className="text-danger small mt-1">
+                            Client Name is required.
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <Input
+                          type="select"
+                          value={text(row.ageCategory)}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "ageCategory",
+                              e.target.value
+                            )
+                          }
+                        >
+                          <option value="">Select</option>
+                          {ROOMING_AGE_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </Input>
+                      </td>
+                      <td>
+                        <Input
+                          type="select"
+                          value={text(row.roomType)}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "roomType",
+                              e.target.value
+                            )
+                          }
+                        >
+                          <option value="">Select</option>
+                          {ROOMING_ROOM_OPTIONS.map(option => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Input>
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.roomNo)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "roomNo", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.meal)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "meal", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.code1)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "code1", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.code2)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "code2", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.code3)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "code3", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          type="textarea"
+                          value={text(row.comments)}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "comments",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <TableCheckbox
+                          checked={normalizeBoolean(row.isMN)}
+                          onChange={value =>
+                            updateRow("roomingList", index, "isMN", value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Button
+                          color="danger"
+                          size="sm"
+                          onClick={() => removeRow("roomingList", index)}
+                        >
+                          Remove
+                        </Button>
                       </td>
                     </tr>
-                  ) : null}
-                </tbody>
-              </Table>
-            </div>
-
-            <div className="d-flex justify-content-between flex-wrap gap-2 mt-3">
-              <Button color="success" onClick={() => addRow("roomingList")}>
-                Add Client / Add Row
-              </Button>
-              <Button
-                color="primary"
-                onClick={handleSaveRoomingList}
-                disabled={saving}
-              >
-                {saving ? <Spinner size="sm" className="me-2" /> : null}
-                Save Rooming List
-              </Button>
-            </div>
+                  );
+                })}
+                {!asArray(draft?.roomingList).length ? (
+                  <tr>
+                    <td colSpan="13" className="text-center text-muted py-4">
+                      No rooming list rows have been added yet.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </Table>
           </div>
-        )}
-      </>
-    );
+
+          <div className="d-flex justify-content-between flex-wrap gap-2 mt-3">
+            <Button color="success" onClick={() => addRow("roomingList")}>
+              Add Client / Add Row
+            </Button>
+            <Button
+              color="primary"
+              onClick={handleSaveRoomingList}
+              disabled={saving}
+            >
+              {saving ? <Spinner size="sm" className="me-2" /> : null}
+              Save Rooming List
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   const renderAttach = () => (
     <>
-      <SectionHeader title="Attach" fileReference={referenceTitle} />
+      <SectionHeader title="Attach" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 mb-3">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
           <h5 className="mb-0">Updated/Attached Offers</h5>
@@ -4177,7 +4380,9 @@ const ReservationFileDetails = () => {
 
   const renderReminder = () => (
     <>
-      <SectionHeader title="Reminder" fileReference={referenceTitle} />
+      <SectionHeader title="Reminder" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-4">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div className="text-muted">
@@ -4259,7 +4464,9 @@ const ReservationFileDetails = () => {
 
     return (
       <>
-        <SectionHeader title="Activity Log" fileReference={referenceTitle} />
+        <SectionHeader title="Activity Log" fileReference={referenceTitle}>
+          <SaveChangesButton onClick={handleSave} disabled={saving} />
+        </SectionHeader>
         <div className="rounded border bg-light p-3">
           <Row className="g-3 mb-3">
             <Col md="3">
@@ -4485,7 +4692,11 @@ const ReservationFileDetails = () => {
                   Approve
                 </Button>
               ) : null}
-              <Button color="success" onClick={handleSave} disabled={saving || loading || !draft}>
+              <Button
+                color="success"
+                onClick={() => handleSave({ fullReservation: true })}
+                disabled={saving || loading || !draft}
+              >
                 {saving ? <Spinner size="sm" className="me-2" /> : null}
                 Save Full Reservation
               </Button>

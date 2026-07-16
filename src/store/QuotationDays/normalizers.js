@@ -13,6 +13,13 @@ const normalizeRoute = item => {
   return {
     text: route?.text || basic?.ROUTE_TEXT || item?.ROUTE_TEXT || "",
     cities: Array.isArray(route?.cities) ? route.cities : [],
+    stops: Array.isArray(route?.stops) ? route.stops : [],
+    distance: route?.distance || {
+      available: false,
+      totalKm: null,
+      segments: [],
+      message: "",
+    },
   };
 };
 
@@ -51,6 +58,7 @@ const normalizeGuide = item => {
       enabled: !!item.guide?.enabled,
       GUIDE_TYPE: item.guide?.GUIDE_TYPE || null,
       GUIDE_TYPE_NAME: item.guide?.GUIDE_TYPE_NAME || "",
+      rows: Array.isArray(item.guide?.rows) ? item.guide.rows : [],
     };
   }
 
@@ -58,6 +66,7 @@ const normalizeGuide = item => {
     enabled: !!item?.GUIDE_TYPE,
     GUIDE_TYPE: item?.GUIDE_TYPE || null,
     GUIDE_TYPE_NAME: item?.GUIDE_TYPE_NAME || "",
+    rows: [],
   };
 };
 
