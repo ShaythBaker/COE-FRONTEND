@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import { get } from "./api_helper";
 import { getAttachmentBlob } from "./attachments_helper";
+import { getCurrentCompany } from "./coe_backend_helper";
 import {
   buildPdfOptionColumns,
   buildTravcoPackageTitle,
@@ -15,6 +16,7 @@ import {
   buildPackageSupplementRows,
   getPackageGuideLabel,
 } from "./quotation_supplements";
+import { loadQuotationSystemInformation } from "./quotation_system_information";
 
 const PAGE = {
   width: 210,
@@ -44,8 +46,6 @@ const DEFAULT_BRAND_COLORS = {
   paleAccent: [...COLORS.paleAccent],
 };
 
-const SYSTEM_INFORMATION_STORAGE_KEY = "coeSystemInformation";
-
 const asArray = value => (Array.isArray(value) ? value : []);
 
 const normalizeKey = value =>
@@ -58,30 +58,6 @@ const safeText = value => {
   if (value === null || value === undefined) return "-";
   const text = String(value).trim();
   return text || "-";
-};
-
-const readSystemInformation = () => {
-  try {
-    const saved = JSON.parse(
-      localStorage.getItem(SYSTEM_INFORMATION_STORAGE_KEY) || "{}"
-    );
-
-    return {
-      systemName: saved?.systemName || "",
-      systemLogo: saved?.systemLogo || "",
-      systemEmail: saved?.systemEmail || "",
-      systemCountry: saved?.systemCountry || "",
-      phoneNumber: saved?.phoneNumber || "",
-    };
-  } catch {
-    return {
-      systemName: "",
-      systemLogo: "",
-      systemEmail: "",
-      systemCountry: "",
-      phoneNumber: "",
-    };
-  }
 };
 
 const plainText = value =>
@@ -2926,7 +2902,10 @@ export const generateQuotationPdf = async ({
   const agentLogoDataUrl = await getImageDataUrl(
     quotationInfo.travelAgentLogoAttachmentId
   );
-  const systemInformation = readSystemInformation();
+  const systemInformation = await loadQuotationSystemInformation({
+    loadCurrentCompany: getCurrentCompany,
+    loadLogoDataUrl: getImageDataUrl,
+  });
   const brandLogoDataUrl =
     systemInformation.systemLogo || agentLogoDataUrl || "";
   const brandColors = await getLogoPalette(brandLogoDataUrl);
