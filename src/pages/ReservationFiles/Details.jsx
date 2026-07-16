@@ -88,16 +88,78 @@ const RESERVATION_SECTIONS = [
 const asArray = value => (Array.isArray(value) ? value : []);
 
 const ARR_DEP_SCHEDULE_TYPES = {
+  SINGLE: "singlePeriod",
+  MULTIPLE: "multipleDates",
+  WEEKLY: "weeklyRecurring",
+};
+
+const LEGACY_ARR_DEP_SCHEDULE_TYPES = {
   SINGLE: "SINGLE",
   MULTIPLE: "MULTIPLE",
   WEEKLY: "WEEKLY",
 };
 
-const ARR_DEP_SCHEDULE_OPTIONS = [
-  { value: ARR_DEP_SCHEDULE_TYPES.SINGLE, label: "Single Period" },
-  { value: ARR_DEP_SCHEDULE_TYPES.MULTIPLE, label: "Multiple Dates" },
-  { value: ARR_DEP_SCHEDULE_TYPES.WEEKLY, label: "Weekly Recurring" },
+const scheduleTypeOptions = [
+  {
+    value: "singlePeriod",
+    label: "Single Period",
+  },
+  {
+    value: "multipleDates",
+    label: "Multiple Dates",
+  },
+  {
+    value: "weeklyRecurring",
+    label: "Weekly Recurring",
+  },
 ];
+
+const ARR_DEP_SCHEDULE_TYPE_VALUES = Object.values(ARR_DEP_SCHEDULE_TYPES);
+
+const normalizeArrDepScheduleTypeValue = type => {
+  if (ARR_DEP_SCHEDULE_TYPE_VALUES.includes(type)) return type;
+  if (type === LEGACY_ARR_DEP_SCHEDULE_TYPES.SINGLE) return ARR_DEP_SCHEDULE_TYPES.SINGLE;
+  if (type === LEGACY_ARR_DEP_SCHEDULE_TYPES.MULTIPLE) return ARR_DEP_SCHEDULE_TYPES.MULTIPLE;
+  if (type === LEGACY_ARR_DEP_SCHEDULE_TYPES.WEEKLY) return ARR_DEP_SCHEDULE_TYPES.WEEKLY;
+  return "";
+};
+
+const getLegacyArrDepScheduleTypeValue = type => {
+  if (type === ARR_DEP_SCHEDULE_TYPES.SINGLE) return LEGACY_ARR_DEP_SCHEDULE_TYPES.SINGLE;
+  if (type === ARR_DEP_SCHEDULE_TYPES.MULTIPLE) return LEGACY_ARR_DEP_SCHEDULE_TYPES.MULTIPLE;
+  if (type === ARR_DEP_SCHEDULE_TYPES.WEEKLY) return LEGACY_ARR_DEP_SCHEDULE_TYPES.WEEKLY;
+  return "";
+};
+
+const sanitizeArrDepScheduleTypes = types =>
+  asArray(types)
+    .map(normalizeArrDepScheduleTypeValue)
+    .filter(Boolean);
+
+const normalizeArrDepScheduleTypes = schedule => {
+  if (Array.isArray(schedule?.types)) {
+    return sanitizeArrDepScheduleTypes(schedule.types);
+  }
+
+  return ARR_DEP_SCHEDULE_TYPE_VALUES.includes(schedule?.type)
+    ? [schedule.type]
+    : normalizeArrDepScheduleTypeValue(schedule?.type)
+    ? [normalizeArrDepScheduleTypeValue(schedule?.type)]
+    : [ARR_DEP_SCHEDULE_TYPES.SINGLE];
+};
+
+const getArrDepRowsForType = (draft, type) => {
+  const rowsByType = draft?.arrDepSchedule?.rowsByType || {};
+  return asArray(rowsByType?.[type] || rowsByType?.[getLegacyArrDepScheduleTypeValue(type)]);
+};
+
+const buildCombinedArrDepRows = (rowsByType = {}, selectedTypes = []) =>
+  sanitizeArrDepScheduleTypes(selectedTypes).flatMap(type =>
+    asArray(rowsByType?.[type]).map(row => ({
+      ...row,
+      scheduleType: type,
+    }))
+  );
 
 const ARR_DEP_MOVEMENT_OPTIONS = [
   { value: "Arrival", label: "Arrival" },
@@ -574,8 +636,14 @@ const buildDraftDefaults = file => {
     },
     arrDepSchedule: {
       type: ARR_DEP_SCHEDULE_TYPES.SINGLE,
+      types: [ARR_DEP_SCHEDULE_TYPES.SINGLE],
       repeatFrom: arrivalDate,
       repeatUntil: departureDate,
+      rowsByType: {
+        [ARR_DEP_SCHEDULE_TYPES.SINGLE]: arrDep,
+        [ARR_DEP_SCHEDULE_TYPES.MULTIPLE]: [],
+        [ARR_DEP_SCHEDULE_TYPES.WEEKLY]: [],
+      },
     },
     arrDep,
     hotels: hotelRows,
@@ -846,21 +914,57 @@ const mergeRows = (defaults, savedRows) => {
   ];
 };
 
-const mergeDraft = (defaults, saved = {}) =>
-  mergeReservationMetadata(
+const buildMergedArrDepSchedule = (defaults, saved = {}) => {
+  const defaultSchedule = defaults?.arrDepSchedule || {};
+  const savedSchedule = saved?.arrDepSchedule || {};
+  const selectedTypes = normalizeArrDepScheduleTypes(savedSchedule);
+  const legacyType = ARR_DEP_SCHEDULE_TYPE_VALUES.includes(savedSchedule?.type)
+    ? savedSchedule.type
+    : normalizeArrDepScheduleTypeValue(savedSchedule?.type) ||
+      ARR_DEP_SCHEDULE_TYPES.SINGLE;
+  const savedRowsByType = savedSchedule?.rowsByType || {};
+  const getSavedRows = type =>
+    savedRowsByType?.[type] ||
+    savedRowsByType?.[getLegacyArrDepScheduleTypeValue(type)] ||
+    (legacyType === type ? saved?.arrDep : []);
+
+  const rowsByType = {
+    [ARR_DEP_SCHEDULE_TYPES.SINGLE]: mergeRows(
+      defaultSchedule?.rowsByType?.[ARR_DEP_SCHEDULE_TYPES.SINGLE] ||
+        defaults?.arrDep ||
+        [],
+      getSavedRows(ARR_DEP_SCHEDULE_TYPES.SINGLE)
+    ),
+    [ARR_DEP_SCHEDULE_TYPES.MULTIPLE]: mergeRows(
+      defaultSchedule?.rowsByType?.[ARR_DEP_SCHEDULE_TYPES.MULTIPLE] || [],
+      getSavedRows(ARR_DEP_SCHEDULE_TYPES.MULTIPLE)
+    ),
+    [ARR_DEP_SCHEDULE_TYPES.WEEKLY]: mergeRows(
+      defaultSchedule?.rowsByType?.[ARR_DEP_SCHEDULE_TYPES.WEEKLY] || [],
+      getSavedRows(ARR_DEP_SCHEDULE_TYPES.WEEKLY)
+    ),
+  };
+
+  return {
+    ...defaultSchedule,
+    ...savedSchedule,
+    type: selectedTypes[0],
+    types: selectedTypes,
+    rowsByType,
+  };
+};
+
+const mergeDraft = (defaults, saved = {}) => {
+  const arrDepSchedule = buildMergedArrDepSchedule(defaults, saved);
+
+  return mergeReservationMetadata(
     {
       general: { ...defaults.general, ...(saved?.general || {}) },
-      arrDepSchedule: {
-        ...(defaults.arrDepSchedule || {}),
-        ...(saved?.arrDepSchedule || {}),
-        type:
-          Object.values(ARR_DEP_SCHEDULE_TYPES).includes(
-            saved?.arrDepSchedule?.type
-          )
-            ? saved.arrDepSchedule.type
-            : ARR_DEP_SCHEDULE_TYPES.SINGLE,
-      },
-      arrDep: mergeRows(defaults.arrDep, saved?.arrDep),
+      arrDepSchedule,
+      arrDep: buildCombinedArrDepRows(
+        arrDepSchedule.rowsByType,
+        arrDepSchedule.types
+      ),
       hotels: mergeRows(defaults.hotels, saved?.hotels),
       transportation: mergeRows(defaults.transportation, saved?.transportation),
       guides: mergeRows(defaults.guides, saved?.guides),
@@ -880,6 +984,7 @@ const mergeDraft = (defaults, saved = {}) =>
     },
     saved
   );
+};
 
 const newKey = prefix => `${prefix}-manual-${Date.now()}-${Math.random()}`;
 
@@ -1459,7 +1564,12 @@ const buildSpecialRatesFileMeta = attachment => ({
   uploadedOn: attachment?.CREATED_ON || new Date().toISOString(),
 });
 
-const validateReservationDates = ({ draft, quotation, sections }) => {
+const validateReservationDates = ({
+  draft,
+  quotation,
+  selectedScheduleTypes,
+  sections,
+}) => {
   const validationSections = new Set(asArray(sections));
   if (!draft || !validationSections.size) return null;
 
@@ -1467,25 +1577,44 @@ const validateReservationDates = ({ draft, quotation, sections }) => {
   const quotationEndDate = toDateInput(quotation?.QUOTATION_END_DATE);
   const quotationTripDays = getQuotationAllowedTripDays(quotation);
   const schedule = draft?.arrDepSchedule || {};
-  const scheduleType = Object.values(ARR_DEP_SCHEDULE_TYPES).includes(schedule?.type)
-    ? schedule.type
-    : ARR_DEP_SCHEDULE_TYPES.SINGLE;
-  const arrDepRows = asArray(draft?.arrDep);
-  const { arrivalDate, departureDate } = getArrDepTripDates(arrDepRows, {
-    ...schedule,
-    type: scheduleType,
-  });
+  const selectedTypes = sanitizeArrDepScheduleTypes(selectedScheduleTypes);
+  const rowsByType = schedule?.rowsByType || {};
+  const combinedRows = buildCombinedArrDepRows(rowsByType, selectedTypes);
+  const tripDateRanges = selectedTypes.map(type =>
+    getArrDepTripDates(getArrDepRowsForType(draft, type), {
+      ...schedule,
+      type,
+    })
+  );
+  const arrivalDates = tripDateRanges
+    .map(range => toDateInput(range.arrivalDate))
+    .filter(Boolean)
+    .sort((a, b) => dateToUtcMs(a) - dateToUtcMs(b));
+  const departureDates = tripDateRanges
+    .map(range => toDateInput(range.departureDate))
+    .filter(Boolean)
+    .sort((a, b) => dateToUtcMs(a) - dateToUtcMs(b));
+  const arrivalDate = arrivalDates[0] || "";
+  const departureDate = departureDates[departureDates.length - 1] || "";
 
   if (validationSections.has("arrDep")) {
     if (!quotationStartDate || !quotationEndDate) {
       return "Quotation dates are missing or invalid.";
     }
 
-    if (scheduleType === ARR_DEP_SCHEDULE_TYPES.SINGLE) {
-      const arrivalRows = arrDepRows.filter(
+    if (!selectedTypes.length) {
+      return null;
+    }
+
+    if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.SINGLE)) {
+      const singleRows = getArrDepRowsForType(
+        draft,
+        ARR_DEP_SCHEDULE_TYPES.SINGLE
+      );
+      const arrivalRows = singleRows.filter(
         (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
       );
-      const departureRows = arrDepRows.filter(
+      const departureRows = singleRows.filter(
         (row, index) => getArrDepLabel(row, index).toLowerCase() === "departure"
       );
 
@@ -1494,11 +1623,14 @@ const validateReservationDates = ({ draft, quotation, sections }) => {
       }
     }
 
-    if (scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE && !arrDepRows.length) {
+    if (
+      selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.MULTIPLE) &&
+      !getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.MULTIPLE).length
+    ) {
       return "At least one Arrival / Departure row is required for Multiple Dates.";
     }
 
-    if (scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) {
+    if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.WEEKLY)) {
       if (!toDateInput(schedule?.repeatFrom)) {
         return "Weekly Repeat From date is required.";
       }
@@ -1511,12 +1643,12 @@ const validateReservationDates = ({ draft, quotation, sections }) => {
       ) {
         return "Weekly Repeat From date must not be after Repeat Until date.";
       }
-      if (!arrDepRows.length) {
+      if (!getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.WEEKLY).length) {
         return "At least one weekly Arrival / Departure row is required.";
       }
     }
 
-    for (const [index, row] of arrDepRows.entries()) {
+    for (const [index, row] of combinedRows.entries()) {
       const rowLabel = getArrDepLabel(row, index);
       if (!["arrival", "departure"].includes(rowLabel.toLowerCase())) {
         return `Type is required for Arrival / Departure row ${index + 1}.`;
@@ -1525,13 +1657,13 @@ const validateReservationDates = ({ draft, quotation, sections }) => {
         return `Pax must be a valid non-negative integer in Arrival / Departure (${rowLabel}).`;
       }
       if (
-        scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE &&
+        row.scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE &&
         !toDateInput(row?.date)
       ) {
         return `Date is required for Arrival / Departure (${rowLabel}).`;
       }
       if (
-        scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY &&
+        row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY &&
         !String(row?.weekday || "").trim()
       ) {
         return `Weekday is required for weekly Arrival / Departure (${rowLabel}).`;
@@ -1539,15 +1671,11 @@ const validateReservationDates = ({ draft, quotation, sections }) => {
     }
 
     if (!arrivalDate) {
-      return scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE
-        ? "At least one valid movement date is required."
-        : "Arrival date is required.";
+      return "At least one valid arrival / departure date is required.";
     }
 
     if (!departureDate) {
-      return scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY
-        ? "Weekly Repeat Until date is required."
-        : "Departure date is required.";
+      return "At least one valid departure / schedule end date is required.";
     }
 
     if (dateToUtcMs(departureDate) < dateToUtcMs(arrivalDate)) {
@@ -1638,8 +1766,8 @@ const validateReservationDates = ({ draft, quotation, sections }) => {
   };
 
   if (validationSections.has("arrDep")) {
-    for (const [index, row] of asArray(draft?.arrDep).entries()) {
-      if (scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) continue;
+    for (const [index, row] of combinedRows.entries()) {
+      if (row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) continue;
       const rowLabel = getArrDepLabel(row, index);
       const rangeError = validateSingleDate("Arrival / Departure", rowLabel, "Date", row?.date);
       if (rangeError) return rangeError;
@@ -1934,6 +2062,7 @@ const ReservationFileDetails = () => {
   );
   const [activeSection, setActiveSection] = useState("RES Details");
   const [draft, setDraft] = useState(null);
+  const [selectedScheduleTypes, setSelectedScheduleTypes] = useState([]);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [activeClientsTab, setActiveClientsTab] = useState(
@@ -1984,6 +2113,7 @@ const ReservationFileDetails = () => {
     () => (defaults ? mergeDraft(defaults, selected?.RESERVATION_DATA || {}) : null),
     [defaults, selected?.RESERVATION_DATA]
   );
+  const loadedReservationId = getId(selected?._id);
   const initialCurrentUserName = useMemo(() => getCurrentUserName(), []);
   const [currentUserName, setCurrentUserName] = useState(initialCurrentUserName);
   const currentUserEmail = useMemo(() => getCurrentUserEmail(), []);
@@ -2074,12 +2204,15 @@ const ReservationFileDetails = () => {
   }, [dispatch]);
 
   useEffect(() => {
-    if (!defaults) {
-      setDraft(null);
-      return;
-    }
+    if (!loadedReservationId || !savedDraft) return;
+
     setDraft(savedDraft);
-  }, [defaults, savedDraft]);
+    setSelectedScheduleTypes(
+      normalizeArrDepScheduleTypes(savedDraft?.arrDepSchedule)
+    );
+    // Schedule selection is initialized only when a different reservation loads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedReservationId]);
 
   useEffect(() => {
     if (!pendingAccommodationOptionKey && accommodationOptionChoices.length) {
@@ -2158,11 +2291,106 @@ const ReservationFileDetails = () => {
     }));
   };
 
-  const handleArrDepTypeChange = (index, movementType) => {
-    updateRowFields("arrDep", index, {
-      movementType,
-      arr: movementType === "Arrival",
-      dep: movementType === "Departure",
+  const updateArrDepScheduleRows = (type, rows) => {
+    setDraft(prev => {
+      const rowsByType = {
+        ...(prev?.arrDepSchedule?.rowsByType || {}),
+        [type]: rows,
+      };
+
+      return {
+        ...prev,
+        arrDepSchedule: {
+          ...(prev?.arrDepSchedule || {}),
+          rowsByType,
+        },
+        arrDep: buildCombinedArrDepRows(rowsByType, selectedScheduleTypes),
+      };
+    });
+  };
+
+  const updateArrDepRow = (type, index, field, value) => {
+    setDraft(prev => {
+      const rowsByType = { ...(prev?.arrDepSchedule?.rowsByType || {}) };
+      rowsByType[type] = asArray(rowsByType[type]).map((row, rowIndex) =>
+        rowIndex === index ? { ...row, [field]: value } : row
+      );
+
+      return {
+        ...prev,
+        arrDepSchedule: {
+          ...(prev?.arrDepSchedule || {}),
+          rowsByType,
+        },
+        arrDep: buildCombinedArrDepRows(rowsByType, selectedScheduleTypes),
+      };
+    });
+  };
+
+  const addArrDepRow = type => {
+    const row = emptyRow.arrDep();
+    if (type === ARR_DEP_SCHEDULE_TYPES.WEEKLY) {
+      row.date = "";
+    }
+
+    updateArrDepScheduleRows(type, [
+      ...getArrDepRowsForType(draft, type),
+      row,
+    ]);
+  };
+
+  const removeArrDepRowNow = (type, index) => {
+    updateArrDepScheduleRows(
+      type,
+      getArrDepRowsForType(draft, type).filter((_, rowIndex) => rowIndex !== index)
+    );
+  };
+
+  const removeArrDepRow = (type, index) => {
+    const row = getArrDepRowsForType(draft, type)[index];
+    const rowLabel = getArrDepLabel(row, index);
+    const typeLabel =
+      scheduleTypeOptions.find(option => option.value === type)?.label ||
+      "Arrival / Departure";
+    setConfirmDelete({
+      itemName: rowLabel,
+      message: `Are you sure you want to delete this ${typeLabel} row${rowLabel ? ` (${rowLabel})` : ""}?`,
+      onConfirm: () => removeArrDepRowNow(type, index),
+    });
+  };
+
+  const toggleScheduleType = type => {
+    setSelectedScheduleTypes(current => {
+      if (current.includes(type)) {
+        return current.filter(item => item !== type);
+      }
+
+      return [...current, type];
+    });
+  };
+
+  const handleArrDepTypeChange = (type, index, movementType) => {
+    setDraft(prev => {
+      const rowsByType = { ...(prev?.arrDepSchedule?.rowsByType || {}) };
+      rowsByType[type] = asArray(rowsByType[type]).map((row, rowIndex) =>
+        rowIndex === index
+          ? {
+              ...row,
+              movementType,
+              arr: movementType === "Arrival",
+              dep: movementType === "Departure",
+            }
+          : row
+      );
+
+      return {
+        ...prev,
+        arrDepSchedule: {
+          ...(prev?.arrDepSchedule || {}),
+          rowsByType,
+        },
+        arrDep: buildCombinedArrDepRows(rowsByType, selectedScheduleTypes),
+      };
     });
   };
 
@@ -2641,6 +2869,7 @@ const ReservationFileDetails = () => {
     const reservationDateError = validateReservationDates({
       draft,
       quotation,
+      selectedScheduleTypes,
       sections: validationPlan.dateSections,
     });
     if (reservationDateError) {
@@ -2675,9 +2904,17 @@ const ReservationFileDetails = () => {
       }
       roomingList = roomingListResult.rows;
     }
-
     const draftForSave = {
       ...draft,
+      arrDepSchedule: {
+        ...(draft?.arrDepSchedule || {}),
+        type: selectedScheduleTypes[0] || ARR_DEP_SCHEDULE_TYPES.SINGLE,
+        types: selectedScheduleTypes,
+      },
+      arrDep: buildCombinedArrDepRows(
+        draft?.arrDepSchedule?.rowsByType || {},
+        selectedScheduleTypes
+      ),
       roomingList,
     };
 
@@ -3182,186 +3419,231 @@ const ReservationFileDetails = () => {
     </>
   );
 
-  const renderArrDep = () => (
-    <>
-      <SectionHeader title="Arrival / Departure" fileReference={referenceTitle}>
-        <SaveChangesButton onClick={handleSave} disabled={saving} />
-      </SectionHeader>
-      <Row className="align-items-end g-3 mb-3">
-        <Col md="4">
-          <Label className="form-label">Schedule Type</Label>
-          <Input
-            type="select"
-            value={draft?.arrDepSchedule?.type || ARR_DEP_SCHEDULE_TYPES.SINGLE}
-            onChange={e => updateArrDepSchedule("type", e.target.value)}
-          >
-            {ARR_DEP_SCHEDULE_OPTIONS.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Input>
-        </Col>
-        {draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.MULTIPLE ||
-        draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.WEEKLY ? (
-          <Col md="8" className="text-md-end">
-            <Button color="success" type="button" onClick={() => addRow("arrDep")}>
+  const renderArrDepTable = type => {
+    const option = scheduleTypeOptions.find(item => item.value === type);
+    const rows = getArrDepRowsForType(draft, type);
+    const isSingle = type === ARR_DEP_SCHEDULE_TYPES.SINGLE;
+    const isWeekly = type === ARR_DEP_SCHEDULE_TYPES.WEEKLY;
+
+    return (
+      <div className="rounded border bg-white p-3 mb-3" key={type}>
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h5 className="mb-1">{option?.label || "Schedule"}</h5>
+            <div className="text-muted small">
+              {isSingle
+                ? "One arrival row and one departure row."
+                : isWeekly
+                ? "Recurring movements by weekday."
+                : "Separate arrival/departure movements by date."}
+            </div>
+          </div>
+          {!isSingle ? (
+            <Button color="success" type="button" onClick={() => addArrDepRow(type)}>
               Add Row
             </Button>
-          </Col>
+          ) : null}
+        </div>
+
+        {isWeekly ? (
+          <Row className="g-3 mb-3">
+            <Col md="3">
+              <Label className="form-label">Repeat From</Label>
+              <Input
+                type="date"
+                value={text(draft?.arrDepSchedule?.repeatFrom)}
+                onChange={e => updateArrDepSchedule("repeatFrom", e.target.value)}
+              />
+            </Col>
+            <Col md="3">
+              <Label className="form-label">Repeat Until</Label>
+              <Input
+                type="date"
+                value={text(draft?.arrDepSchedule?.repeatUntil)}
+                onChange={e => updateArrDepSchedule("repeatUntil", e.target.value)}
+              />
+            </Col>
+          </Row>
         ) : null}
-      </Row>
 
-      {draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.WEEKLY ? (
-        <Row className="g-3 mb-3">
-          <Col md="3">
-            <Label className="form-label">Repeat From</Label>
-            <Input
-              type="date"
-              value={text(draft?.arrDepSchedule?.repeatFrom)}
-              onChange={e => updateArrDepSchedule("repeatFrom", e.target.value)}
-            />
-          </Col>
-          <Col md="3">
-            <Label className="form-label">Repeat Until</Label>
-            <Input
-              type="date"
-              value={text(draft?.arrDepSchedule?.repeatUntil)}
-              onChange={e => updateArrDepSchedule("repeatUntil", e.target.value)}
-            />
-          </Col>
-        </Row>
-      ) : null}
-
-      <div className="table-responsive">
-        <Table bordered className="align-middle bg-light">
-          <thead>
-            <tr>
-              {[
-                "Type",
-                draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.WEEKLY
-                  ? "Weekday"
-                  : "Date",
-                "From",
-                "To",
-                "Border",
-                "Flight",
-                "Time",
-                "Pax",
-                "Meet By",
-                "Driver Name",
-                "Notes",
-                draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.SINGLE
-                  ? ""
-                  : "Action",
-              ].map(head => (
-                <th key={head}>{head}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {asArray(draft?.arrDep).map((row, index) => (
-              <tr key={row._sourceKey || index}>
-                <td>
-                  {draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.SINGLE ? (
-                    <span className="fw-semibold">{getArrDepLabel(row, index)}</span>
-                  ) : (
-                    <Input
-                      type="select"
-                      value={getArrDepLabel(row, index)}
-                      onChange={e => handleArrDepTypeChange(index, e.target.value)}
-                    >
-                      {ARR_DEP_MOVEMENT_OPTIONS.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Input>
-                  )}
-                </td>
-                <td>
-                  {draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.WEEKLY ? (
-                    <Input
-                      type="select"
-                      value={text(row.weekday)}
-                      onChange={e =>
-                        updateRow("arrDep", index, "weekday", e.target.value)
-                      }
-                    >
-                      <option value="">Select weekday</option>
-                      {WEEKDAY_OPTIONS.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Input>
-                  ) : (
-                    <Input
-                      type="date"
-                      value={text(row.date)}
-                      onChange={e =>
-                        updateRow("arrDep", index, "date", e.target.value)
-                      }
-                    />
-                  )}
-                </td>
-                <td><Input value={text(row.from)} onChange={e => updateRow("arrDep", index, "from", e.target.value)} /></td>
-                <td><Input value={text(row.to)} onChange={e => updateRow("arrDep", index, "to", e.target.value)} /></td>
-                <td><Input value={text(row.border)} onChange={e => updateRow("arrDep", index, "border", e.target.value)} /></td>
-                <td><Input value={text(row.flight)} onChange={e => updateRow("arrDep", index, "flight", e.target.value)} /></td>
-                <td><Input type="time" value={text(row.time)} onChange={e => updateRow("arrDep", index, "time", e.target.value)} /></td>
-                <td><Input type="number" value={text(row.pax)} onChange={e => updateRow("arrDep", index, "pax", e.target.value)} /></td>
-                <td>
-                  <Input
-                    type="select"
-                    value={text(row.meetBy)}
-                    onChange={e =>
-                      updateRow("arrDep", index, "meetBy", e.target.value)
-                    }
-                  >
-                    {withCurrentOption(
-                      contractingUserOptions,
-                      row.meetBy
-                    ).map(option => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Input>
-                </td>
-                <td><Input value={text(row.driverName)} onChange={e => updateRow("arrDep", index, "driverName", e.target.value)} /></td>
-                <td><Input type="textarea" value={text(row.notes)} onChange={e => updateRow("arrDep", index, "notes", e.target.value)} /></td>
-                {draft?.arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.SINGLE ? (
-                  <td />
-                ) : (
-                  <td>
-                    <Button
-                      color="danger"
-                      size="sm"
-                      type="button"
-                      onClick={() => removeRow("arrDep", index)}
-                    >
-                      Remove
-                    </Button>
-                  </td>
-                )}
-              </tr>
-            ))}
-            {!asArray(draft?.arrDep).length ? (
+        <div className="table-responsive">
+          <Table bordered className="align-middle bg-light mb-0">
+            <thead>
               <tr>
-                <td
-                  colSpan="12"
-                  className="text-center text-muted py-4"
-                >
-                  No arrival / departure rows found.
-                </td>
+                {[
+                  "Type",
+                  isWeekly ? "Weekday" : "Date",
+                  "From",
+                  "To",
+                  "Border",
+                  "Flight",
+                  "Time",
+                  "Pax",
+                  "Meet By",
+                  "Driver Name",
+                  "Notes",
+                  isSingle ? "" : "Action",
+                ].map(head => (
+                  <th key={head}>{head}</th>
+                ))}
               </tr>
-            ) : null}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={row._sourceKey || index}>
+                  <td>
+                    {isSingle ? (
+                      <span className="fw-semibold">{getArrDepLabel(row, index)}</span>
+                    ) : (
+                      <Input
+                        type="select"
+                        value={getArrDepLabel(row, index)}
+                        onChange={e =>
+                          handleArrDepTypeChange(type, index, e.target.value)
+                        }
+                      >
+                        {ARR_DEP_MOVEMENT_OPTIONS.map(item => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </Input>
+                    )}
+                  </td>
+                  <td>
+                    {isWeekly ? (
+                      <Input
+                        type="select"
+                        value={text(row.weekday)}
+                        onChange={e =>
+                          updateArrDepRow(type, index, "weekday", e.target.value)
+                        }
+                      >
+                        <option value="">Select weekday</option>
+                        {WEEKDAY_OPTIONS.map(item => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </Input>
+                    ) : (
+                      <Input
+                        type="date"
+                        value={text(row.date)}
+                        onChange={e =>
+                          updateArrDepRow(type, index, "date", e.target.value)
+                        }
+                      />
+                    )}
+                  </td>
+                  <td><Input value={text(row.from)} onChange={e => updateArrDepRow(type, index, "from", e.target.value)} /></td>
+                  <td><Input value={text(row.to)} onChange={e => updateArrDepRow(type, index, "to", e.target.value)} /></td>
+                  <td><Input value={text(row.border)} onChange={e => updateArrDepRow(type, index, "border", e.target.value)} /></td>
+                  <td><Input value={text(row.flight)} onChange={e => updateArrDepRow(type, index, "flight", e.target.value)} /></td>
+                  <td><Input type="time" value={text(row.time)} onChange={e => updateArrDepRow(type, index, "time", e.target.value)} /></td>
+                  <td><Input type="number" value={text(row.pax)} onChange={e => updateArrDepRow(type, index, "pax", e.target.value)} /></td>
+                  <td>
+                    <Input
+                      type="select"
+                      value={text(row.meetBy)}
+                      onChange={e =>
+                        updateArrDepRow(type, index, "meetBy", e.target.value)
+                      }
+                    >
+                      {withCurrentOption(contractingUserOptions, row.meetBy).map(item => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </Input>
+                  </td>
+                  <td><Input value={text(row.driverName)} onChange={e => updateArrDepRow(type, index, "driverName", e.target.value)} /></td>
+                  <td><Input type="textarea" value={text(row.notes)} onChange={e => updateArrDepRow(type, index, "notes", e.target.value)} /></td>
+                  {isSingle ? (
+                    <td />
+                  ) : (
+                    <td>
+                      <Button
+                        color="danger"
+                        size="sm"
+                        type="button"
+                        onClick={() => removeArrDepRow(type, index)}
+                      >
+                        Remove
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {!rows.length ? (
+                <tr>
+                  <td colSpan="12" className="text-center text-muted py-4">
+                    No arrival / departure rows found.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </Table>
+        </div>
       </div>
-    </>
-  );
+    );
+  };
+
+  const renderArrDep = () => {
+    return (
+      <>
+        <SectionHeader title="Arrival / Departure" fileReference={referenceTitle}>
+          <Button color="primary" onClick={handleSave} disabled={saving}>
+            Save Changes
+          </Button>
+        </SectionHeader>
+        <div className="rounded border bg-light p-3 mb-3">
+          <Label className="form-label fw-semibold d-block mb-2">
+            Schedule Type
+          </Label>
+          <div className="schedule-type-options d-flex flex-wrap gap-2">
+            {scheduleTypeOptions.map(option => {
+              const isSelected = selectedScheduleTypes.includes(option.value);
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={isSelected}
+                  className={`schedule-type-option btn d-inline-flex align-items-center justify-content-center ${
+                    isSelected ? "btn-primary" : "btn-outline-secondary"
+                  }`}
+                  style={{ minWidth: "190px" }}
+                  onClick={() => toggleScheduleType(option.value)}
+                >
+                  <span
+                    className={`schedule-type-indicator d-inline-flex align-items-center justify-content-center rounded-circle border me-2 ${
+                      isSelected
+                        ? "schedule-type-indicator--active border-white"
+                        : "border-secondary"
+                    }`}
+                    style={{ width: "20px", height: "20px", flexShrink: 0 }}
+                    aria-hidden="true"
+                  >
+                    {isSelected ? "✓" : ""}
+                  </span>
+
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {selectedScheduleTypes.includes("singlePeriod") &&
+          renderArrDepTable("singlePeriod")}
+        {selectedScheduleTypes.includes("multipleDates") &&
+          renderArrDepTable("multipleDates")}
+        {selectedScheduleTypes.includes("weeklyRecurring") &&
+          renderArrDepTable("weeklyRecurring")}
+      </>
+    );
+  };
 
   const renderHotels = () => (
     <>
