@@ -28,6 +28,7 @@ import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
 import { get, post } from "../../helpers/api_helper";
 import { fetchListItems } from "../../helpers/list_items_helper";
+import { calculateOptionSupplementTotals } from "../../helpers/quotation_supplements";
 import {
   fetchQuotationPricing,
   rejectQuotationPricing,
@@ -146,6 +147,182 @@ const asArray = value => {
   if (Array.isArray(value)) return value;
   if (!value) return [];
   return [value];
+};
+
+const parsePaxGroups = value => {
+  const expression = String(value || "").trim();
+  if (!expression) return [];
+
+  return expression
+    .split(",")
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+      const numberMatch = part.match(/^\d+$/);
+      if (!rangeMatch && !numberMatch) return null;
+
+      const min = rangeMatch ? Number(rangeMatch[1]) : Number(part);
+      const max = rangeMatch ? Number(rangeMatch[2]) : Number(part);
+      if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min) {
+        return null;
+      }
+
+      return {
+        min,
+        max,
+        label: min === max ? String(min) : `${min}-${max}`,
+      };
+    })
+    .filter(Boolean);
+};
+
+const comparePaxGroups = (a, b) => {
+  const minDiff = Number(a?.min || 0) - Number(b?.min || 0);
+  if (minDiff !== 0) return minDiff;
+  return Number(a?.max || 0) - Number(b?.max || 0);
+};
+
+const sortPaxGroups = groups =>
+  [...groups]
+    .sort(comparePaxGroups)
+    .map((group, index) => ({ ...group, index }));
+
+const normalizePaxGroups = (...sources) => {
+  for (const source of sources) {
+    const groups = asArray(source?.PAX_GROUPS)
+      .map(group => {
+        const min = Number(group?.min ?? group?.MIN ?? group?.PAX_MIN);
+        const max = Number(group?.max ?? group?.MAX ?? group?.PAX_MAX ?? min);
+        if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min) {
+          return null;
+        }
+
+        return {
+          min,
+          max,
+          label: String(group?.label || (min === max ? min : `${min}-${max}`)),
+        };
+      })
+      .filter(Boolean);
+
+    if (groups.length) {
+      return sortPaxGroups(groups);
+    }
+
+    const parsed = parsePaxGroups(source?.NUMBER_OF_PAX_TEXT);
+    if (parsed.length) {
+      return sortPaxGroups(parsed);
+    }
+  }
+
+  const pax = Number(
+    sources.find(source => Number(source?.NUMBER_OF_PAX) > 0)?.NUMBER_OF_PAX || 0
+  );
+
+  return pax > 0 ? sortPaxGroups([{ min: pax, max: pax, label: String(pax) }]) : [];
+};
+
+const getPaxGroupKey = group =>
+  `pax-${group?.index ?? 0}-${group?.min || ""}-${group?.max || ""}`;
+
+const getPaxGroupLabel = group => {
+  const label = String(group?.label || "").trim();
+  if (label) return label;
+  return Number(group?.min) === Number(group?.max)
+    ? String(group?.min || "")
+    : `${group?.min || ""}-${group?.max || ""}`;
+};
+
+const formatPaxGroupLabel = group => {
+  const label = getPaxGroupLabel(group);
+  if (!label) return "-";
+  return /pax$/i.test(label) ? label : `${label} Pax`;
+};
+
+const getPaxGroupMin = group =>
+  Number(group?.min || group?.paxMin || group?.pax || 0) || 0;
+
+const getPaxGroupPax = group => Number(group?.max || group?.min || 0) || 0;
+
+const getSharedCostPerPerson = (amount, paxMinimum) => {
+  const value = Number(amount || 0) || 0;
+  const denominator = Number(paxMinimum || 0) || 0;
+  return denominator > 0 ? Math.ceil(value / denominator) : value;
+};
+
+const getOptionPaxSortValue = option => {
+  const paxMin = Number(option?.paxMin ?? option?.PAX_MIN ?? option?.min);
+  if (Number.isFinite(paxMin) && paxMin > 0) return paxMin;
+
+  const label = String(option?.paxLabel || option?.PAX_LABEL || option?.label || "");
+  const match = label.match(/\d+/);
+  if (match) return Number(match[0]);
+
+  const pax = Number(option?.pax || option?.paxMax || option?.PAX_MAX || option?.max);
+  return Number.isFinite(pax) && pax > 0 ? pax : Number.MAX_SAFE_INTEGER;
+};
+
+const compareOptionByPax = (a, b) => {
+  const paxDiff = getOptionPaxSortValue(a) - getOptionPaxSortValue(b);
+  if (paxDiff !== 0) return paxDiff;
+
+  const optionDiff = Number(a?.optionIndex ?? 0) - Number(b?.optionIndex ?? 0);
+  if (optionDiff !== 0) return optionDiff;
+
+  return String(a?.optionName || "").localeCompare(String(b?.optionName || ""));
+};
+
+const rowMatchesPaxGroup = (row, group) => {
+  if (!row || !group) return false;
+  const rowLabel = String(row?.PAX_LABEL || row?.paxLabel || row?.label || "").trim();
+  const groupLabel = getPaxGroupLabel(group);
+  const normalizedRowLabel = rowLabel.replace(/\s*pax$/i, "");
+  const normalizedGroupLabel = groupLabel.replace(/\s*pax$/i, "");
+
+  if (rowLabel && groupLabel && rowLabel === groupLabel) return true;
+  if (
+    normalizedRowLabel &&
+    normalizedGroupLabel &&
+    normalizedRowLabel === normalizedGroupLabel
+  ) {
+    return true;
+  }
+
+  const rowMin = Number(row?.PAX_MIN ?? row?.paxMin ?? row?.min);
+  const rowMax = Number(row?.PAX_MAX ?? row?.paxMax ?? row?.max ?? rowMin);
+
+  return rowMin === group.min && rowMax === group.max;
+};
+
+const rowsForPaxGroup = (rows, group, allowSingleFallback = false) => {
+  const sourceRows = asArray(rows);
+  const matched = sourceRows.filter(row => rowMatchesPaxGroup(row, group));
+  if (matched.length) return matched;
+  if (allowSingleFallback && sourceRows.length === 1) return sourceRows;
+  return [];
+};
+
+const getDayGuideKey = (day, group) =>
+  `${getId(day) || String(day?.DAY_ORDER || "")}__${getPaxGroupKey(group)}`;
+
+const getGuideRowForPaxGroup = (day, group, allowSingleFallback = false) => {
+  const guide = day?.guide || {};
+  const rows = asArray(guide?.rows);
+  const matchedRows = rowsForPaxGroup(rows, group, allowSingleFallback);
+  if (matchedRows[0]) return matchedRows[0];
+  if (allowSingleFallback && guide?.enabled) {
+    return {
+      PAX_LABEL: getPaxGroupLabel(group),
+      PAX_MIN: group.min,
+      PAX_MAX: group.max,
+      enabled: true,
+      GUIDE_TYPE: guide?.GUIDE_TYPE,
+      GUIDE_TYPE_NAME: guide?.GUIDE_TYPE_NAME,
+      GUIDE_COST: guide?.GUIDE_COST,
+    };
+  }
+  return null;
 };
 
 const getSeasonKey = season =>
@@ -526,29 +703,47 @@ const QuotationPricingDetails = () => {
   }, [selected]);
 
   const boardBasis = String(selected?.BOARD_BASIS || "").toUpperCase();
-  const pax = Number(
-    financeData?.DAYS?.[0]?.SNAPSHOT?.QUOTATION?.NUMBER_OF_PAX ||
-      financeData?.ACCOMMODATION?.NUMBER_OF_PAX ||
-      selected?.SNAPSHOT?.QUOTATION?.NUMBER_OF_PAX ||
-      quotation?.NUMBER_OF_PAX ||
-      0
-  ) || 0;
+  const paxGroups = useMemo(
+    () =>
+      normalizePaxGroups(
+        selected?.SNAPSHOT?.QUOTATION,
+        selected,
+        quotation,
+        financeData?.ACCOMMODATION
+      ),
+    [selected, quotation, financeData]
+  );
+  const pax = paxGroups.length
+    ? Math.max(...paxGroups.map(group => getPaxGroupPax(group)))
+    : 0;
+  const paxLabel = paxGroups.length
+    ? paxGroups.map(formatPaxGroupLabel).join(", ")
+    : pax || "-";
 
   useEffect(() => {
     const days = Array.isArray(financeData?.DAYS) ? financeData.DAYS : [];
     const next = {};
 
     days.forEach(day => {
-      const key = getId(day) || String(day?.DAY_ORDER || "");
-      if (!key) return;
+      paxGroups.forEach(group => {
+        const key = getDayGuideKey(day, group);
+        if (!key) return;
 
-      const totalGuideCost = Number(day?.guide?.GUIDE_COST || 0) || 0;
-      next[key] = totalGuideCost ? String(totalGuideCost) : "";
+        const guideRow = getGuideRowForPaxGroup(day, group, paxGroups.length === 1);
+        if (!guideRow || !(guideRow.enabled || guideRow.required)) return;
+
+        const totalGuideCost = Number(
+          guideRow?.GUIDE_COST ??
+            (paxGroups.length === 1 ? day?.guide?.GUIDE_COST : 0) ??
+            0
+        ) || 0;
+        next[key] = totalGuideCost ? String(totalGuideCost) : "";
+      });
     });
 
     setGuidePrices(next);
     setGuideTouched({});
-  }, [financeData]);
+  }, [financeData, paxGroups]);
 
   const profitErrors = useMemo(() => {
     const next = {};
@@ -576,7 +771,7 @@ const QuotationPricingDetails = () => {
       ...collectAccommodationEntries(financeData),
     ];
 
-    const resolveHotelBoardBase = seasonRates => {
+    const resolveHotelBoardBase = (seasonRates, paxForGroup) => {
       const bb = Number(seasonRates?.BB_RATE_AMOUNT || 0);
       const hb = Number(seasonRates?.HB_RATE_AMOUNT || 0);
       const fb = Number(seasonRates?.FB_RATE_AMOUNT || 0);
@@ -590,7 +785,7 @@ const QuotationPricingDetails = () => {
         perPerson = bb + fb;
       }
 
-      if (pax === 1) {
+      if (Number(paxForGroup) === 1) {
         perPerson += ss;
       }
 
@@ -806,7 +1001,15 @@ const QuotationPricingDetails = () => {
                   0
                 );
 
-                return seasonTotal + perNight * Number(row.nights || 0);
+                const resolvedStayTotal =
+                  row.costStayPerPerson ?? row.stayPerPerson ?? null;
+
+                return (
+                  seasonTotal +
+                  (resolvedStayTotal !== null
+                    ? Number(resolvedStayTotal || 0)
+                    : perNight * Number(row.nights || 0))
+                );
               }, 0)
             );
           }, 0),
@@ -821,9 +1024,16 @@ const QuotationPricingDetails = () => {
     const accommodationRows = [];
     let accommodationTotal = 0;
 
-    accommodationOptions.forEach((option, optionIndex) => {
-      const optionKey = getId(option) || `${option?.OPTION_NAME || "Option"}-${optionIndex}`;
-      const cityGroups = Array.isArray(option?.CITY_GROUPS) ? option.CITY_GROUPS : [];
+    paxGroups.forEach((paxGroup, paxGroupIndex) => {
+      const paxForGroup = getPaxGroupPax(paxGroup);
+      const paxGroupKey = getPaxGroupKey(paxGroup);
+      const paxGroupLabel = formatPaxGroupLabel(paxGroup);
+
+      accommodationOptions.forEach((option, optionIndex) => {
+        const baseOptionKey =
+          getId(option) || `${option?.OPTION_NAME || "Option"}-${optionIndex}`;
+        const optionKey = `${baseOptionKey}__${paxGroupKey}`;
+        const cityGroups = Array.isArray(option?.CITY_GROUPS) ? option.CITY_GROUPS : [];
 
       cityGroups.forEach(cityGroup => {
         const stays = Array.isArray(cityGroup?.STAYS) ? cityGroup.STAYS : [];
@@ -887,7 +1097,10 @@ const QuotationPricingDetails = () => {
               ...(stay?.SEASON_RATES || {}),
               ...(season || {}),
             };
-            const { bb, hb, fb, ss, perPerson } = resolveHotelBoardBase(seasonRates);
+            const { bb, hb, fb, ss, perPerson } = resolveHotelBoardBase(
+              seasonRates,
+              paxForGroup
+            );
             const seasonStartDate = getDateValue(
               seasonRates?.FROM_DATE,
               seasonRates?.START_DATE,
@@ -921,12 +1134,20 @@ const QuotationPricingDetails = () => {
 
             const stayPerPerson = perPerson * displayNights;
             const costStayPerPerson = perPerson * costNights;
-            const stayTotal = costStayPerPerson * pax;
+            const stayTotal = costStayPerPerson * paxForGroup;
 
             accommodationTotal += stayTotal;
 
             accommodationRows.push({
+              paxGroupIndex,
+              paxGroupKey,
+              paxLabel: paxGroupLabel,
+              paxMin: paxGroup.min,
+              paxMax: paxGroup.max,
+              pax: paxForGroup,
+              baseOptionKey,
               optionKey,
+              optionIndex,
               optionName: option?.OPTION_NAME || "-",
               cityName: cityGroup?.CITY_NAME || stay?.HOTEL_CITY_VALUE || "-",
               overnightDate: stayStartDate,
@@ -964,14 +1185,22 @@ const QuotationPricingDetails = () => {
         });
       });
     });
+    });
 
-    const accommodationOptionsList = accommodationOptions.map((option, optionIndex) => {
-      const optionKey = getId(option) || `${option?.OPTION_NAME || "Option"}-${optionIndex}`;
-      const optionName = option?.OPTION_NAME || `Option ${optionIndex + 1}`;
-      const rows = Object.values(
-        accommodationRows
-          .filter(row => row.optionKey === optionKey)
-          .reduce((acc, row) => {
+    const accommodationOptionsList = paxGroups.flatMap((paxGroup, paxGroupIndex) => {
+      const paxGroupKey = getPaxGroupKey(paxGroup);
+      const paxGroupLabel = formatPaxGroupLabel(paxGroup);
+      const paxForGroup = getPaxGroupPax(paxGroup);
+
+      return accommodationOptions.map((option, optionIndex) => {
+        const baseOptionKey =
+          getId(option) || `${option?.OPTION_NAME || "Option"}-${optionIndex}`;
+        const optionKey = `${baseOptionKey}__${paxGroupKey}`;
+        const optionName = option?.OPTION_NAME || `Option ${optionIndex + 1}`;
+        const rows = Object.values(
+          accommodationRows
+            .filter(row => row.optionKey === optionKey)
+            .reduce((acc, row) => {
             const key = [
               row.hotelId || normalizeKey(row.hotelName),
               normalizeKey(row.seasonName),
@@ -1007,57 +1236,79 @@ const QuotationPricingDetails = () => {
             };
 
             return acc;
+            }, {})
+        );
+        const hotelStayRows = Object.values(
+          rows.reduce((acc, row) => {
+            const key = `${row.cityName}-${row.hotelName}`;
+
+            if (!acc[key]) {
+              acc[key] = {
+                cityName: row.cityName,
+                hotelName: row.hotelName,
+                nights: row.totalHotelNights || row.nights,
+              };
+            }
+            return acc;
           }, {})
-      );
-      const hotelStayRows = Object.values(
-        rows.reduce((acc, row) => {
-          const key = `${row.cityName}-${row.hotelName}`;
+        );
+        const supplementRows = buildSupplementRows(rows);
+        const supplementGroups = Object.values(
+          supplementRows.reduce((acc, row) => {
+            const key = `${row.duration}-${row.seasons}`;
 
-          if (!acc[key]) {
-            acc[key] = {
-              cityName: row.cityName,
-              hotelName: row.hotelName,
-              nights: row.totalHotelNights || row.nights,
-            };
-          }
-          return acc;
-        }, {})
-      );
-      const supplementRows = buildSupplementRows(rows);
-      const supplementGroups = Object.values(
-        supplementRows.reduce((acc, row) => {
-          const key = `${row.duration}-${row.seasons}`;
+            if (!acc[key]) {
+              acc[key] = {
+                duration: row.duration,
+                seasons: row.seasons,
+                rows: [],
+              };
+            }
 
-          if (!acc[key]) {
-            acc[key] = {
-              duration: row.duration,
-              seasons: row.seasons,
-              rows: [],
-            };
-          }
+            acc[key].rows.push(row);
+            return acc;
+          }, {})
+        );
 
-          acc[key].rows.push(row);
-          return acc;
-        }, {})
-      );
-
-      return {
-        optionKey,
-        optionName,
-        optionStars: option?.SELECTED_HOTEL_STARS || rows[0]?.hotelStars || "",
-        rows,
-        hotelStayRows,
-        hotelsPerPerson: getSelectedHotelPriceTotal(rows),
-        supplementRows,
-        supplementGroups,
-      };
-    });
+        return {
+          optionKey,
+          optionBaseKey: baseOptionKey,
+          optionIndex,
+          optionName,
+          optionStars: option?.SELECTED_HOTEL_STARS || rows[0]?.hotelStars || "",
+          paxGroupIndex,
+          paxGroupKey,
+          paxLabel: paxGroupLabel,
+          paxMin: paxGroup.min,
+          paxMax: paxGroup.max,
+          pax: paxForGroup,
+          rows,
+          hotelStayRows,
+          hotelsPerPerson: getSelectedHotelPriceTotal(rows),
+          supplementTotals: calculateOptionSupplementTotals(rows),
+          supplementRows,
+          supplementGroups,
+        };
+      });
+    }).sort(compareOptionByPax);
 
     const daysRows = [];
-    let transportationTotal = 0;
-    let mealsTotal = 0;
-    let entranceFeesTotal = 0;
-    let guideTotal = 0;
+    const groupTotals = new Map(
+      paxGroups.map(group => [
+        getPaxGroupKey(group),
+        {
+          paxGroup: group,
+          paxGroupKey: getPaxGroupKey(group),
+          paxLabel: formatPaxGroupLabel(group),
+          pax: getPaxGroupPax(group),
+          transportationTotal: 0,
+          mealsTotal: 0,
+          entranceFeesTotal: 0,
+          guideTotal: 0,
+          extraServicesTotal: 0,
+        },
+      ])
+    );
 
     days.forEach(day => {
       const transportationResolved = Array.isArray(day?.TRANSPORTATION_RESOLVED)
@@ -1066,28 +1317,47 @@ const QuotationPricingDetails = () => {
       const mealsRows = Array.isArray(day?.meals?.rows) ? day.meals.rows : [];
       const entranceFeesRows = Array.isArray(day?.NTRANCE_FEES) ? day.NTRANCE_FEES : [];
 
-      const transportationItems = transportationResolved.map(item => {
-        const rate = Number(item?.RATE || 0) || 0;
-        const minimumCapacity = Number(item?.MINIMUM_CAPACITY || 0) || 0;
-        const perPerson = minimumCapacity > 0 ? Math.ceil(rate / minimumCapacity) : 0;
+      const transportationItems = paxGroups.flatMap(group => {
+        const groupKey = getPaxGroupKey(group);
+        const paxForGroup = getPaxGroupPax(group);
+        const paxMinimum = getPaxGroupMin(group) || paxForGroup;
+        const totals = groupTotals.get(groupKey);
+        const rows = rowsForPaxGroup(
+          transportationResolved,
+          group,
+          paxGroups.length === 1
+        );
 
-        transportationTotal += perPerson * pax;
+        return rows.map(item => {
+          const rate = Number(item?.RATE || 0) || 0;
+          const minimumCapacity = Number(item?.MINIMUM_CAPACITY || 0) || 0;
+          const perPerson = getSharedCostPerPerson(rate, paxMinimum);
 
-        return {
-          typeName: item?.TRANSPORTATION_TYPE_NAME || "-",
-          transportationBy: item?.TRANSPORTATION_BY || "-",
-          companyName: item?.TRANSPORTATION_COMPANY_NAME || "-",
-          rate,
-          minimumCapacity,
-          maximumCapacity: Number(item?.MAXIMUM_CAPACITY || 0) || 0,
-          perPerson,
-        };
+          if (totals) totals.transportationTotal += perPerson * paxForGroup;
+
+          return {
+            paxGroupKey: groupKey,
+            paxLabel: formatPaxGroupLabel(group),
+            pax: paxForGroup,
+            typeName: item?.TRANSPORTATION_TYPE_NAME || "-",
+            transportationBy: item?.TRANSPORTATION_BY || "-",
+            companyName: item?.TRANSPORTATION_COMPANY_NAME || "-",
+            rate,
+            paxMinimum,
+            minimumCapacity,
+            maximumCapacity: Number(item?.MAXIMUM_CAPACITY || 0) || 0,
+            perPerson,
+          };
+        });
       });
 
       const mealItems = mealsRows.map(item => {
         const pricePerPerson = Number(item?.MEAL_PRICE_PER_PERSON || 0) || 0;
 
-        mealsTotal += pricePerPerson * pax;
+        paxGroups.forEach(group => {
+          const totals = groupTotals.get(getPaxGroupKey(group));
+          if (totals) totals.mealsTotal += pricePerPerson * getPaxGroupPax(group);
+        });
 
         return {
           cityName: item?.CITY_NAME || "-",
@@ -1100,7 +1370,10 @@ const QuotationPricingDetails = () => {
       const entranceFeeItems = entranceFeesRows.map(item => {
         const amount = Number(item?.ENTRANCE_FEE_AMOUNT || 0) || 0;
 
-        entranceFeesTotal += amount * pax;
+        paxGroups.forEach(group => {
+          const totals = groupTotals.get(getPaxGroupKey(group));
+          if (totals) totals.entranceFeesTotal += amount * getPaxGroupPax(group);
+        });
 
         return {
           placeName: item?.PLACE_NAME || "-",
@@ -1110,11 +1383,43 @@ const QuotationPricingDetails = () => {
       });
 
       const guideKey = getId(day) || String(day?.DAY_ORDER || "");
-      const guideInputValue = guidePrices[guideKey];
-      const currentGuideCost = String(guideInputValue || "").trim()
-        ? Number(guideInputValue) || 0
-        : Number(day?.guide?.GUIDE_COST || 0) || 0;
-      guideTotal += currentGuideCost;
+      const guideRows = paxGroups.map(group => {
+        const groupKey = getPaxGroupKey(group);
+        const paxForGroup = getPaxGroupPax(group);
+        const paxMinimum = getPaxGroupMin(group) || paxForGroup;
+        const sourceRow = getGuideRowForPaxGroup(day, group, paxGroups.length === 1);
+        const enabled = Boolean(sourceRow?.enabled || sourceRow?.required);
+        const rowGuideKey = getDayGuideKey(day, group);
+        const guideInputValue = guidePrices[rowGuideKey];
+        const currentGuideCost = String(guideInputValue || "").trim()
+          ? Number(guideInputValue) || 0
+          : Number(sourceRow?.GUIDE_COST ?? (paxGroups.length === 1 ? day?.guide?.GUIDE_COST : 0)) ||
+            0;
+        const totals = groupTotals.get(groupKey);
+        const guideCostPerPerson = getSharedCostPerPerson(
+          currentGuideCost,
+          paxMinimum
+        );
+
+        if (enabled && totals) totals.guideTotal += guideCostPerPerson * paxForGroup;
+
+        return {
+          guideKey: rowGuideKey,
+          paxGroupKey: groupKey,
+          paxLabel: formatPaxGroupLabel(group),
+          paxMin: group.min,
+          paxMax: group.max,
+          pax: paxForGroup,
+          required: Boolean(sourceRow?.required),
+          enabled,
+          guideType: sourceRow?.GUIDE_TYPE || day?.guide?.GUIDE_TYPE || "",
+          guideTypeName:
+            sourceRow?.GUIDE_TYPE_NAME || day?.guide?.GUIDE_TYPE_NAME || "-",
+          guideCostPerDay: currentGuideCost,
+          guideCostPerPerson,
+        };
+      });
+      const enabledGuideRows = guideRows.filter(row => row.enabled);
 
       daysRows.push({
         dayId: getId(day),
@@ -1123,10 +1428,17 @@ const QuotationPricingDetails = () => {
         dayDate: day?.DAY_DATE || "",
         routeText: day?.ROUTE_TEXT || "-",
         overnightCityName: day?.overnight?.OVERNIGHT_CITY_NAME || "-",
-        guideEnabled: !!day?.guide?.enabled,
-        guideTypeName: day?.guide?.GUIDE_TYPE_NAME || "-",
-        guideCostPerDay: currentGuideCost,
-        guideCostPerPerson: pax > 0 ? currentGuideCost / pax : currentGuideCost,
+        guideEnabled: enabledGuideRows.length > 0,
+        guideTypeName:
+          enabledGuideRows.map(row => row.guideTypeName).filter(Boolean).join(", ") ||
+          day?.guide?.GUIDE_TYPE_NAME ||
+          "-",
+        guideCostPerDay: enabledGuideRows.reduce(
+          (sum, row) => sum + Number(row.guideCostPerDay || 0),
+          0
+        ),
+        guideCostPerPerson: enabledGuideRows[0]?.guideCostPerPerson || 0,
+        guideRows,
         transportationItems,
         mealItems,
         entranceFeeItems,
@@ -1142,11 +1454,57 @@ const QuotationPricingDetails = () => {
       };
     });
 
-    const extraServicesTotal = extraServicesRows.reduce(
-      (sum, item) => sum + item.pricePerPerson * pax,
-      0
+    extraServicesRows.forEach(item => {
+      paxGroups.forEach(group => {
+        const totals = groupTotals.get(getPaxGroupKey(group));
+        if (totals) {
+          totals.extraServicesTotal += item.pricePerPerson * getPaxGroupPax(group);
+        }
+      });
+    });
+
+    const paxSummaries = Array.from(groupTotals.values()).map(item => {
+      const groupPax = item.pax || 0;
+      const sharedPerPersonSummary = {
+        transportation:
+          groupPax > 0 ? item.transportationTotal / groupPax : item.transportationTotal,
+        meals: groupPax > 0 ? item.mealsTotal / groupPax : item.mealsTotal,
+        entranceFees:
+          groupPax > 0 ? item.entranceFeesTotal / groupPax : item.entranceFeesTotal,
+        guide: groupPax > 0 ? item.guideTotal / groupPax : item.guideTotal,
+        extraServices:
+          groupPax > 0 ? item.extraServicesTotal / groupPax : item.extraServicesTotal,
+      };
+
+      return {
+        ...item,
+        sharedPerPersonSummary,
+        sharedPerPersonTotal:
+          sharedPerPersonSummary.transportation +
+          sharedPerPersonSummary.meals +
+          sharedPerPersonSummary.entranceFees +
+          sharedPerPersonSummary.guide +
+          sharedPerPersonSummary.extraServices,
+      };
+    });
+    const paxSummaryByKey = new Map(
+      paxSummaries.map(summary => [summary.paxGroupKey, summary])
     );
 
+    const transportationTotal = paxSummaries.reduce(
+      (sum, item) => sum + item.transportationTotal,
+      0
+    );
+    const mealsTotal = paxSummaries.reduce((sum, item) => sum + item.mealsTotal, 0);
+    const entranceFeesTotal = paxSummaries.reduce(
+      (sum, item) => sum + item.entranceFeesTotal,
+      0
+    );
+    const guideTotal = paxSummaries.reduce((sum, item) => sum + item.guideTotal, 0);
+    const extraServicesTotal = paxSummaries.reduce(
+      (sum, item) => sum + item.extraServicesTotal,
+      0
+    );
     const baseTotal =
       accommodationTotal +
       transportationTotal +
@@ -1154,21 +1512,6 @@ const QuotationPricingDetails = () => {
       entranceFeesTotal +
       guideTotal +
       extraServicesTotal;
-
-    const sharedPerPersonSummary = {
-      transportation: pax > 0 ? transportationTotal / pax : transportationTotal,
-      meals: pax > 0 ? mealsTotal / pax : mealsTotal,
-      entranceFees: pax > 0 ? entranceFeesTotal / pax : entranceFeesTotal,
-      guide: pax > 0 ? guideTotal / pax : guideTotal,
-      extraServices: pax > 0 ? extraServicesTotal / pax : extraServicesTotal,
-    };
-
-    const sharedPerPersonTotal =
-      sharedPerPersonSummary.transportation +
-      sharedPerPersonSummary.meals +
-      sharedPerPersonSummary.entranceFees +
-      sharedPerPersonSummary.guide +
-      sharedPerPersonSummary.extraServices;
 
     const profitType = String(profitForm.PROFIT_TYPE || selected?.PROFIT_TYPE || "PERCENT")
       .toUpperCase();
@@ -1182,70 +1525,91 @@ const QuotationPricingDetails = () => {
       return profitValue;
     };
 
-    const optionSummaries = accommodationOptionsList.map((option, index) => {
-      const basePerPerson = option.hotelsPerPerson + sharedPerPersonTotal;
-      const profitPerPerson = calculateProfit(basePerPerson);
-      const finalTotal = basePerPerson + profitPerPerson;
-      const seasonPriceRows = option.rows.map(row => {
-        const seasonBasePrice = row.stayPerPerson;
+    const optionSummaries = accommodationOptionsList
+      .map((option, index) => {
+        const paxSummary = paxSummaryByKey.get(option.paxGroupKey) || {};
+        const sharedPerPersonSummary = paxSummary.sharedPerPersonSummary || {
+          transportation: 0,
+          meals: 0,
+          entranceFees: 0,
+          guide: 0,
+          extraServices: 0,
+        };
+        const sharedPerPersonTotal = Number(paxSummary.sharedPerPersonTotal || 0);
+        const basePerPerson = option.hotelsPerPerson + sharedPerPersonTotal;
+        const profitPerPerson = calculateProfit(basePerPerson);
+        const finalTotal = basePerPerson + profitPerPerson;
+        const seasonPriceRows = option.rows.map(row => {
+          const seasonBasePrice = row.stayPerPerson;
+
+          return {
+            optionName: option.optionName || `Option ${index + 1}`,
+            seasonName: row.seasonName,
+            hotelName: row.hotelName,
+            pricePerPerson: seasonBasePrice,
+          };
+        });
+        const otherPerPersonRows = [
+          {
+            name: "Transportation",
+            pricePerPerson: sharedPerPersonSummary.transportation,
+          },
+          {
+            name: "Meals",
+            pricePerPerson: sharedPerPersonSummary.meals,
+          },
+          {
+            name: "Entrance Fees",
+            pricePerPerson: sharedPerPersonSummary.entranceFees,
+          },
+          {
+            name: "Guide",
+            pricePerPerson: sharedPerPersonSummary.guide,
+          },
+          {
+            name: "Extra Services",
+            pricePerPerson: sharedPerPersonSummary.extraServices,
+          },
+        ];
 
         return {
+          optionKey: option.optionKey,
+          optionBaseKey: option.optionBaseKey,
+          optionIndex: option.optionIndex ?? index,
           optionName: option.optionName || `Option ${index + 1}`,
-          seasonName: row.seasonName,
-          hotelName: row.hotelName,
-          pricePerPerson: seasonBasePrice,
+          optionStars: option.optionStars,
+          paxGroupIndex: option.paxGroupIndex,
+          paxGroupKey: option.paxGroupKey,
+          paxLabel: option.paxLabel,
+          paxMin: option.paxMin,
+          paxMax: option.paxMax,
+          pax: option.pax,
+          rows: option.rows,
+          hotelStayRows: option.hotelStayRows,
+          supplementRows: option.supplementRows,
+          supplementGroups: option.supplementGroups,
+          supplementTotals: option.supplementTotals,
+          seasonPriceRows,
+          otherPerPersonRows,
+          hotelsPerPerson: option.hotelsPerPerson,
+          ...sharedPerPersonSummary,
+          sharedPerPersonTotal,
+          basePerPerson,
+          profitType,
+          profitValue,
+          profitPerPerson,
+          finalTotal,
         };
-      });
-      const otherPerPersonRows = [
-        {
-          name: "Transportation",
-          pricePerPerson: sharedPerPersonSummary.transportation,
-        },
-        {
-          name: "Meals",
-          pricePerPerson: sharedPerPersonSummary.meals,
-        },
-        {
-          name: "Entrance Fees",
-          pricePerPerson: sharedPerPersonSummary.entranceFees,
-        },
-        {
-          name: "Guide",
-          pricePerPerson: sharedPerPersonSummary.guide,
-        },
-        {
-          name: "Extra Services",
-          pricePerPerson: sharedPerPersonSummary.extraServices,
-        },
-      ];
+      })
+      .sort(compareOptionByPax);
 
-      return {
-        optionKey: option.optionKey,
-        optionIndex: index,
-        optionName: option.optionName || `Option ${index + 1}`,
-        optionStars: option.optionStars,
-        rows: option.rows,
-        hotelStayRows: option.hotelStayRows,
-        supplementRows: option.supplementRows,
-        supplementGroups: option.supplementGroups,
-        seasonPriceRows,
-        otherPerPersonRows,
-        hotelsPerPerson: option.hotelsPerPerson,
-        ...sharedPerPersonSummary,
-        sharedPerPersonTotal,
-        basePerPerson,
-        profitType,
-        profitValue,
-        profitPerPerson,
-        finalTotal,
-      };
-    });
-
+    const firstPaxSummary = paxSummaries[0] || {};
     const perPersonSummary = {
-      accommodation: pax > 0 ? accommodationTotal / pax : accommodationTotal,
-      ...sharedPerPersonSummary,
-      baseTotal: pax > 0 ? baseTotal / pax : baseTotal,
+      accommodation: optionSummaries[0]?.hotelsPerPerson || 0,
+      ...(firstPaxSummary.sharedPerPersonSummary || {}),
+      baseTotal: optionSummaries[0]?.basePerPerson || 0,
     };
+    const sharedPerPersonSummary = firstPaxSummary.sharedPerPersonSummary || {};
 
     return {
       accommodationRows,
@@ -1261,13 +1625,13 @@ const QuotationPricingDetails = () => {
       baseTotal,
       perPersonSummary,
       sharedPerPersonSummary,
+      paxSummaries,
       optionSummaries,
     };
   }, [
     financeData,
     boardBasis,
-    pax,
-    quotation?.NUMBER_OF_PAX,
+    paxGroups,
     selected,
     quotation,
     guidePrices,
@@ -1283,8 +1647,10 @@ const QuotationPricingDetails = () => {
     () =>
       pricingView.accommodationOptionsList.map((option, index) => ({
         key: option.optionKey || `${option.optionName}-${index}`,
-        label: option.optionName || `Option ${index + 1}`,
-        index,
+        label: `${option.optionName || `Option ${(option.optionIndex ?? index) + 1}`} - ${
+          option.paxLabel || "-"
+        }`,
+        index: option.optionIndex ?? index,
       })),
     [pricingView.accommodationOptionsList]
   );
@@ -1303,6 +1669,7 @@ const QuotationPricingDetails = () => {
       const searchable = [
         option.optionName,
         option.optionStars,
+        option.paxLabel,
         ...option.hotelStayRows.map(row => `${row.cityName} ${row.hotelName}`),
         ...option.rows.map(row => `${row.cityName} ${row.hotelName} ${row.seasonName}`),
       ].join(" ");
@@ -1323,6 +1690,10 @@ const QuotationPricingDetails = () => {
           optionKey,
           optionIndex,
           optionName: option.optionName || `Option ${optionIndex + 1}`,
+          paxLabel: option.paxLabel,
+          paxMin: option.paxMin,
+          paxMax: option.paxMax,
+          pax: option.pax,
           rowIndex,
         }))
         .filter(row => {
@@ -1335,6 +1706,7 @@ const QuotationPricingDetails = () => {
           return normalizeKey(
             [
               row.optionName,
+              row.paxLabel,
               row.cityName,
               row.hotelName,
               row.hotelStars,
@@ -1344,7 +1716,7 @@ const QuotationPricingDetails = () => {
             ].join(" ")
           ).includes(query);
         });
-    });
+    }).sort(compareOptionByPax);
   }, [pricingSearch, pricingOptionFilter, pricingView.accommodationOptionsList]);
 
   const selectedOptionDetail = useMemo(() => {
@@ -1459,8 +1831,14 @@ const QuotationPricingDetails = () => {
             (fieldSum, field) => fieldSum + Number(row[field] || 0),
             0
           );
+          const resolvedStayTotal = row.costStayPerPerson ?? row.stayPerPerson ?? null;
 
-          return sum + perNight * Number(row.nights || 0);
+          return (
+            sum +
+            (resolvedStayTotal !== null
+              ? Number(resolvedStayTotal || 0)
+              : perNight * Number(row.nights || 0))
+          );
         }, 0);
 
         rows.push({
@@ -1576,16 +1954,18 @@ const QuotationPricingDetails = () => {
     const next = {};
 
     pricingView.daysRows.forEach(day => {
-      if (!day.guideEnabled) return;
+      day.guideRows
+        .filter(row => row.enabled)
+        .forEach(row => {
+          const key = row.guideKey;
+          const value = guidePrices[key];
 
-      const key = day.guideKey;
-      const value = guidePrices[key];
-
-      if (!String(value || "").trim()) {
-        next[key] = "Required";
-      } else if (Number(value) < 0) {
-        next[key] = "Must be greater than or equal to 0";
-      }
+          if (!String(value || "").trim()) {
+            next[key] = "Required";
+          } else if (Number(value) < 0) {
+            next[key] = "Must be greater than or equal to 0";
+          }
+        });
     });
 
     return next;
@@ -1593,8 +1973,10 @@ const QuotationPricingDetails = () => {
 
   const missingGuidePrices = useMemo(
     () =>
-      pricingView.daysRows.filter(
-        day => day.guideEnabled && Number(guidePrices[day.guideKey] || 0) <= 0
+      pricingView.daysRows.flatMap(day =>
+        day.guideRows.filter(
+          row => row.enabled && Number(guidePrices[row.guideKey] || 0) <= 0
+        )
       ),
     [guidePrices, pricingView.daysRows]
   );
@@ -1613,9 +1995,11 @@ const QuotationPricingDetails = () => {
   const touchGuideAll = () => {
     const next = {};
     pricingView.daysRows.forEach(day => {
-      if (day.guideEnabled) {
-        next[day.guideKey] = true;
-      }
+      day.guideRows
+        .filter(row => row.enabled)
+        .forEach(row => {
+          next[row.guideKey] = true;
+        });
     });
     setGuideTouched(next);
   };
@@ -1636,19 +2020,36 @@ const QuotationPricingDetails = () => {
     }
 
     const days = pricingView.daysRows
-      .filter(day => day.guideEnabled)
-      .map(day => {
-        const pricePerDay = Number(guidePrices[day.guideKey] || 0) || 0;
-        const pricePerPerson = pax > 0 ? pricePerDay / pax : pricePerDay;
+      .filter(day => day.guideRows.length > 0)
+      .map(day => ({
+        DAY_ID: day.dayId || null,
+        DAY_ORDER: day.dayOrder,
+        GUIDE_ROWS: day.guideRows.map(row => {
+          const pricePerDay = row.enabled
+            ? Number(guidePrices[row.guideKey] || 0) || 0
+            : 0;
+          const pricePerPerson = getSharedCostPerPerson(
+            pricePerDay,
+            row.paxMin || row.pax
+          );
 
-        return {
-          DAY_ID: day.dayId || null,
-          DAY_ORDER: day.dayOrder,
-          GUIDE_COST_PER_DAY: pricePerDay,
-          GUIDE_COST_PER_PERSON: pricePerPerson,
-          GUIDE_COST: pricePerDay,
-        };
-      });
+          return {
+            PAX_LABEL: getPaxGroupLabel({
+              min: row.paxMin,
+              max: row.paxMax,
+            }),
+            PAX_MIN: row.paxMin,
+            PAX_MAX: row.paxMax,
+            required: row.required,
+            enabled: row.enabled,
+            GUIDE_TYPE: row.guideType || null,
+            GUIDE_TYPE_NAME: row.guideTypeName || null,
+            GUIDE_COST_PER_DAY: pricePerDay,
+            GUIDE_COST_PER_PERSON: pricePerPerson,
+            GUIDE_COST: pricePerDay,
+          };
+        }),
+      }));
 
     setGuideSaving(true);
 
@@ -1679,13 +2080,21 @@ const QuotationPricingDetails = () => {
 
     const optionSummaries = pricingView.optionSummaries.map((option, index) => ({
       optionKey: option.optionKey || `${option.optionName || "Option"}-${index}`,
+      optionBaseKey: option.optionBaseKey || "",
       optionIndex: option.optionIndex ?? index,
       optionName: option.optionName || `Option ${index + 1}`,
       optionStars: option.optionStars || "",
+      paxGroupIndex: option.paxGroupIndex ?? 0,
+      paxGroupKey: option.paxGroupKey || "",
+      paxLabel: option.paxLabel || "",
+      paxMin: Number(option.paxMin || 0),
+      paxMax: Number(option.paxMax || 0),
+      pax: Number(option.pax || 0),
       rows: option.rows || [],
       hotelStayRows: option.hotelStayRows || [],
       supplementRows: option.supplementRows || [],
       supplementGroups: option.supplementGroups || [],
+      supplementTotals: option.supplementTotals || { ss: 0, hb: 0, fb: 0 },
       seasonPriceRows: option.seasonPriceRows || [],
       otherPerPersonRows: option.otherPerPersonRows || [],
       hotelsPerPerson: Number(option.hotelsPerPerson || 0),
@@ -1714,9 +2123,14 @@ const QuotationPricingDetails = () => {
       PROFIT_VALUE: Number(selected?.PROFIT_VALUE ?? profitForm.PROFIT_VALUE ?? 0),
       OPTION_SUMMARIES: optionSummaries,
       FINAL_OPTIONS: optionSummaries,
-      FINAL_TOTAL: optionSummaries[0]?.finalTotal || 0,
+      FINAL_TOTAL: optionSummaries.reduce(
+        (sum, option) => sum + Number(option.finalTotal || 0),
+        0
+      ),
       PRICING_VIEW: {
+        paxGroups,
         optionSummaries,
+        paxSummaries: pricingView.paxSummaries,
         perPersonSummary: pricingView.perPersonSummary,
         sharedPerPersonSummary: pricingView.sharedPerPersonSummary,
       },
@@ -1725,7 +2139,9 @@ const QuotationPricingDetails = () => {
         OPTION_SUMMARIES: optionSummaries,
         FINAL_OPTIONS: optionSummaries,
         PRICING_VIEW: {
+          paxGroups,
           optionSummaries,
+          paxSummaries: pricingView.paxSummaries,
           perPersonSummary: pricingView.perPersonSummary,
           sharedPerPersonSummary: pricingView.sharedPerPersonSummary,
         },
@@ -1848,7 +2264,7 @@ const QuotationPricingDetails = () => {
                         </Col>
 
                         <Col md="6" xl="2">
-                          <SummaryInfoCard label="Pax" value={pax || "-"} />
+                          <SummaryInfoCard label="Pax" value={paxLabel} />
                         </Col>
 
                         <Col md="6" xl="2">
@@ -2037,7 +2453,7 @@ const QuotationPricingDetails = () => {
                                 <option value="ALL">All options</option>
                                 {accommodationOptionChoices.map(option => (
                                   <option key={option.key} value={option.key}>
-                                    Option {option.index + 1} - {option.label}
+                                    {option.label}
                                   </option>
                                 ))}
                               </Input>
@@ -2063,6 +2479,9 @@ const QuotationPricingDetails = () => {
                                 <tr>
                                   <th style={{ position: "sticky", top: 0, zIndex: 2 }}>
                                     Option
+                                  </th>
+                                  <th style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                                    Pax
                                   </th>
                                   <th style={{ position: "sticky", top: 0, zIndex: 2 }}>
                                     Hotels
@@ -2108,7 +2527,7 @@ const QuotationPricingDetails = () => {
                               <tbody>
                                 {filteredOptionSummaries.length === 0 ? (
                                   <tr>
-                                    <td className="text-center text-muted py-4" colSpan="8">
+                                    <td className="text-center text-muted py-4" colSpan="9">
                                       No matching options.
                                     </td>
                                   </tr>
@@ -2133,6 +2552,11 @@ const QuotationPricingDetails = () => {
                                             </Badge>
                                           </div>
                                         </div>
+                                      </td>
+                                      <td>
+                                        <Badge color="light" className="text-dark border" pill>
+                                          {option.paxLabel || "-"}
+                                        </Badge>
                                       </td>
                                       <td style={{ minWidth: 260 }}>
                                         <div className="d-flex flex-column gap-1">
@@ -2191,6 +2615,9 @@ const QuotationPricingDetails = () => {
                                       </h5>
                                       <Badge color="light" className="text-dark border" pill>
                                         {formatStars(selectedOptionDetail.optionStars)}
+                                      </Badge>
+                                      <Badge color="info" pill>
+                                        {selectedOptionDetail.paxLabel || "-"}
                                       </Badge>
                                     </div>
                                     <div className="text-muted small">
@@ -2293,6 +2720,24 @@ const QuotationPricingDetails = () => {
                                         </Button>
                                       ))}
                                     </div>
+                                    <Row className="g-2 mt-2">
+                                      {[
+                                        ["Single Room Supplement", "ss"],
+                                        ["Half Board Supplement", "hb"],
+                                        ["Full Board Supplement", "fb"],
+                                      ].map(([label, key]) => (
+                                        <Col md="4" key={key}>
+                                          <div className="border rounded bg-light px-3 py-2 h-100">
+                                            <div className="text-muted small">{label}</div>
+                                            <div className="fw-bold text-primary">
+                                              USD {formatCurrency(
+                                                selectedOptionDetail.supplementTotals?.[key]
+                                              )}
+                                            </div>
+                                          </div>
+                                        </Col>
+                                      ))}
+                                    </Row>
                                   </div>
                                   <div
                                     className="table-responsive"
@@ -2833,6 +3278,7 @@ const QuotationPricingDetails = () => {
                                 <tr>
                                   {[
                                     "Option",
+                                    "Pax",
                                     "City",
                                     "Hotel",
                                     "Stars",
@@ -2846,7 +3292,7 @@ const QuotationPricingDetails = () => {
                                   ].map((heading, index) => (
                                     <th
                                       key={heading}
-                                      className={index >= 6 ? "text-end" : ""}
+                                      className={index >= 7 ? "text-end" : ""}
                                       style={{
                                         position: "sticky",
                                         top: 0,
@@ -2868,7 +3314,7 @@ const QuotationPricingDetails = () => {
                               <tbody>
                                 {accommodationTableRows.length === 0 ? (
                                   <tr>
-                                    <td className="text-center text-muted py-4" colSpan="11">
+                                    <td className="text-center text-muted py-4" colSpan="12">
                                       No matching accommodation rows.
                                     </td>
                                   </tr>
@@ -2881,6 +3327,11 @@ const QuotationPricingDetails = () => {
                                         <div className="fw-semibold">{row.optionName}</div>
                                         <Badge color="primary" pill>
                                           Option {row.optionIndex + 1}
+                                        </Badge>
+                                      </td>
+                                      <td>
+                                        <Badge color="light" className="text-dark border" pill>
+                                          {row.paxLabel || "-"}
                                         </Badge>
                                       </td>
                                       <td>{row.cityName}</td>
@@ -2940,7 +3391,7 @@ const QuotationPricingDetails = () => {
                         <Form onSubmit={handleSaveGuidePrices}>
                           <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
                             <div className="text-muted small">
-                              Add the guide cost for each day before approving the quotation.
+                              Add guide costs by day and pax group before approving the quotation.
                             </div>
                             <Button
                               color="primary"
@@ -2987,6 +3438,9 @@ const QuotationPricingDetails = () => {
                                           <div className="fw-semibold mb-1">
                                             {item.typeName}
                                           </div>
+                                          <Badge color="light" className="text-dark border mb-2" pill>
+                                            {item.paxLabel || "-"}
+                                          </Badge>
                                           <div className="text-muted small mb-1">
                                             {item.companyName}
                                           </div>
@@ -3068,57 +3522,77 @@ const QuotationPricingDetails = () => {
                                 <Col xl="3">
                                   <div className="border rounded p-3 h-100">
                                     <h6 className="mb-3">Guide</h6>
-                                    <div className="text-muted small mb-1">
-                                      Enabled: {day.guideEnabled ? "Yes" : "No"}
-                                    </div>
-                                    <div className="text-muted small mb-2">
-                                      {day.guideTypeName || "-"}
-                                    </div>
-                                    {day.guideEnabled ? (
-                                      <div>
-                                        <Label className="form-label small">
-                                          Guide Price / Day
-                                        </Label>
-                                        <InputGroup>
-                                          <Input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={guidePrices[day.guideKey] || ""}
-                                            onChange={e =>
-                                              handleGuidePriceChange(
-                                                day.guideKey,
-                                                e.target.value
-                                              )
-                                            }
-                                            invalid={
-                                              !!(
-                                                guideTouched[day.guideKey] &&
-                                                guideErrors[day.guideKey]
-                                              )
-                                            }
-                                            disabled={
-                                              saving || guideSaving || isTerminalStatus
-                                            }
-                                          />
-                                          <InputGroupText>DAY</InputGroupText>
-                                          <FormFeedback>
-                                            {guideErrors[day.guideKey]}
-                                          </FormFeedback>
-                                        </InputGroup>
-                                        <div className="text-muted small mt-2">
-                                          Per person from this day:{" "}
-                                          {formatCurrency(
-                                            pax > 0
-                                              ? Number(guidePrices[day.guideKey] || 0) / pax
-                                              : Number(guidePrices[day.guideKey] || 0)
-                                          )}
-                                        </div>
-                                      </div>
+                                    {day.guideRows.filter(row => row.enabled).length === 0 ? (
+                                      <div className="text-muted small">No guide.</div>
                                     ) : (
-                                      <div className="fw-bold text-primary">
-                                        {formatCurrency(day.guideCostPerPerson)}
-                                      </div>
+                                      day.guideRows
+                                        .filter(row => row.enabled)
+                                        .map((row, index) => (
+                                          <div
+                                            key={row.guideKey}
+                                            className={
+                                              index ===
+                                              day.guideRows.filter(item => item.enabled)
+                                                .length -
+                                                1
+                                                ? ""
+                                                : "border-bottom pb-3 mb-3"
+                                            }
+                                          >
+                                            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                              <Badge color="light" className="text-dark border" pill>
+                                                {row.paxLabel}
+                                              </Badge>
+                                              {row.required ? (
+                                                <Badge color="warning" pill>
+                                                  Required
+                                                </Badge>
+                                              ) : null}
+                                            </div>
+                                            <div className="text-muted small mb-2">
+                                              {row.guideTypeName || "-"}
+                                            </div>
+                                            <Label className="form-label small">
+                                              Guide Price / Day
+                                            </Label>
+                                            <InputGroup>
+                                              <Input
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value={guidePrices[row.guideKey] || ""}
+                                                onChange={e =>
+                                                  handleGuidePriceChange(
+                                                    row.guideKey,
+                                                    e.target.value
+                                                  )
+                                                }
+                                                invalid={
+                                                  !!(
+                                                    guideTouched[row.guideKey] &&
+                                                    guideErrors[row.guideKey]
+                                                  )
+                                                }
+                                                disabled={
+                                                  saving || guideSaving || isTerminalStatus
+                                                }
+                                              />
+                                              <InputGroupText>DAY</InputGroupText>
+                                              <FormFeedback>
+                                                {guideErrors[row.guideKey]}
+                                              </FormFeedback>
+                                            </InputGroup>
+                                            <div className="text-muted small mt-2">
+                                              Per person from this day:{" "}
+                                              {formatCurrency(
+                                                getSharedCostPerPerson(
+                                                  guidePrices[row.guideKey],
+                                                  row.paxMin || row.pax
+                                                )
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))
                                     )}
                                   </div>
                                 </Col>

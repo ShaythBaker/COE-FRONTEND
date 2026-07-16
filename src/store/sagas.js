@@ -24,6 +24,7 @@ import quotationPricingSaga from "./QuotationPricing/saga";
 import reservationFilesSaga from "./ReservationFiles/saga";
 
 import GuidesSaga from "./Guides/saga";
+import TemplatesSaga from "./Templates/saga";
 
 
 export default function* rootSaga() {
@@ -33,6 +34,7 @@ export default function* rootSaga() {
     fork(CompanyUsersSaga),
     fork(ListItemsSaga),
     fork(GuidesSaga),
+    fork(TemplatesSaga),
     fork(HotelsSaga),
     fork(RestaurantsSaga),
     fork(TravelAgentsSaga),

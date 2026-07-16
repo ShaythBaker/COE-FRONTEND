@@ -9,7 +9,7 @@ import {
   CardBody,
   Col,
   Container,
-  FormFeedback,
+  Form,
   Input,
   Label,
   Modal,
@@ -26,7 +26,7 @@ import {
 } from "../../store/Quotations/actions";
 import { sendQuotationForPricing } from "../../store/QuotationPricing/actions";
 import { convertQuotationToReservationFile } from "../../store/ReservationFiles/actions";
-import { get, patch } from "../../helpers/api_helper";
+import { get } from "../../helpers/api_helper";
 import { notifyError, notifySuccess } from "../../helpers/notify";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import {
@@ -37,10 +37,10 @@ import {
   isQuotationReadOnly,
 } from "../../helpers/quotation_pricing_helper";
 import { generateQuotationPdf } from "../../helpers/quotation_pdf";
+import { normalizeOptionSupplementTotals } from "../../helpers/quotation_supplements";
 import { getAccommodationOptionKey } from "../../helpers/reservation_options";
 
 const PRICE_VIEW_ROLES = ["ACCOUNTING", "COMPANY_ADMIN", "USER_COMPANY"];
-const GENERAL_NOTES_ROLES = ["TOUR_OPERATION"];
 const APPROVED_FINAL_PRICE_ROLES = ["TOUR_OPERATION"];
 
 const unwrapId = value => {
@@ -95,6 +95,147 @@ const formatDateRangeLabel = (from, to) => {
   return "-";
 };
 
+const DEFAULT_PDF_TEMPLATE_FORM = {
+  groupName: "",
+  arrivalDepartureHtml: `
+    <h2>Arrival and Departure</h2>
+    <p><strong><u>Arrival:</u></strong></p>
+    <p>Type the arrival notes here.</p>
+    <ol><li></li><li></li></ol>
+    <p><strong><u>Departure:</u></strong></p>
+    <p>Type the departure notes here.</p>
+    <ol><li></li><li></li></ol>
+  `,
+  inclusionsExclusionsHtml: `
+    <p><strong>Inclusions:</strong></p>
+    <ul><li></li><li></li><li></li><li></li><li></li><li></li></ul>
+    <p>.................................................................</p>
+    <p><strong>Exclusions:</strong></p>
+    <ul><li></li><li></li><li></li><li></li><li></li><li></li></ul>
+  `,
+  generalNotesHtml: `
+    <p><strong>General Notes:</strong></p>
+    <ul><li></li><li></li><li></li><li></li><li></li><li></li><li></li></ul>
+  `,
+  bankAccountHtml: `
+    <table style="width: 100%; border-collapse: collapse;" border="1" cellpadding="6">
+      <tbody>
+        <tr><td><strong>Bank Account Details (Bank charges to be paid by the sender)</strong></td></tr>
+        <tr><td><strong>Beneficiary Name:</strong></td></tr>
+        <tr><td><strong>Bank Name:</strong></td></tr>
+        <tr><td><strong>Bank Address:</strong></td></tr>
+        <tr><td><strong>USD currency:</strong></td></tr>
+        <tr><td><strong>Account # US Dollars:</strong></td></tr>
+        <tr><td><strong>USD IBAN#:</strong></td></tr>
+        <tr><td><strong>Swift Code:</strong></td></tr>
+        <tr><td><strong>Purpose Code:</strong></td></tr>
+      </tbody>
+    </table>
+    <p style="text-align: center;"><strong>THANK YOU</strong></p>
+  `,
+};
+
+const REQUIRED_PDF_TEMPLATE_TYPES = [
+  {
+    type: "ARRIVAL_DEPARTURE",
+    label: "Arrival and Departure Template",
+    field: "arrivalDepartureHtml",
+  },
+  {
+    type: "INCLUSIONS_EXCLUSIONS",
+    label: "Inclusions and Exclusions Template",
+    field: "inclusionsExclusionsHtml",
+  },
+  {
+    type: "GENERAL_NOTES",
+    label: "General Notes Template",
+    field: "generalNotesHtml",
+  },
+  {
+    type: "BANK_ACCOUNT",
+    label: "Bank Account Detail Template",
+    field: "bankAccountHtml",
+  },
+];
+
+const stripHtmlForValidation = value =>
+  String(value || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const getTemplateByType = (templates, type) =>
+  (Array.isArray(templates) ? templates : []).find(
+    template =>
+      template?.ACTIVE_STATUS !== false &&
+      template?.TEMPLATE_STATUS !== false &&
+      String(template?.TEMPLATE_TYPE || "").toUpperCase().trim() === type
+  );
+
+const getRequiredPdfTemplateSnapshot = templates => {
+  const snapshot = {};
+  const missing = [];
+
+  REQUIRED_PDF_TEMPLATE_TYPES.forEach(item => {
+    const template = getTemplateByType(templates, item.type);
+    const html = template?.TEMPLATE_CONTENT_HTML || "";
+
+    if (!template || !stripHtmlForValidation(html)) {
+      missing.push(item.label);
+      return;
+    }
+
+    snapshot[item.field] = html;
+  });
+
+  return { snapshot, missing };
+};
+
+const PdfTemplateEditor = ({ value, onChange, minHeight = 180 }) => {
+  const editorRef = React.useRef(null);
+  const lastHtmlRef = React.useRef("");
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const nextValue = value || "";
+
+    if (nextValue !== lastHtmlRef.current && editor.innerHTML !== nextValue) {
+      editor.innerHTML = nextValue;
+    }
+    lastHtmlRef.current = nextValue;
+  }, [value]);
+
+  const syncValue = () => {
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      lastHtmlRef.current = html;
+      onChange(html);
+    }
+  };
+
+  return (
+    <div
+      ref={editorRef}
+      contentEditable
+      suppressContentEditableWarning
+      className="border rounded bg-white p-3"
+      style={{
+        minHeight,
+        maxHeight: 320,
+        overflowY: "auto",
+        lineHeight: 1.6,
+        outline: "none",
+      }}
+      onInput={syncValue}
+      onBlur={syncValue}
+    />
+  );
+};
+
 const asArray = value => (Array.isArray(value) ? value : []);
 
 const getErrorMessage = (error, fallback) =>
@@ -120,6 +261,28 @@ const formatMoney = value => {
 const toNumber = value => {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : 0;
+};
+
+const getApprovedOptionPaxSortValue = option => {
+  const paxMin = toNumber(option?.paxMin || option?.PAX_MIN);
+  if (paxMin > 0) return paxMin;
+
+  const paxLabel = String(option?.paxLabel || option?.PAX_LABEL || "");
+  const match = paxLabel.match(/\d+/);
+  if (match) return Number(match[0]);
+
+  const pax = toNumber(option?.pax || option?.paxMax || option?.PAX_MAX);
+  return pax > 0 ? pax : Number.MAX_SAFE_INTEGER;
+};
+
+const compareApprovedOptionByPax = (a, b) => {
+  const paxDiff = getApprovedOptionPaxSortValue(a) - getApprovedOptionPaxSortValue(b);
+  if (paxDiff !== 0) return paxDiff;
+
+  const optionDiff = toNumber(a?.optionIndex) - toNumber(b?.optionIndex);
+  if (optionDiff !== 0) return optionDiff;
+
+  return String(a?.optionName || "").localeCompare(String(b?.optionName || ""));
 };
 
 const getDirectAmount = candidates => {
@@ -408,6 +571,20 @@ const normalizeDay = day => {
   const routeCities = asArray(route?.cities)
     .map(city => city?.CITY_NAME)
     .filter(Boolean);
+  const routeStops = asArray(route?.stops)
+    .map((stop, index) => ({
+      ...stop,
+      order: Number(stop?.order || index + 1),
+      label:
+        stop?.label ||
+        stop?.placeName ||
+        stop?.PLACE_NAME ||
+        stop?.cityName ||
+        stop?.CITY_NAME ||
+        "",
+    }))
+    .filter(stop => stop.label)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return {
     _id: basic?._id || day?._id || "",
@@ -415,6 +592,7 @@ const normalizeDay = day => {
     DAY_DATE: basic?.DAY_DATE || day?.DAY_DATE || "",
     ROUTE_TEXT: route?.text || basic?.ROUTE_TEXT || day?.ROUTE_TEXT || "",
     routeCities,
+    routeStops,
     transportationRows,
     guide: day?.guide || {},
     mealsRows,
@@ -566,10 +744,19 @@ const FinalOptionMetric = ({ label, value, subtitle, tone = "light", icon }) => 
 };
 
 const FinalOptionPriceSummary = ({ option }) => {
+  const profitLabel =
+    option.profitType === "PERCENT"
+      ? `${formatMoney(option.profitValue)}%`
+      : `Fixed ${formatMoney(option.profitValue)}`;
   const sourceRows = [
-    { label: "Accommodation", value: option.hotelsDisplayPrice },
-    { label: "Shared services", value: option.sharedDisplayPrice },
+    { label: "Hotels / Person", value: option.hotelsPerPerson },
+    { label: "Shared / Person", value: option.sharedPerPerson },
+    { label: "Cost / Person", value: option.basePerPerson },
+    { label: "Profit / Person", value: option.profitPerPerson },
   ].filter(row => toNumber(row.value) > 0);
+  const breakdownRows = asArray(option.detailRows).filter(
+    row => toNumber(row.amount) > 0 || toNumber(row.afterProfit) > 0
+  );
 
   return (
     <div className="rounded overflow-hidden border bg-white mb-3">
@@ -603,23 +790,64 @@ const FinalOptionPriceSummary = ({ option }) => {
 
       <div className="p-3">
         <Row className="g-3 mb-3">
-          <Col md="6">
+          <Col md="6" xl="3">
             <FinalOptionMetric
               icon="bx bx-hotel"
               label="Hotels / Person"
-              value={option.hotelsDisplayPrice}
+              value={option.hotelsPerPerson}
               subtitle="Selected hotel seasons and board basis"
             />
           </Col>
-          <Col md="6">
+          <Col md="6" xl="3">
             <FinalOptionMetric
               icon="bx bx-trip"
               label="Shared / Person"
-              value={option.sharedDisplayPrice}
+              value={option.sharedPerPerson}
               subtitle="Transport, meals, fees, guide, services"
             />
           </Col>
+          <Col md="6" xl="3">
+            <FinalOptionMetric
+              icon="bx bx-calculator"
+              label="Cost / Person"
+              value={option.basePerPerson}
+              subtitle="Hotels plus shared costs"
+            />
+          </Col>
+          <Col md="6" xl="3">
+            <FinalOptionMetric
+              icon="bx bx-trending-up"
+              label="Profit / Person"
+              value={option.profitPerPerson}
+              subtitle={profitLabel}
+            />
+          </Col>
         </Row>
+
+        {breakdownRows.length ? (
+          <div className="table-responsive border rounded mb-3">
+            <table className="table table-sm align-middle mb-0">
+              <thead className="table-light">
+                <tr>
+                  <th>Price Component</th>
+                  <th className="text-end">Cost / Person</th>
+                  <th className="text-end">Final / Person</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdownRows.map(row => (
+                  <tr key={row.name}>
+                    <td className="fw-semibold">{row.name}</td>
+                    <td className="text-end">{formatMoney(row.amount)}</td>
+                    <td className="text-end fw-semibold">
+                      {formatMoney(row.afterProfit)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
 
         <div className="d-flex flex-wrap gap-2">
           {sourceRows.map(row => (
@@ -640,6 +868,21 @@ const FinalOptionPriceSummary = ({ option }) => {
     </div>
   );
 };
+
+const getAccommodationOptionHotelRows = option =>
+  asArray(option?.cityGroups).flatMap(cityGroup =>
+    asArray(cityGroup?.stays).map(stay => ({
+      cityName: cityGroup?.cityName || stay?.HOTEL_CITY_VALUE || "-",
+      hotelName: stay?.HOTEL_NAME || "-",
+      hotelStars: stay?.HOTEL_STARS || option?.selectedStars || "",
+      seasonName: stay?.SEASON_NAME || "-",
+      seasonStartDate: stay?.FROM_DATE || stay?.START_DATE || "",
+      seasonEndDate: stay?.TO_DATE || stay?.END_DATE || "",
+      nights: toNumber(stay?.NIGHTS || cityGroup?.totalNights) || 1,
+      rateAfterProfit: 0,
+      afterProfit: 0,
+    }))
+  );
 
 const FinalSeasonSummaryTable = ({ rows }) => {
   if (!rows?.length) return null;
@@ -717,30 +960,29 @@ const FinalSeasonSummaryTable = ({ rows }) => {
   );
 };
 
-const buildFinalSupplementRows = (rows, optionName, optionStars) =>
-  ["BB", "HB", "FB", "SS"]
-    .map(label => {
-      const key = label.toLowerCase();
-      const price = asArray(rows)
-        .filter(row => Number(row?.nights) > 0)
-        .reduce((sum, row) => sum + toNumber(row?.[key]), 0);
+const buildFinalSupplementRows = option => {
+  const totals = normalizeOptionSupplementTotals(
+    option?.supplementTotals,
+    option?.seasonSummaryRows
+  );
 
-      return {
-        key: `${optionName}-${label}`,
-        optionName,
-        optionStars,
-        supplement: label,
-        price,
-      };
-    })
+  return [
+    ["HB", totals.hb],
+    ["FB", totals.fb],
+    ["SS", totals.ss],
+  ]
+    .map(([label, price]) => ({
+      key: `${option?.optionName}-${label}`,
+      optionName: option?.optionName,
+      optionStars: option?.optionStars,
+      supplement: label,
+      price,
+    }))
     .filter(row => row.price > 0);
+};
 
 const FinalSupplementPriceTable = ({ option }) => {
-  const rows = buildFinalSupplementRows(
-    option.seasonSummaryRows,
-    option.optionName,
-    option.optionStars
-  );
+  const rows = buildFinalSupplementRows(option);
 
   if (!rows.length) return null;
 
@@ -821,15 +1063,25 @@ const QuotationsDetails = () => {
   const [finalPricing, setFinalPricing] = useState(null);
   const [finalPricingLoading, setFinalPricingLoading] = useState(false);
   const [expandedFinalOptionKey, setExpandedFinalOptionKey] = useState("");
-  const [generalNotesOpen, setGeneralNotesOpen] = useState(false);
-  const [generalNotes, setGeneralNotes] = useState("");
-  const [generalNotesTouched, setGeneralNotesTouched] = useState(false);
-  const [generalNotesSaving, setGeneralNotesSaving] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [pdfTemplateModalOpen, setPdfTemplateModalOpen] = useState(false);
+  const [pdfTemplateLoading, setPdfTemplateLoading] = useState(false);
+  const [pdfTemplateForm, setPdfTemplateForm] = useState(
+    DEFAULT_PDF_TEMPLATE_FORM
+  );
+  const [pdfTemplateErrors, setPdfTemplateErrors] = useState({});
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState("");
+  const [pdfDownloadFileName, setPdfDownloadFileName] = useState("");
   const [reservationOptionModalOpen, setReservationOptionModalOpen] =
     useState(false);
   const [reservationAccommodationOptionKey, setReservationAccommodationOptionKey] =
     useState("");
+
+  useEffect(() => {
+    return () => {
+      if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    };
+  }, [pdfPreviewUrl]);
 
   useEffect(() => {
     if (id) {
@@ -837,11 +1089,6 @@ const QuotationsDetails = () => {
       dispatch(fetchQuotation(id));
     }
   }, [dispatch, id]);
-
-  useEffect(() => {
-    setGeneralNotes(selected?.GENERAL_NOTES || "");
-    setGeneralNotesTouched(false);
-  }, [selected?.GENERAL_NOTES]);
 
   useEffect(() => {
     let ignore = false;
@@ -993,10 +1240,6 @@ const QuotationsDetails = () => {
   const readOnlyMessage = getQuotationReadOnlyMessage(selected);
   const isApprovedQuotation = quotationStatus === "APPROVED";
   const canSendForPricing = canSendQuotationForPricing(selected);
-  const canEditGeneralNotes =
-    isApprovedQuotation && hasAnyRole(roles, GENERAL_NOTES_ROLES);
-  const generalNotesError =
-    generalNotes.length > 5000 ? "General notes must be 5000 characters or fewer." : "";
   const referenceNumber = selected?.REFERANCE_NUMBER || "-";
   const travelAgentName =
     selected?.TRAVEL_AGENT_NAME ||
@@ -1018,37 +1261,7 @@ const QuotationsDetails = () => {
   const tripNights =
     selected?.NUMBER_OF_NIGHTS ??
     (tripDays === "-" ? "-" : Math.max(0, Number(tripDays) - 1));
-  const paxCount = selected?.NUMBER_OF_PAX ?? "-";
-  const hasGeneralNotes = String(selected?.GENERAL_NOTES || "").trim().length > 0;
-
-  const handleSaveGeneralNotes = async () => {
-    setGeneralNotesTouched(true);
-
-    if (!canEditGeneralNotes) {
-      notifyError("Only TOUR_OPERATION can update general notes for approved quotations.");
-      return;
-    }
-
-    if (generalNotesError) {
-      notifyError(generalNotesError);
-      return;
-    }
-
-    setGeneralNotesSaving(true);
-
-    try {
-      await patch(`/quotations/${selected?._id || id}`, {
-        GENERAL_NOTES: generalNotes,
-      });
-      notifySuccess("General notes saved successfully.");
-      setGeneralNotesOpen(false);
-      dispatch(fetchQuotation(id));
-    } catch (error) {
-      notifyError(getErrorMessage(error, "Failed to save general notes."));
-    } finally {
-      setGeneralNotesSaving(false);
-    }
-  };
+  const paxCount = selected?.NUMBER_OF_PAX_TEXT || selected?.NUMBER_OF_PAX || "-";
 
   const handleSendForPricing = () => {
     if (!selected?._id && !id) {
@@ -1130,121 +1343,164 @@ const QuotationsDetails = () => {
       [];
 
     if (Array.isArray(directOptionSummaries) && directOptionSummaries.length > 0) {
-      return directOptionSummaries.map((option, index) => {
-        const sharedRows = [
-          { name: "Transportation", amount: option?.transportation },
-          { name: "Meals", amount: option?.meals },
-          { name: "Entrance Fees", amount: option?.entranceFees },
-          { name: "Guide", amount: option?.guide },
-          { name: "Extra Services", amount: option?.extraServices },
-        ].filter(row => toNumber(row.amount) > 0);
+      return directOptionSummaries
+        .map((option, index) => {
+          const paxLabel = option?.paxLabel || option?.PAX_LABEL || "";
+          const paxForOption =
+            toNumber(option?.pax || option?.paxMax || option?.PAX_MAX) ||
+            selected?.NUMBER_OF_PAX ||
+            1;
+          const sharedRows = [
+            { name: "Transportation", amount: option?.transportation },
+            { name: "Meals", amount: option?.meals },
+            { name: "Entrance Fees", amount: option?.entranceFees },
+            { name: "Guide", amount: option?.guide },
+            { name: "Extra Services", amount: option?.extraServices },
+          ].filter(row => toNumber(row.amount) > 0);
 
-        const otherRows = asArray(option?.otherPerPersonRows).map(row => ({
-          name: row?.name || "Other Service",
-          amount: toNumber(row?.pricePerPerson ?? row?.amount),
-        }));
+          const otherRows = asArray(option?.otherPerPersonRows).map(row => ({
+            name: row?.name || "Other Service",
+            amount: toNumber(row?.pricePerPerson ?? row?.amount),
+          }));
 
-        const detailRows = [
-          { name: "Accommodation", amount: toNumber(option?.hotelsPerPerson) },
-          ...(otherRows.length ? otherRows : sharedRows),
-        ]
-          .filter(row => toNumber(row.amount) > 0)
-          .map(row => ({ ...row, afterProfit: toNumber(row.amount) }));
+          const detailRows = [
+            { name: "Accommodation", amount: toNumber(option?.hotelsPerPerson) },
+            ...(otherRows.length ? otherRows : sharedRows),
+          ]
+            .filter(row => toNumber(row.amount) > 0)
+            .map(row => ({ ...row, afterProfit: toNumber(row.amount) }));
 
-        const hotelRows = asArray(option?.rows).map(row => ({
-          cityName: row?.cityName || row?.CITY_NAME || "-",
-          hotelName: row?.hotelName || row?.HOTEL_NAME || "-",
-          hotelStars:
-            row?.hotelStars ||
-            row?.HOTEL_STARS ||
-            row?.selectedStars ||
-            option?.optionStars ||
-            option?.selectedStars ||
-            option?.hotelStars ||
-            "",
-          seasonName: row?.seasonName || row?.SEASON_NAME || "-",
-          seasonStartDate:
-            row?.seasonStartDate ||
-            row?.FROM_DATE ||
-            row?.START_DATE ||
-            row?.DATE_FROM ||
-            "",
-          seasonEndDate:
-            row?.seasonEndDate ||
-            row?.TO_DATE ||
-            row?.END_DATE ||
-            row?.DATE_TO ||
-            "",
-          nights: toNumber(row?.costNights ?? row?.nights),
-          rateAfterProfit: toNumber(row?.perPerson ?? row?.rate),
-          afterProfit: toNumber(row?.costStayPerPerson ?? row?.stayPerPerson ?? row?.total),
-        }));
+          const sourceHotelRows = asArray(option?.rows);
+          const fallbackAccommodationOption = accommodationOptions.find(
+            (item, itemIndex) =>
+              itemIndex === toNumber(option?.optionIndex) ||
+              String(item?.optionName || "").trim() ===
+                String(option?.optionName || "").trim()
+          );
+          const fallbackAccommodationRows = getAccommodationOptionHotelRows(
+            fallbackAccommodationOption
+          );
+          const hasSourceHotelRows = sourceHotelRows.some(
+            row => toNumber(row?.costNights ?? row?.nights) > 0
+          );
+          const hotelRowsSource = hasSourceHotelRows
+            ? sourceHotelRows
+            : asArray(option?.hotelStayRows).length
+            ? asArray(option?.hotelStayRows)
+            : fallbackAccommodationRows;
+          const hotelRows = hotelRowsSource.map(row => ({
+            cityName: row?.cityName || row?.CITY_NAME || "-",
+            hotelName: row?.hotelName || row?.HOTEL_NAME || "-",
+            hotelStars:
+              row?.hotelStars ||
+              row?.HOTEL_STARS ||
+              row?.selectedStars ||
+              option?.optionStars ||
+              option?.selectedStars ||
+              option?.hotelStars ||
+              "",
+            seasonName: row?.seasonName || row?.SEASON_NAME || "-",
+            seasonStartDate:
+              row?.seasonStartDate ||
+              row?.FROM_DATE ||
+              row?.START_DATE ||
+              row?.DATE_FROM ||
+              "",
+            seasonEndDate:
+              row?.seasonEndDate ||
+              row?.TO_DATE ||
+              row?.END_DATE ||
+              row?.DATE_TO ||
+              "",
+            nights: toNumber(row?.costNights ?? row?.nights) || 1,
+            rateAfterProfit: toNumber(row?.perPerson ?? row?.rate),
+            afterProfit: toNumber(
+              row?.costStayPerPerson ?? row?.stayPerPerson ?? row?.total
+            ),
+          }));
 
-        const hotelsPerPerson = toNumber(option?.hotelsPerPerson);
-        const sharedPerPerson = toNumber(option?.sharedPerPersonTotal ?? option?.sharedPerPerson);
-        const finalPerPerson = toNumber(option?.finalTotal ?? option?.finalPerPerson);
-        const hotelsDisplayPrice =
-          toNumber(option?.hotelsDisplayPrice ?? option?.hotelsPerPerson) ||
-          hotelsPerPerson;
-        const sharedDisplayPrice =
-          toNumber(
-            option?.sharedDisplayPrice ??
-              option?.sharedPerPersonTotal ??
-              option?.sharedPerPerson
-          ) || sharedPerPerson;
-        const basePerPerson =
-          toNumber(option?.basePerPerson) ||
-          hotelsDisplayPrice + sharedDisplayPrice;
-        const profitPerPerson =
-          toNumber(option?.profitPerPerson) ||
-          Math.max(0, finalPerPerson - basePerPerson);
-        const priceFactor = basePerPerson > 0 ? finalPerPerson / basePerPerson : 1;
-        const finalHotelsDisplayPrice = hotelsPerPerson * priceFactor;
-        const finalSharedDisplayPrice = sharedPerPerson * priceFactor;
-        const detailRowsAfterAdjustment = detailRows.map(row => ({
-          ...row,
-          afterProfit: toNumber(row.afterProfit) * priceFactor,
-        }));
-        const hotelRowsAfterAdjustment = hotelRows.map(row => ({
-          ...row,
-          rateAfterProfit: toNumber(row.rateAfterProfit) * priceFactor,
-          afterProfit: toNumber(row.afterProfit) * priceFactor,
-        }));
-        const seasonSummaryRows = buildSeasonSummaryRows(
-          option?.rows,
-          finalPricing?.BOARD_BASIS || option?.boardBasis || "BB",
-          selected?.NUMBER_OF_PAX || 1
-        );
+          const hotelsPerPerson = toNumber(option?.hotelsPerPerson);
+          const sharedPerPerson = toNumber(
+            option?.sharedPerPersonTotal ?? option?.sharedPerPerson
+          );
+          const finalPerPerson = toNumber(option?.finalTotal ?? option?.finalPerPerson);
+          const hotelsDisplayPrice =
+            toNumber(option?.hotelsDisplayPrice ?? option?.hotelsPerPerson) ||
+            hotelsPerPerson;
+          const sharedDisplayPrice =
+            toNumber(
+              option?.sharedDisplayPrice ??
+                option?.sharedPerPersonTotal ??
+                option?.sharedPerPerson
+            ) || sharedPerPerson;
+          const basePerPerson =
+            toNumber(option?.basePerPerson) ||
+            hotelsDisplayPrice + sharedDisplayPrice;
+          const profitPerPerson =
+            toNumber(option?.profitPerPerson) ||
+            Math.max(0, finalPerPerson - basePerPerson);
+          const priceFactor = basePerPerson > 0 ? finalPerPerson / basePerPerson : 1;
+          const finalHotelsDisplayPrice = hotelsPerPerson * priceFactor;
+          const finalSharedDisplayPrice = sharedPerPerson * priceFactor;
+          const detailRowsAfterAdjustment = detailRows.map(row => ({
+            ...row,
+            afterProfit: toNumber(row.afterProfit) * priceFactor,
+          }));
+          const hotelRowsAfterAdjustment = hotelRows.map(row => ({
+            ...row,
+            rateAfterProfit: toNumber(row.rateAfterProfit) * priceFactor,
+            afterProfit: toNumber(row.afterProfit) * priceFactor,
+          }));
+          const seasonSummaryRows = buildSeasonSummaryRows(
+            option?.rows,
+            finalPricing?.BOARD_BASIS || option?.boardBasis || "BB",
+            paxForOption
+          );
+          const supplementTotals = normalizeOptionSupplementTotals(
+            option?.supplementTotals,
+            seasonSummaryRows
+          );
 
-        return {
-          key: option?.optionKey || `${option?.optionName || "option"}-${index}`,
-          optionIndex: Number.isFinite(Number(option?.optionIndex))
-            ? Number(option.optionIndex)
-            : index,
-          optionName: option?.optionName || `Option ${index + 1}`,
-          optionStars:
-            option?.optionStars ||
-            option?.selectedStars ||
-            option?.hotelStars ||
-            "",
-          boardBasis: String(finalPricing?.BOARD_BASIS || option?.boardBasis || "BB").toUpperCase(),
-          profitType: String(
-            option?.profitType || finalPricing?.PROFIT_TYPE || "PERCENT"
-          ).toUpperCase(),
-          profitValue: toNumber(option?.profitValue ?? finalPricing?.PROFIT_VALUE),
-          hotelsPerPerson,
-          sharedPerPerson,
-          hotelsDisplayPrice: finalHotelsDisplayPrice || hotelsDisplayPrice,
-          sharedDisplayPrice: finalSharedDisplayPrice || sharedDisplayPrice,
-          basePerPerson,
-          profitPerPerson,
-          finalAdjustmentPerPerson: profitPerPerson,
-          finalPerPerson,
-          detailRows: detailRowsAfterAdjustment,
-          hotelRows: hotelRowsAfterAdjustment,
-          seasonSummaryRows,
-        };
-      });
+          return {
+            key:
+              option?.optionKey ||
+              `${option?.optionName || "option"}-${paxLabel || "pax"}-${index}`,
+            optionBaseKey: option?.optionBaseKey || "",
+            optionIndex: Number.isFinite(Number(option?.optionIndex))
+              ? Number(option.optionIndex)
+              : index,
+            optionName: option?.optionName || `Option ${index + 1}`,
+            optionStars:
+              option?.optionStars ||
+              option?.selectedStars ||
+              option?.hotelStars ||
+              "",
+            boardBasis: String(
+              finalPricing?.BOARD_BASIS || option?.boardBasis || "BB"
+            ).toUpperCase(),
+            profitType: String(
+              option?.profitType || finalPricing?.PROFIT_TYPE || "PERCENT"
+            ).toUpperCase(),
+            profitValue: toNumber(option?.profitValue ?? finalPricing?.PROFIT_VALUE),
+            paxLabel,
+            paxMin: toNumber(option?.paxMin || option?.PAX_MIN),
+            paxMax: toNumber(option?.paxMax || option?.PAX_MAX),
+            pax: paxForOption,
+            hotelsPerPerson,
+            sharedPerPerson,
+            hotelsDisplayPrice: finalHotelsDisplayPrice || hotelsDisplayPrice,
+            sharedDisplayPrice: finalSharedDisplayPrice || sharedDisplayPrice,
+            basePerPerson,
+            profitPerPerson,
+            finalAdjustmentPerPerson: profitPerPerson,
+            finalPerPerson,
+            detailRows: detailRowsAfterAdjustment,
+            hotelRows: hotelRowsAfterAdjustment,
+            seasonSummaryRows,
+            supplementTotals,
+          };
+        })
+        .sort(compareApprovedOptionByPax);
     }
 
     const snapshot = finalPricing?.SNAPSHOT || {};
@@ -1300,6 +1556,7 @@ const QuotationsDetails = () => {
           afterProfit,
         };
       });
+      const seasonSummaryRows = buildSeasonSummaryRows(hotelRows, boardBasis, pax);
 
       return {
         key: `${option?.OPTION_NAME || "option"}-${index}`,
@@ -1319,12 +1576,85 @@ const QuotationsDetails = () => {
         finalPerPerson,
         detailRows,
         hotelRows: hotelRowsAfterProfit,
-        seasonSummaryRows: buildSeasonSummaryRows(hotelRows, boardBasis, pax),
+        seasonSummaryRows,
+        supplementTotals: normalizeOptionSupplementTotals(null, seasonSummaryRows),
       };
     });
-  }, [finalPricing, isApprovedFinalPricing, selected?.NUMBER_OF_PAX]);
+  }, [accommodationOptions, finalPricing, isApprovedFinalPricing, selected?.NUMBER_OF_PAX]);
 
-  const handleDownloadPdf = async () => {
+  const approvedFinalOptionGroups = useMemo(() => {
+    const groups = new Map();
+
+    approvedFinalOptions.forEach((option, index) => {
+      const groupKey =
+        option.optionBaseKey ||
+        `option-${Number.isFinite(Number(option.optionIndex)) ? option.optionIndex : index}-${
+          option.optionName || "option"
+        }`;
+
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          key: groupKey,
+          optionIndex: option.optionIndex,
+          optionName: option.optionName,
+          optionStars: option.optionStars,
+          boardBasis: option.boardBasis,
+          prices: [],
+        });
+      }
+
+      groups.get(groupKey).prices.push(option);
+    });
+
+    return Array.from(groups.values()).map(group => ({
+      ...group,
+      prices: group.prices.sort((a, b) => {
+        const paxDiff =
+          getApprovedOptionPaxSortValue(a) - getApprovedOptionPaxSortValue(b);
+        if (paxDiff !== 0) return paxDiff;
+        return String(a.paxLabel || "").localeCompare(String(b.paxLabel || ""));
+      }),
+    }));
+  }, [approvedFinalOptions]);
+
+  const getQuotationPdfPayload = () => ({
+    quotation: selected,
+    quotationInfo: {
+      referenceNumber,
+      travelAgentName,
+      travelAgentEmail: selectedTravelAgent?.AGENT_EMAIL || "",
+      travelAgentPhone: selectedTravelAgent?.AGENT_PHONE || "",
+      travelAgentCountry:
+        nationalityMap.get(unwrapId(selectedTravelAgent?.AGENT_COUNTRY)) || "",
+      travelAgentLogoAttachmentId:
+        unwrapId(selectedTravelAgent?.AGENT_LOGO_ATTACHMENT_ID) || "",
+      quotationTypeName,
+      nationalityName,
+      validityDays,
+      tripDays,
+      tripNights,
+      paxCount,
+      quotationStatus,
+    },
+    approvedFinalOptions,
+    daysRoutes,
+    accommodationOptions,
+    extraServices,
+    finalPricing,
+  });
+
+  const clearGeneratedPdf = () => {
+    setPdfPreviewUrl("");
+    setPdfDownloadFileName("");
+  };
+
+  const handleClosePdfTemplateModal = () => {
+    if (pdfGenerating) return;
+    setPdfTemplateModalOpen(false);
+    clearGeneratedPdf();
+  };
+
+  const handleOpenPdfTemplateModal = async () => {
     if (!selected) {
       notifyError("Quotation details are still loading.");
       return;
@@ -1335,34 +1665,113 @@ const QuotationsDetails = () => {
       return;
     }
 
+    setPdfTemplateLoading(true);
+    clearGeneratedPdf();
+
+    try {
+      const templates = await get("/templates", {
+        params: { status: true, includeInactive: false },
+      });
+      const { snapshot, missing } = getRequiredPdfTemplateSnapshot(templates);
+
+      if (missing.length) {
+        notifyError(
+          `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing or inactive.`
+        );
+        return;
+      }
+
+      setPdfTemplateForm({
+        groupName:
+          selected?.GROUP_NAME ||
+          selected?.QUOTATION_GROUP_NAME ||
+          selected?.GROUP ||
+          "",
+        ...snapshot,
+      });
+      setPdfTemplateErrors({});
+      setPdfTemplateModalOpen(true);
+    } catch (error) {
+      notifyError(getErrorMessage(error, "Failed to load PDF templates."));
+    } finally {
+      setPdfTemplateLoading(false);
+    }
+  };
+
+  const updatePdfTemplateField = (name, value) => {
+    clearGeneratedPdf();
+    setPdfTemplateForm(prev => ({
+      ...prev,
+      [name]: value,
+    }));
+    setPdfTemplateErrors(prev => ({
+      ...prev,
+      [name]: "",
+    }));
+  };
+
+  const handlePdfTemplateChange = event => {
+    const { name, value } = event.target;
+    updatePdfTemplateField(name, value);
+  };
+
+  const validatePdfTemplateForm = () => {
+    const nextErrors = {};
+
+    if (!String(pdfTemplateForm.groupName || "").trim()) {
+      nextErrors.groupName = "Group name is required.";
+    }
+
+    if (!stripHtmlForValidation(pdfTemplateForm.arrivalDepartureHtml)) {
+      nextErrors.arrivalDepartureHtml =
+        "Arrival and Departure template is required.";
+    }
+
+    if (!stripHtmlForValidation(pdfTemplateForm.inclusionsExclusionsHtml)) {
+      nextErrors.inclusionsExclusionsHtml =
+        "Inclusions and Exclusions template is required.";
+    }
+
+    if (!stripHtmlForValidation(pdfTemplateForm.generalNotesHtml)) {
+      nextErrors.generalNotesHtml = "General Notes template is required.";
+    }
+
+    if (!stripHtmlForValidation(pdfTemplateForm.bankAccountHtml)) {
+      nextErrors.bankAccountHtml = "Bank Account template is required.";
+    }
+
+    setPdfTemplateErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleGeneratePdfFromTemplates = async event => {
+    event.preventDefault();
+
+    if (!validatePdfTemplateForm()) {
+      notifyError("Please fill all required PDF template fields.");
+      return;
+    }
+
     setPdfGenerating(true);
 
     try {
-      await generateQuotationPdf({
-        quotation: selected,
-        quotationInfo: {
-          referenceNumber,
-          travelAgentName,
-          travelAgentEmail: selectedTravelAgent?.AGENT_EMAIL || "",
-          travelAgentPhone: selectedTravelAgent?.AGENT_PHONE || "",
-          travelAgentCountry:
-            nationalityMap.get(unwrapId(selectedTravelAgent?.AGENT_COUNTRY)) || "",
-          travelAgentLogoAttachmentId:
-            unwrapId(selectedTravelAgent?.AGENT_LOGO_ATTACHMENT_ID) || "",
-          quotationTypeName,
-          nationalityName,
-          validityDays,
-          tripDays,
-          tripNights,
-          paxCount,
-          quotationStatus,
-        },
-        approvedFinalOptions,
-        daysRoutes,
+      const result = await generateQuotationPdf({
+        ...getQuotationPdfPayload(),
+        filledTemplates: pdfTemplateForm,
       });
-      notifySuccess("PDF downloaded successfully.");
+      const blob = result?.blob || result;
+      const fileName =
+        result?.fileName || `quotation-${referenceNumber || "approved"}.pdf`;
+
+      if (!(blob instanceof Blob)) {
+        throw new Error("PDF generation did not return a downloadable file.");
+      }
+
+      setPdfPreviewUrl(URL.createObjectURL(blob));
+      setPdfDownloadFileName(fileName);
+      notifySuccess("PDF generated successfully. Review it, then download.");
     } catch (error) {
-      notifyError(getErrorMessage(error, "Failed to download quotation PDF."));
+      notifyError(getErrorMessage(error, "Failed to generate quotation PDF."));
     } finally {
       setPdfGenerating(false);
     }
@@ -1421,6 +1830,171 @@ const QuotationsDetails = () => {
             Convert
           </Button>
         </ModalFooter>
+      </Modal>
+      <Modal
+        isOpen={pdfTemplateModalOpen}
+        toggle={handleClosePdfTemplateModal}
+        size="xl"
+        backdrop="static"
+      >
+        <Form onSubmit={handleGeneratePdfFromTemplates}>
+          <ModalHeader toggle={handleClosePdfTemplateModal}>
+            Generate Approved Quotation PDF
+          </ModalHeader>
+          <ModalBody>
+            <Alert color="info" className="mb-4">
+              Review and fill the required template sections. These edits are
+              used only for this generated quotation file and will not update
+              the reusable master templates.
+            </Alert>
+
+            {pdfPreviewUrl ? (
+              <Alert color="success" className="mb-4">
+                PDF generated. Review the preview below, then use Download PDF
+                when you are ready.
+              </Alert>
+            ) : null}
+
+            <Row className="g-4">
+              <Col md="12">
+                <Label className="form-label fw-semibold">
+                  Name of the Group <span className="text-danger">*</span>
+                </Label>
+                <Input
+                  name="groupName"
+                  value={pdfTemplateForm.groupName}
+                  onChange={handlePdfTemplateChange}
+                  invalid={!!pdfTemplateErrors.groupName}
+                  placeholder="Example: Best of Jordan - Amman UK"
+                />
+                {pdfTemplateErrors.groupName ? (
+                  <div className="text-danger small mt-1">
+                    {pdfTemplateErrors.groupName}
+                  </div>
+                ) : null}
+              </Col>
+
+              <Col md="12">
+                <Label className="form-label fw-semibold">
+                  Arrival and Departure Template{" "}
+                  <span className="text-danger">*</span>
+                </Label>
+                <PdfTemplateEditor
+                  value={pdfTemplateForm.arrivalDepartureHtml}
+                  onChange={value =>
+                    updatePdfTemplateField("arrivalDepartureHtml", value)
+                  }
+                  minHeight={260}
+                />
+                {pdfTemplateErrors.arrivalDepartureHtml ? (
+                  <div className="text-danger small mt-1">
+                    {pdfTemplateErrors.arrivalDepartureHtml}
+                  </div>
+                ) : null}
+              </Col>
+
+              <Col lg="6">
+                <Label className="form-label fw-semibold">
+                  Inclusions and Exclusions <span className="text-danger">*</span>
+                </Label>
+                <PdfTemplateEditor
+                  value={pdfTemplateForm.inclusionsExclusionsHtml}
+                  onChange={value =>
+                    updatePdfTemplateField("inclusionsExclusionsHtml", value)
+                  }
+                  minHeight={260}
+                />
+                {pdfTemplateErrors.inclusionsExclusionsHtml ? (
+                  <div className="text-danger small mt-1">
+                    {pdfTemplateErrors.inclusionsExclusionsHtml}
+                  </div>
+                ) : null}
+              </Col>
+
+              <Col lg="6">
+                <Label className="form-label fw-semibold">
+                  General Notes <span className="text-danger">*</span>
+                </Label>
+                <PdfTemplateEditor
+                  value={pdfTemplateForm.generalNotesHtml}
+                  onChange={value =>
+                    updatePdfTemplateField("generalNotesHtml", value)
+                  }
+                  minHeight={260}
+                />
+                {pdfTemplateErrors.generalNotesHtml ? (
+                  <div className="text-danger small mt-1">
+                    {pdfTemplateErrors.generalNotesHtml}
+                  </div>
+                ) : null}
+              </Col>
+
+              <Col md="12">
+                <Label className="form-label fw-semibold">
+                  Bank Account Detail Template{" "}
+                  <span className="text-danger">*</span>
+                </Label>
+                <PdfTemplateEditor
+                  value={pdfTemplateForm.bankAccountHtml}
+                  onChange={value =>
+                    updatePdfTemplateField("bankAccountHtml", value)
+                  }
+                  minHeight={220}
+                />
+                {pdfTemplateErrors.bankAccountHtml ? (
+                  <div className="text-danger small mt-1">
+                    {pdfTemplateErrors.bankAccountHtml}
+                  </div>
+                ) : null}
+              </Col>
+
+              {pdfPreviewUrl ? (
+                <Col md="12">
+                  <Label className="form-label fw-semibold">
+                    Generated PDF Preview
+                  </Label>
+                  <div className="border rounded overflow-hidden bg-light">
+                    <iframe
+                      title="Generated quotation PDF preview"
+                      src={pdfPreviewUrl}
+                      style={{
+                        width: "100%",
+                        height: 560,
+                        border: 0,
+                        display: "block",
+                      }}
+                    />
+                  </div>
+                </Col>
+              ) : null}
+            </Row>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              color="light"
+              className="border"
+              type="button"
+              onClick={handleClosePdfTemplateModal}
+              disabled={pdfGenerating}
+            >
+              Cancel
+            </Button>
+            {pdfPreviewUrl ? (
+              <Button
+                color="success"
+                tag="a"
+                href={pdfPreviewUrl}
+                download={pdfDownloadFileName || "quotation.pdf"}
+              >
+                Download PDF
+              </Button>
+            ) : null}
+            <Button color="primary" type="submit" disabled={pdfGenerating}>
+              {pdfGenerating ? <Spinner size="sm" className="me-2" /> : null}
+              Generate PDF
+            </Button>
+          </ModalFooter>
+        </Form>
       </Modal>
       <div className="page-content">
         <Container fluid>
@@ -1500,34 +2074,6 @@ const QuotationsDetails = () => {
                                   <i className="bx bx-transfer me-1" />
                                 )}
                                 Convert to Reservation File
-                              </Button>
-                            ) : null}
-
-                            {isApprovedQuotation ? (
-                              <Button
-                                color="light"
-                                className="border d-flex align-items-center gap-2 px-3 py-2 text-start"
-                                type="button"
-                                onClick={() => {
-                                  setGeneralNotes(selected?.GENERAL_NOTES || "");
-                                  setGeneralNotesTouched(false);
-                                  setGeneralNotesOpen(true);
-                                }}
-                              >
-                                <span
-                                  className="rounded-2 bg-primary-subtle d-flex align-items-center justify-content-center"
-                                  style={{ width: 34, height: 34, minWidth: 34 }}
-                                >
-                                  <i className="bx bx-message-square-detail text-primary font-size-18" />
-                                </span>
-                                <span>
-                                  <span className="d-block fw-semibold text-dark">
-                                    General Notes
-                                  </span>
-                                  <span className="d-block text-muted small">
-                                    {hasGeneralNotes ? "View or edit" : "Add note"}
-                                  </span>
-                                </span>
                               </Button>
                             ) : null}
 
@@ -1691,15 +2237,17 @@ const QuotationsDetails = () => {
                         <Button
                           color="primary"
                           type="button"
-                          onClick={handleDownloadPdf}
-                          disabled={pdfGenerating || summaryLoading}
+                          onClick={handleOpenPdfTemplateModal}
+                          disabled={
+                            pdfGenerating || pdfTemplateLoading || summaryLoading
+                          }
                         >
-                          {pdfGenerating ? (
+                          {pdfTemplateLoading ? (
                             <Spinner size="sm" className="me-2" />
                           ) : (
-                            <i className="bx bx-download me-1" />
+                            <i className="bx bx-file-find me-1" />
                           )}
-                          Download as PDF file
+                          Generate PDF
                         </Button>
                       ) : null}
                     </SummaryHeader>
@@ -1707,23 +2255,25 @@ const QuotationsDetails = () => {
                       <LoadingState text="Loading approved final price..." />
                     ) : !isApprovedFinalPricing ? (
                       <EmptyState text="The final approved price is not available yet." />
-                    ) : approvedFinalOptions.length === 0 ? (
+                    ) : approvedFinalOptionGroups.length === 0 ? (
                       <EmptyState text="No approved option prices were found." />
                     ) : (
                       <div className="border rounded overflow-hidden">
-                        {approvedFinalOptions.map((option, index) => {
-                          const isOpen = expandedFinalOptionKey === option.key;
+                        {approvedFinalOptionGroups.map((group, index) => {
+                          const isOpen = expandedFinalOptionKey === group.key;
+                          const hasMultiplePax = group.prices.length > 1;
+                          const firstPrice = group.prices[0] || {};
 
                           return (
                             <div
-                              key={option.key}
+                              key={group.key}
                               className={index === 0 ? "" : "border-top"}
                             >
                               <button
                                 type="button"
                                 className="btn btn-link w-100 text-start text-decoration-none p-3 bg-white"
                                 onClick={() =>
-                                  setExpandedFinalOptionKey(isOpen ? "" : option.key)
+                                  setExpandedFinalOptionKey(isOpen ? "" : group.key)
                                 }
                               >
                                 <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap">
@@ -1735,26 +2285,79 @@ const QuotationsDetails = () => {
                                     />
                                     <div>
                                       <div className="fw-semibold text-dark">
-                                        {option.optionName}
+                                        {group.optionName}
                                       </div>
                                       <div className="text-muted small">
-                                        Board basis {option.boardBasis} | price
+                                        Board basis {group.boardBasis} |{" "}
+                                        {hasMultiplePax
+                                          ? `${group.prices.length} pax prices`
+                                          : `${firstPrice.paxLabel || "price"}`}
                                       </div>
                                     </div>
                                   </div>
-                                  <div className="text-end">
-                                    <div className="text-muted small">Final Total</div>
-                                    <div className="h4 mb-0 text-primary">
-                                      {formatMoney(option.finalPerPerson)}
-                                    </div>
+                                  <div
+                                    className="text-end"
+                                    style={{ minWidth: hasMultiplePax ? 260 : 120 }}
+                                  >
+                                    {hasMultiplePax ? (
+                                      <div className="d-flex flex-column gap-1">
+                                        {group.prices.map(price => (
+                                          <div
+                                            key={price.key}
+                                            className="d-flex justify-content-end align-items-baseline gap-3"
+                                          >
+                                            <span className="text-muted small">
+                                              {price.paxLabel || "Pax"}
+                                            </span>
+                                            <span className="h5 mb-0 text-primary">
+                                              {formatMoney(price.finalPerPerson)}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div className="text-muted small">Final Total / Person</div>
+                                        <div className="h4 mb-0 text-primary">
+                                          {formatMoney(firstPrice.finalPerPerson)}
+                                        </div>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               </button>
 
                               {isOpen ? (
                                 <div className="bg-light border-top p-3">
-                                  <FinalHotelSeasonTable rows={option.hotelRows} />
-                                  <FinalSupplementPriceTable option={option} />
+                                  {group.prices.map((option, optionIndex) => (
+                                    <div
+                                      key={option.key}
+                                      className={
+                                        optionIndex === group.prices.length - 1
+                                          ? ""
+                                          : "border-bottom pb-3 mb-3"
+                                      }
+                                    >
+                                      {hasMultiplePax ? (
+                                        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                                          <Badge color="primary" pill>
+                                            {option.paxLabel || "Pax"}
+                                          </Badge>
+                                          <div className="text-end">
+                                            <div className="text-muted small">
+                                              Final Total / Person
+                                            </div>
+                                            <div className="h5 mb-0 text-primary">
+                                              {formatMoney(option.finalPerPerson)}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                      <FinalOptionPriceSummary option={option} />
+                                      <FinalHotelSeasonTable rows={option.hotelRows} />
+                                      <FinalSupplementPriceTable option={option} />
+                                    </div>
+                                  ))}
                                 </div>
                               ) : null}
                             </div>
@@ -2290,81 +2893,6 @@ const QuotationsDetails = () => {
               </Card>
             </Col>
           </Row>
-
-          <Modal
-            isOpen={generalNotesOpen}
-            toggle={() => !generalNotesSaving && setGeneralNotesOpen(false)}
-            centered
-          >
-            <ModalHeader toggle={() => !generalNotesSaving && setGeneralNotesOpen(false)}>
-              <div className="d-flex align-items-center gap-2">
-                <span
-                  className="rounded-circle bg-primary-subtle d-flex align-items-center justify-content-center"
-                  style={{ width: 36, height: 36, minWidth: 36 }}
-                >
-                  <i className="bx bx-note text-primary font-size-18" />
-                </span>
-                <span>
-                  <span className="d-block">General Notes</span>
-                  <span className="d-block text-muted small fw-normal">
-                    {referenceNumber}
-                  </span>
-                </span>
-              </div>
-            </ModalHeader>
-            <ModalBody>
-              <div className="rounded border bg-light p-3">
-                <div className="d-flex justify-content-between align-items-center gap-3 mb-2">
-                  <Label className="form-label mb-0">Notes</Label>
-                  <Badge color={generalNotesError ? "danger" : "light"} className="text-dark">
-                    {generalNotes.length}/5000
-                  </Badge>
-                </div>
-                <Input
-                  type="textarea"
-                  rows="8"
-                  value={generalNotes}
-                  onChange={e => {
-                    setGeneralNotes(e.target.value);
-                    setGeneralNotesTouched(true);
-                  }}
-                  invalid={!!(generalNotesTouched && generalNotesError)}
-                  disabled={!canEditGeneralNotes || generalNotesSaving}
-                  placeholder={
-                    canEditGeneralNotes
-                      ? "Write the approved quotation notes here."
-                      : "Only TOUR_OPERATION can update notes."
-                  }
-                  className="bg-white"
-                />
-                <FormFeedback>{generalNotesError}</FormFeedback>
-                <div className="text-muted small mt-2">
-                  Visible from the approved quotation summary.
-                </div>
-              </div>
-            </ModalBody>
-            <ModalFooter>
-              <Button
-                color="light"
-                type="button"
-                onClick={() => setGeneralNotesOpen(false)}
-                disabled={generalNotesSaving}
-              >
-                Close
-              </Button>
-              {canEditGeneralNotes ? (
-                <Button
-                  color="primary"
-                  type="button"
-                  onClick={handleSaveGeneralNotes}
-                  disabled={generalNotesSaving}
-                >
-                  {generalNotesSaving ? <Spinner size="sm" className="me-2" /> : null}
-                  Save
-                </Button>
-              ) : null}
-            </ModalFooter>
-          </Modal>
         </Container>
       </div>
     </React.Fragment>

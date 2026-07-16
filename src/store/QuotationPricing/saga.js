@@ -51,7 +51,9 @@ function normalizePricing(item) {
       item?.REFERANCE_NUMBER ||
       "-",
     NUMBER_OF_PAX:
+      item?.SNAPSHOT?.QUOTATION?.NUMBER_OF_PAX_TEXT ||
       item?.SNAPSHOT?.QUOTATION?.NUMBER_OF_PAX ||
+      item?.NUMBER_OF_PAX_TEXT ||
       item?.NUMBER_OF_PAX ||
       0,
   };

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -19,6 +19,7 @@ import {
 import Breadcrumbs from "../../components/Common/Breadcrumb";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError, notifyInfo } from "../../helpers/notify";
+import { post } from "../../helpers/api_helper";
 import { fetchQuotation } from "../../store/Quotations/actions";
 import {
   createQuotationDay,
@@ -90,6 +91,103 @@ const getQuotationPax = quotation => {
   return Number.isFinite(pax) && pax > 0 ? pax : 0;
 };
 
+const parsePaxGroups = value => {
+  const expression = String(value || "").trim();
+  if (!expression) return [];
+
+  return expression
+    .split(",")
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+      const numberMatch = part.match(/^\d+$/);
+      if (!rangeMatch && !numberMatch) return null;
+
+      const min = rangeMatch ? Number(rangeMatch[1]) : Number(part);
+      const max = rangeMatch ? Number(rangeMatch[2]) : Number(part);
+      if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min) {
+        return null;
+      }
+
+      return {
+        min,
+        max,
+        label: min === max ? String(min) : `${min}-${max}`,
+      };
+    })
+    .filter(Boolean);
+};
+
+const getQuotationPaxGroups = quotation => {
+  if (Array.isArray(quotation?.PAX_GROUPS) && quotation.PAX_GROUPS.length) {
+    return quotation.PAX_GROUPS
+      .map(group => {
+        const min = Number(group?.min ?? group?.MIN ?? group?.PAX_MIN);
+        const max = Number(group?.max ?? group?.MAX ?? group?.PAX_MAX ?? min);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min < 1 || max < min) {
+          return null;
+        }
+        return {
+          min,
+          max,
+          label: group?.label || (min === max ? String(min) : `${min}-${max}`),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  const parsed = parsePaxGroups(quotation?.NUMBER_OF_PAX_TEXT);
+  if (parsed.length) return parsed;
+
+  const pax = getQuotationPax(quotation);
+  return pax ? [{ min: pax, max: pax, label: String(pax) }] : [];
+};
+
+const formatPaxGroupLabel = group => {
+  const rawLabel = String(group?.label || "").trim();
+  const label =
+    rawLabel ||
+    (Number(group?.min) === Number(group?.max)
+      ? String(group?.min || "")
+      : `${group?.min || ""}-${group?.max || ""}`);
+
+  if (!label) return "";
+  return /pax$/i.test(label) ? label : `${label} Pax`;
+};
+
+const isGuideRequiredForPaxGroup = group => Number(group?.max || group?.PAX_MAX || 0) >= 6;
+
+const normalizeGuideRows = (rows, paxGroups = [], legacyGuide = {}, defaultGuideType = "") => {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+
+  return paxGroups.map(group => {
+    const label = group.label || (group.min === group.max ? String(group.min) : `${group.min}-${group.max}`);
+    const existing =
+      sourceRows.find(
+        row =>
+          String(row?.PAX_LABEL || row?.label || "") === String(label) ||
+          (Number(row?.PAX_MIN ?? row?.min) === Number(group.min) &&
+            Number(row?.PAX_MAX ?? row?.max) === Number(group.max))
+      ) || null;
+    const required = isGuideRequiredForPaxGroup(group);
+    const legacyEnabled = Boolean(legacyGuide?.enabled || legacyGuide?.GUIDE_TYPE);
+    const enabled = required || Boolean(existing?.enabled ?? legacyEnabled);
+    const guideType = enabled
+      ? existing?.GUIDE_TYPE || existing?.guideType || legacyGuide?.GUIDE_TYPE || defaultGuideType || ""
+      : "";
+
+    return {
+      PAX_LABEL: label,
+      PAX_MIN: group.min,
+      PAX_MAX: group.max,
+      required,
+      enabled,
+      GUIDE_TYPE: guideType,
+    };
+  });
+};
+
 const getTransportationTypeLabel = item =>
   item?.TRANSPORTATION_TYPE_NAME ||
   item?.NAME ||
@@ -128,6 +226,282 @@ const getCityLabel = item =>
   item?.TITLE ||
   item?.VALUE ||
   "-";
+
+const normalizeSearchText = value =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ");
+
+const findBestCityMatch = (value, cities = []) => {
+  const search = normalizeSearchText(value);
+  if (!search) return null;
+
+  let bestMatch = null;
+  let bestScore = 0;
+
+  cities.forEach(city => {
+    const label = getCityLabel(city);
+    const normalizedLabel = normalizeSearchText(label);
+    if (!normalizedLabel) return;
+
+    let score = 0;
+    if (search === normalizedLabel) {
+      score = 100;
+    } else if (search.includes(normalizedLabel)) {
+      score = 80 + normalizedLabel.length;
+    } else if (normalizedLabel.includes(search)) {
+      score = 60 + search.length;
+    } else {
+      const searchWords = new Set(search.split(" ").filter(Boolean));
+      const labelWords = normalizedLabel.split(" ").filter(Boolean);
+      const matchedWords = labelWords.filter(word => searchWords.has(word));
+      if (matchedWords.length) {
+        score = matchedWords.length * 20;
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = city;
+    }
+  });
+
+  return bestScore >= 20 ? bestMatch : null;
+};
+
+const buildCityStop = (city, order = 1, sourceText = "") => ({
+  id: `city-${getId(city)}-${order}`,
+  type: "city",
+  label: getCityLabel(city),
+  cityId: getId(city),
+  cityName: getCityLabel(city),
+  placeId: null,
+  placeName: null,
+  sourceText: String(sourceText || getCityLabel(city) || "").trim(),
+  order,
+});
+
+const getPlaceLabel = place =>
+  place?.PLACE_NAME || place?.NAME || place?.TITLE || place?.VALUE || "-";
+
+const getPlaceCityId = place => getId(place?.PLACE_CITY || place?.CITY_ID);
+
+const getPlaceCity = (place, cities = []) =>
+  cities.find(item => getId(item) === getPlaceCityId(place)) || null;
+
+const findExactPlaceMatch = (value, places = []) => {
+  const search = normalizeSearchText(value);
+  if (!search) return null;
+
+  return (
+    (Array.isArray(places) ? places : []).find(
+      place => normalizeSearchText(getPlaceLabel(place)) === search
+    ) || null
+  );
+};
+
+const isPlaceSameAsCity = (place, cities = []) => {
+  const city = getPlaceCity(place, cities);
+  if (!city) return false;
+  return normalizeSearchText(getPlaceLabel(place)) === normalizeSearchText(getCityLabel(city));
+};
+
+const buildCityStopFromPlace = (place, cities = [], order = 1, sourceText = "") => {
+  const cityId = getPlaceCityId(place);
+  const city = getPlaceCity(place, cities);
+  const cityName = city ? getCityLabel(city) : place?.PLACE_CITY_NAME || getPlaceLabel(place);
+
+  return {
+    id: `city-place-${getId(place)}-${order}`,
+    type: "city",
+    label: cityName,
+    cityId,
+    cityName,
+    placeId: getId(place),
+    placeName: getPlaceLabel(place),
+    sourceText: String(sourceText || getPlaceLabel(place) || cityName || "").trim(),
+    order,
+  };
+};
+
+const buildPlaceStop = (place, cities = [], order = 1, sourceText = "") => {
+  const cityId = getPlaceCityId(place);
+  const city = getPlaceCity(place, cities);
+
+  return {
+    id: `place-${getId(place)}-${order}`,
+    type: "place",
+    label: getPlaceLabel(place),
+    cityId,
+    cityName: city ? getCityLabel(city) : place?.PLACE_CITY_NAME || "",
+    placeId: getId(place),
+    placeName: getPlaceLabel(place),
+    sourceText: String(sourceText || getPlaceLabel(place) || "").trim(),
+    order,
+  };
+};
+
+const normalizeRouteStops = stops =>
+  (Array.isArray(stops) ? stops : [])
+    .filter(stop => stop && String(stop.label || "").trim())
+    .map((stop, index) => ({
+      ...stop,
+      id: stop.id || `${stop.type || "stop"}-${stop.cityId || stop.placeId || index}-${index + 1}`,
+      type: stop.type || (stop.placeId ? "place" : "city"),
+      label: String(stop.label || stop.placeName || stop.cityName || "").trim(),
+      sourceText: String(stop.sourceText || stop.label || stop.placeName || stop.cityName || "").trim(),
+      order: index + 1,
+    }));
+
+const parseRouteTextToCityStops = (routeText, cities = []) =>
+  String(routeText || "")
+    .split("-")
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map((part, index) => {
+      const city = findBestCityMatch(part, cities);
+      return city ? buildCityStop(city, index + 1, part) : null;
+    })
+    .filter(Boolean);
+
+const buildRouteTextFromStops = stops =>
+  normalizeRouteStops(stops)
+    .map(stop => stop.label)
+    .filter(Boolean)
+    .join(" - ");
+
+const buildRouteDistanceSignature = stops =>
+  normalizeRouteStops(stops)
+    .map(
+      stop =>
+        `${stop.type || ""}:${stop.label || ""}:${stop.sourceText || ""}:${stop.placeId || ""}:${stop.cityId || ""}`
+    )
+    .join(">");
+
+const insertPlaceStopAfterCity = (stops, place, cities = []) => {
+  const normalized = normalizeRouteStops(stops);
+  const cityId = getPlaceCityId(place);
+  const placeId = getId(place);
+  const withoutExistingPlace = normalized.filter(
+    stop => stop.placeId !== placeId
+  );
+  const exactCityIndex = withoutExistingPlace.findIndex(
+    stop =>
+      stop.type === "city" &&
+      stop.cityId === cityId &&
+      normalizeSearchText(stop.sourceText || stop.label || stop.cityName) ===
+        normalizeSearchText(getPlaceLabel(place))
+  );
+
+  if (isPlaceSameAsCity(place, cities)) {
+    const cityStop = buildCityStopFromPlace(place, cities, withoutExistingPlace.length + 1);
+
+    if (exactCityIndex !== -1) {
+      const nextStops = [...withoutExistingPlace];
+      nextStops[exactCityIndex] = buildCityStopFromPlace(
+        place,
+        cities,
+        exactCityIndex + 1,
+        withoutExistingPlace[exactCityIndex]?.sourceText
+      );
+      return normalizeRouteStops(nextStops);
+    }
+
+    return normalizeRouteStops([...withoutExistingPlace, cityStop]);
+  }
+
+  const placeStop = buildPlaceStop(place, cities, withoutExistingPlace.length + 1);
+
+  if (exactCityIndex !== -1) {
+    const nextStops = [...withoutExistingPlace];
+    nextStops[exactCityIndex] = buildPlaceStop(
+      place,
+      cities,
+      exactCityIndex + 1,
+      withoutExistingPlace[exactCityIndex]?.sourceText
+    );
+    return normalizeRouteStops(nextStops);
+  }
+
+  let insertIndex = -1;
+
+  withoutExistingPlace.forEach((stop, index) => {
+    if (stop.cityId === cityId) {
+      insertIndex = index;
+    }
+  });
+
+  const nextStops =
+    insertIndex === -1
+      ? [...withoutExistingPlace, placeStop]
+      : [
+          ...withoutExistingPlace.slice(0, insertIndex + 1),
+          placeStop,
+          ...withoutExistingPlace.slice(insertIndex + 1),
+        ];
+
+  return normalizeRouteStops(nextStops);
+};
+
+const removePlaceFromRouteStops = (stops, placeId, cities = []) =>
+  normalizeRouteStops(stops)
+    .map(stop => {
+      if (stop.placeId !== placeId) return stop;
+      if (stop.type !== "city") return null;
+
+      const city = cities.find(item => getId(item) === stop.cityId) || null;
+      return city
+        ? buildCityStop(city, stop.order, stop.sourceText || stop.label)
+        : {
+            ...stop,
+            placeId: null,
+            placeName: null,
+          };
+    })
+    .filter(Boolean);
+
+const mergeRouteTextWithExistingStops = (routeText, existingStops, cities = []) => {
+  const nextStops = parseRouteTextToCityStops(routeText, cities);
+  const selectedStops = normalizeRouteStops(existingStops).filter(stop => stop.placeId);
+
+  selectedStops.forEach(selectedStop => {
+    if (nextStops.some(stop => stop.placeId === selectedStop.placeId)) return;
+
+    const selectedName = normalizeSearchText(
+      selectedStop.placeName || selectedStop.sourceText || selectedStop.label
+    );
+    const exactTextIndex = nextStops.findIndex(
+      stop =>
+        stop.cityId === selectedStop.cityId &&
+        normalizeSearchText(stop.sourceText || stop.label) === selectedName
+    );
+
+    if (exactTextIndex !== -1) {
+      nextStops[exactTextIndex] = {
+        ...selectedStop,
+        sourceText: nextStops[exactTextIndex]?.sourceText || selectedStop.sourceText,
+      };
+      return;
+    }
+
+    let insertIndex = -1;
+    nextStops.forEach((stop, index) => {
+      if (stop.cityId === selectedStop.cityId) {
+        insertIndex = index;
+      }
+    });
+
+    if (insertIndex === -1) {
+      nextStops.push(selectedStop);
+    } else {
+      nextStops.splice(insertIndex + 1, 0, selectedStop);
+    }
+  });
+
+  return normalizeRouteStops(nextStops);
+};
 
 const formatMoney = value => {
   const amount = Number(value);
@@ -242,6 +616,16 @@ const buildDayState = ({
   const routeText = existing?.ROUTE_TEXT
     ? existing.ROUTE_TEXT
     : existingCityNames.join(" - ");
+  const existingRouteStops = normalizeRouteStops(existing?.route?.stops);
+  const routeStops = existingRouteStops.length
+    ? existingRouteStops
+    : parseRouteTextToCityStops(routeText, cities);
+  const routeDistance = existing?.route?.distance || {
+    available: false,
+    totalKm: null,
+    segments: [],
+    message: "",
+  };
 
   return {
     _id: existing?._id || "",
@@ -250,7 +634,11 @@ const buildDayState = ({
     DAY_ORDER: order,
     DAY_DATE: date,
 
-    ROUTE_TEXT: routeText,
+    ROUTE_TEXT: routeText || buildRouteTextFromStops(routeStops),
+    ROUTE_STOPS: routeStops,
+    ROUTE_DISTANCE: routeDistance,
+    ROUTE_DISTANCE_SIGNATURE: "",
+    TRANSPORTATION_ROWS: existingTransportationRows,
 
     TRANSPORTATION_TYPE: existing?.TRANSPORTATION?.ids?.TRANSPORTATION_TYPE ||
       existing?.TRANSPORTATION_TYPE ||
@@ -309,6 +697,7 @@ const buildDayState = ({
       existing?.guide?.GUIDE_TYPE ||
       existing?.GUIDE_TYPE ||
       "",
+    GUIDE_ROWS: Array.isArray(existing?.guide?.rows) ? existing.guide.rows : [],
 
     hasMeals:
       existing?.meals?.enabled ||
@@ -405,6 +794,8 @@ const PlanQuotation = () => {
   const [dayForms, setDayForms] = useState([]);
   const [openDays, setOpenDays] = useState({});
   const [savingDayOrder, setSavingDayOrder] = useState(null);
+  const [routeDistanceLoadingByDay, setRouteDistanceLoadingByDay] = useState({});
+  const routeDistanceRequestsRef = useRef(new Set());
 
   const transportationTypes = lookups?.transportationTypes || [];
   const transportationCompanies = lookups?.transportationCompanies || [];
@@ -420,15 +811,20 @@ const PlanQuotation = () => {
       ? Number(quotation.DURATION_IN_DAYS)
       : 0;
   const quotationNationalityId = getId(quotation?.NATIONALITY);
-  const quotationPax = getQuotationPax(quotation);
-
-  const cityNameMap = useMemo(() => {
-    const map = new Map();
-    cities.forEach(city => {
-      map.set(getCityLabel(city).trim().toLowerCase(), city);
-    });
-    return map;
-  }, [cities]);
+  const quotationPaxGroups = useMemo(
+    () => getQuotationPaxGroups(quotation),
+    [quotation]
+  );
+  const quotationPax =
+    quotationPaxGroups.length > 0
+      ? Math.max(...quotationPaxGroups.map(group => Number(group.max || 0)))
+      : getQuotationPax(quotation);
+  const quotationPaxDisplayGroups = quotationPaxGroups.length
+    ? quotationPaxGroups
+    : quotationPax
+      ? [{ min: quotationPax, max: quotationPax, label: String(quotationPax) }]
+      : [];
+  const guideRequiredByPax = quotationPax >= 6;
 
   useEffect(() => {
     if (id) {
@@ -498,6 +894,7 @@ const PlanQuotation = () => {
     if (!quotationPax) return;
 
     dayForms.forEach(day => {
+      if ((day.TRANSPORTATION_ROWS || []).length) return;
       if (!day?.TRANSPORTATION_TYPE || !day?.TRANSPORTATION_COMPANY_ID) return;
 
       const key = bestRateKey(
@@ -530,8 +927,166 @@ const PlanQuotation = () => {
   ]);
 
   useEffect(() => {
+    if (!quotationPaxGroups.length || readOnly) return;
+    const defaultGuideType = getId(guideTypes[0]) || "";
+
     setDayForms(prev =>
       prev.map(day => {
+        const nextRows = normalizeGuideRows(
+          day.GUIDE_ROWS,
+          quotationPaxGroups,
+          {
+            enabled: day.hasGuide,
+            GUIDE_TYPE: day.GUIDE_TYPE,
+          },
+          defaultGuideType
+        );
+        const currentSignature = JSON.stringify(day.GUIDE_ROWS || []);
+        const nextSignature = JSON.stringify(nextRows);
+        if (currentSignature === nextSignature) return day;
+
+        const firstEnabled = nextRows.find(row => row.enabled);
+        return {
+          ...day,
+          GUIDE_ROWS: nextRows,
+          hasGuide: Boolean(firstEnabled),
+          GUIDE_TYPE: firstEnabled?.GUIDE_TYPE || "",
+          touched: {
+            ...day.touched,
+            GUIDE_ROWS: true,
+          },
+        };
+      })
+    );
+  }, [quotationPaxGroups, guideTypes, readOnly]);
+
+  useEffect(() => {
+    dayForms.forEach(day => {
+      const stops = getRouteStopsForDay(day);
+      const signature = buildRouteDistanceSignature(stops);
+      const requestKey = `${day.DAY_ORDER}:${signature}`;
+
+      if (stops.length < 2 || !signature) return;
+      if (day.ROUTE_DISTANCE_SIGNATURE === signature) return;
+      if (routeDistanceRequestsRef.current.has(requestKey)) return;
+
+      routeDistanceRequestsRef.current.add(requestKey);
+
+      setRouteDistanceLoadingByDay(prev => ({
+        ...prev,
+        [day.DAY_ORDER]: true,
+      }));
+
+      post("/quotation-days/route-distance", { stops })
+        .then(distance => {
+          setDayForms(prev =>
+            prev.map(current => {
+              if (current.DAY_ORDER !== day.DAY_ORDER) return current;
+              const currentSignature = buildRouteDistanceSignature(
+                getRouteStopsForDay(current)
+              );
+              if (currentSignature !== signature) return current;
+
+              return {
+                ...current,
+                ROUTE_DISTANCE: distance || {
+                  available: false,
+                  totalKm: null,
+                  segments: [],
+                  message: "",
+                },
+                ROUTE_DISTANCE_SIGNATURE: signature,
+              };
+            })
+          );
+        })
+        .catch(error => {
+          const message =
+            error?.response?.data?.message ||
+            error?.message ||
+            "Failed to calculate route distance.";
+
+          setDayForms(prev =>
+            prev.map(current =>
+              current.DAY_ORDER === day.DAY_ORDER
+                ? {
+                    ...current,
+                    ROUTE_DISTANCE: {
+                      available: false,
+                      totalKm: null,
+                      segments: [],
+                      message,
+                    },
+                    ROUTE_DISTANCE_SIGNATURE: signature,
+                  }
+                : current
+            )
+          );
+        })
+        .finally(() => {
+          routeDistanceRequestsRef.current.delete(requestKey);
+          setRouteDistanceLoadingByDay(prev => ({
+            ...prev,
+            [day.DAY_ORDER]: false,
+          }));
+        });
+    });
+  }, [dayForms, cities]);
+
+  useEffect(() => {
+    if (readOnly || !quotationPaxGroups.length) return;
+
+    setDayForms(prev =>
+      prev.map(day => {
+        const distance = day.ROUTE_DISTANCE?.totalKm;
+        const autoRows = findAutoTransportationRows(distance, quotationPaxGroups);
+        if (!autoRows.length) return day;
+
+        const currentSignature = (day.TRANSPORTATION_ROWS || [])
+          .map(row => `${row.PAX_LABEL}:${row.TRANSPORTATION_TYPE_ID}:${row.TRANSPORTATION_SIZE_ID}:${row.TRANSPORTATION_COMPANY_ID}:${row.RATE_ID}`)
+          .join("|");
+        const nextSignature = autoRows
+          .map(row => `${row.PAX_LABEL}:${row.TRANSPORTATION_TYPE_ID}:${row.TRANSPORTATION_SIZE_ID}:${row.TRANSPORTATION_COMPANY_ID}:${row.RATE_ID}`)
+          .join("|");
+
+        if (currentSignature === nextSignature) return day;
+
+        const primary = autoRows[0];
+
+        return {
+          ...day,
+          TRANSPORTATION_ROWS: autoRows,
+          TRANSPORTATION_TYPE: primary.TRANSPORTATION_TYPE_ID || "",
+          TRANSPORTATION_COMPANY_ID: primary.TRANSPORTATION_COMPANY_ID || "",
+          TRANSPORTATION_COMPANY_NAME: primary.TRANSPORTATION_COMPANY_NAME || "",
+          TRANSPORTATION_BY: primary.TRANSPORTATION_SIZE_ID || "",
+          TRANSPORTATION_RATE_ID: primary.RATE_ID || "",
+          TRANSPORTATION_RATE: primary.RATE ?? null,
+          TRANSPORTATION_SIZE_LABEL: primary.TRANSPORTATION_BY || "",
+          TRANSPORTATION_MIN_CAPACITY: primary.MINIMUM_CAPACITY ?? null,
+          TRANSPORTATION_MAX_CAPACITY: primary.MAXIMUM_CAPACITY ?? null,
+          touched: {
+            ...day.touched,
+            TRANSPORTATION_TYPE: true,
+            TRANSPORTATION_COMPANY_ID: true,
+            TRANSPORTATION_BY: true,
+          },
+        };
+      })
+    );
+  }, [
+    dayForms,
+    quotationPaxGroups,
+    transportationCompanies,
+    transportationSizes,
+    transportationTypes,
+    readOnly,
+  ]);
+
+  useEffect(() => {
+    setDayForms(prev =>
+      prev.map(day => {
+        if ((day.TRANSPORTATION_ROWS || []).length) return day;
         if (!day.TRANSPORTATION_TYPE || !day.TRANSPORTATION_COMPANY_ID) return day;
 
         const key = bestRateKey(
@@ -635,23 +1190,134 @@ const PlanQuotation = () => {
     };
   };
 
-  const parseRouteCities = routeText => {
-    const names = String(routeText || "")
-      .split("-")
-      .map(item => item.trim())
-      .filter(Boolean);
+  const isTransportationTypeValidForDistance = (type, distanceKm) => {
+    const distance = Number(distanceKm);
+    if (!type || !isActiveRecord(type) || type.TRANSPORTATION_TYPE_STATUS === false) {
+      return false;
+    }
+    if (!Number.isFinite(distance) || distance < 0) return false;
 
+    const from = Number(type.DISTANCE_FROM);
+    const to = Number(type.DISTANCE_TO);
+    const hasFrom = Number.isFinite(from);
+    const hasTo = Number.isFinite(to);
+
+    if (hasFrom && distance < from) return false;
+    if (hasTo && distance > to) return false;
+
+    return true;
+  };
+
+  const buildTransportationRow = ({ group, company, type, size, rate }) => ({
+    PAX_LABEL: group.label,
+    PAX_MIN: group.min,
+    PAX_MAX: group.max,
+    ROUTE_DISTANCE_KM: null,
+    TRANSPORTATION_TYPE_ID: getId(type),
+    TRANSPORTATION_TYPE_NAME: getTransportationTypeLabel(type),
+    TRANSPORTATION_COMPANY_ID: getId(company),
+    TRANSPORTATION_COMPANY_NAME: getCompanyLabel(company),
+    TRANSPORTATION_SIZE_ID: getId(size),
+    TRANSPORTATION_BY: getSizeTypeLabel(size),
+    MINIMUM_CAPACITY: getCapacityMin(size),
+    MAXIMUM_CAPACITY: getCapacityMax(size),
+    RATE_ID: getId(rate),
+    RATE: rate?.RATE ?? null,
+  });
+
+  const findAutoTransportationRows = (distanceKm, paxGroups) => {
+    const distance = Number(distanceKm);
+    if (!Number.isFinite(distance) || distance < 0 || !paxGroups.length) return [];
+
+    return paxGroups
+      .map(group => {
+        const candidates = [];
+
+        transportationCompanies.forEach(company => {
+          if (!isActiveRecord(company)) return;
+
+          const rates = Array.isArray(company?.TRANSPORTATION_RATES)
+            ? company.TRANSPORTATION_RATES
+            : [];
+
+          rates.forEach(rate => {
+            if (!isActiveRecord(rate)) return;
+
+            const type =
+              transportationTypes.find(
+                item => getId(item) === getId(rate?.TRANSPORTATION_TYPE_ID)
+              ) || null;
+            if (!isTransportationTypeValidForDistance(type, distance)) return;
+
+            const size =
+              transportationSizes.find(
+                item => getId(item) === getId(rate?.TRANSPORTATION_SIZE_ID)
+              ) || null;
+            if (!size || !isActiveRecord(size)) return;
+            if (!isTransportationSizeValidForPax(size, group.max)) return;
+
+            candidates.push({ group, company, type, size, rate });
+          });
+        });
+
+        if (!candidates.length) return null;
+
+        const best = candidates.sort((a, b) => {
+          const capacityDiff = getCapacityMax(a.size) - getCapacityMax(b.size);
+          if (capacityDiff !== 0) return capacityDiff;
+
+          const minDiff = getCapacityMin(a.size) - getCapacityMin(b.size);
+          if (minDiff !== 0) return minDiff;
+
+          const rateDiff = Number(a.rate?.RATE || 0) - Number(b.rate?.RATE || 0);
+          if (rateDiff !== 0) return rateDiff;
+
+          return getCompanyLabel(a.company).localeCompare(getCompanyLabel(b.company));
+        })[0];
+
+        return {
+          ...buildTransportationRow(best),
+          ROUTE_DISTANCE_KM: distance,
+        };
+      })
+      .filter(Boolean);
+  };
+
+  const getRouteStopsForDay = day => {
+    const stops = normalizeRouteStops(day?.ROUTE_STOPS);
+    if (stops.length) return stops;
+    return parseRouteTextToCityStops(day?.ROUTE_TEXT, cities);
+  };
+
+  const parseRouteCities = dayOrRouteText => {
+    const day =
+      typeof dayOrRouteText === "object" && dayOrRouteText !== null
+        ? dayOrRouteText
+        : { ROUTE_TEXT: dayOrRouteText, ROUTE_STOPS: [] };
+    const stops = getRouteStopsForDay(day);
     const uniqueMap = new Map();
     const unknownNames = [];
 
-    names.forEach(name => {
-      const city = cityNameMap.get(name.toLowerCase());
-      if (city) {
-        uniqueMap.set(getId(city), city);
-      } else {
-        unknownNames.push(name);
+    stops.forEach(stop => {
+      if (stop.cityId) {
+        const city = cities.find(item => getId(item) === stop.cityId);
+        if (city) {
+          uniqueMap.set(getId(city), city);
+        }
       }
     });
+
+    if (!stops.length) {
+      String(day.ROUTE_TEXT || "")
+        .split("-")
+        .map(item => item.trim())
+        .filter(Boolean)
+        .forEach(name => {
+          if (!findBestCityMatch(name, cities)) {
+            unknownNames.push(name);
+          }
+        });
+    }
 
     return {
       uniqueCities: Array.from(uniqueMap.values()),
@@ -663,7 +1329,7 @@ const PlanQuotation = () => {
     if (!quotationNationalityId) return;
 
     dayForms.forEach(day => {
-      const { uniqueCities } = parseRouteCities(day.ROUTE_TEXT);
+      const { uniqueCities } = parseRouteCities(day);
 
       uniqueCities.forEach(city => {
         const cityId = getId(city);
@@ -684,6 +1350,82 @@ const PlanQuotation = () => {
     routeEntranceFeePlacesLoadingByKey,
     dispatch,
   ]);
+
+  useEffect(() => {
+    if (!quotationNationalityId || readOnly) return;
+
+    setDayForms(prev =>
+      prev.map(day => {
+        const stops = getRouteStopsForDay(day);
+        if (!stops.length) return day;
+
+        const existingPlaceIds = new Set(
+          stops
+            .filter(stop => stop.placeId)
+            .map(stop => stop.placeId)
+        );
+        const selectedPlaceIds = new Set(day.selectedEntranceFeePlaceIds || []);
+        let changed = false;
+
+        const nextStops = stops
+          .map((stop, index) => {
+            if (stop.type !== "city" || !stop.cityId) return stop;
+
+            const key = routeKey(stop.cityId, quotationNationalityId);
+            const places = routeEntranceFeePlacesByKey?.[key] || [];
+            const lookupText = stop.sourceText || stop.label || stop.cityName;
+            const exactPlace = findExactPlaceMatch(lookupText, places);
+            const placeId = getId(exactPlace);
+
+            if (!exactPlace || !placeId) return stop;
+            if (stop.placeId === placeId) {
+              if (!selectedPlaceIds.has(placeId)) {
+                changed = true;
+              }
+              selectedPlaceIds.add(placeId);
+              return stop;
+            }
+
+            changed = true;
+            selectedPlaceIds.add(placeId);
+
+            if (existingPlaceIds.has(placeId)) {
+              return null;
+            }
+
+            return isPlaceSameAsCity(exactPlace, cities)
+              ? buildCityStopFromPlace(exactPlace, cities, index + 1, lookupText)
+              : buildPlaceStop(exactPlace, cities, index + 1, lookupText);
+          })
+          .filter(Boolean);
+
+        if (!changed) return day;
+
+        const normalizedStops = normalizeRouteStops(nextStops);
+
+        return {
+          ...day,
+          selectedEntranceFeePlaceIds: Array.from(selectedPlaceIds),
+          ROUTE_STOPS: normalizedStops,
+          ROUTE_TEXT: buildRouteTextFromStops(normalizedStops),
+          ROUTE_DISTANCE: {
+            available: false,
+            totalKm: null,
+            segments: [],
+            message: "",
+          },
+          ROUTE_DISTANCE_SIGNATURE: "",
+          TRANSPORTATION_ROWS: [],
+          ...clearTransportationRateFields(),
+          touched: {
+            ...day.touched,
+            selectedEntranceFeePlaceIds: true,
+            ROUTE_STOPS: true,
+          },
+        };
+      })
+    );
+  }, [dayForms, quotationNationalityId, routeEntranceFeePlacesByKey, cities, readOnly]);
 
   useEffect(() => {
     const requestedCityIds = new Set();
@@ -732,16 +1474,34 @@ const PlanQuotation = () => {
       };
 
       if (field === "ROUTE_TEXT") {
-        next.selectedEntranceFeePlaceIds = [];
+        const currentStops = getRouteStopsForDay(current);
+        next.ROUTE_STOPS = mergeRouteTextWithExistingStops(value, currentStops, cities);
+        next.ROUTE_DISTANCE = {
+          available: false,
+          totalKm: null,
+          segments: [],
+          message: "",
+        };
+        next.ROUTE_DISTANCE_SIGNATURE = "";
+        next.TRANSPORTATION_ROWS = [];
+        Object.assign(next, clearTransportationRateFields());
+        next.selectedEntranceFeePlaceIds = Array.from(
+          new Set([
+            ...(current.selectedEntranceFeePlaceIds || []),
+            ...next.ROUTE_STOPS.map(stop => stop.placeId).filter(Boolean),
+          ])
+        );
         next.OVERNIGHT_CITY = "";
       }
 
       if (field === "TRANSPORTATION_TYPE") {
+        next.TRANSPORTATION_ROWS = [];
         next.TRANSPORTATION_COMPANY_ID = "";
         Object.assign(next, clearTransportationRateFields());
       }
 
       if (field === "TRANSPORTATION_COMPANY_ID") {
+        next.TRANSPORTATION_ROWS = [];
         Object.assign(next, clearTransportationRateFields());
 
         const localBestRate = findLocalBestTransportationRate(
@@ -797,16 +1557,79 @@ const PlanQuotation = () => {
 
   const handleToggleGuide = (dayOrder, enabled) => {
     if (!canEditQuotation) return;
+    if (guideRequiredByPax && !enabled) {
+      notifyInfo("Guide is required when pax is 6 or more.");
+      return;
+    }
 
     setDayValue(dayOrder, current => ({
       ...current,
       hasGuide: enabled,
-      GUIDE_TYPE: enabled ? current.GUIDE_TYPE : "",
+      GUIDE_TYPE: enabled ? current.GUIDE_TYPE || getId(guideTypes[0]) || "" : "",
       touched: {
         ...current.touched,
         GUIDE_TYPE: true,
       },
     }));
+  };
+
+  const updateGuideRows = (dayOrder, updater) => {
+    if (!canEditQuotation) return;
+
+    setDayValue(dayOrder, current => {
+      const rows = normalizeGuideRows(
+        current.GUIDE_ROWS,
+        quotationPaxGroups,
+        { enabled: current.hasGuide, GUIDE_TYPE: current.GUIDE_TYPE },
+        getId(guideTypes[0]) || ""
+      );
+      const nextRows = updater(rows);
+      const firstEnabled = nextRows.find(row => row.enabled);
+
+      return {
+        ...current,
+        GUIDE_ROWS: nextRows,
+        hasGuide: Boolean(firstEnabled),
+        GUIDE_TYPE: firstEnabled?.GUIDE_TYPE || "",
+        touched: {
+          ...current.touched,
+          GUIDE_ROWS: true,
+          GUIDE_TYPE: true,
+        },
+      };
+    });
+  };
+
+  const handleToggleGuideRow = (dayOrder, rowIndex, enabled) => {
+    updateGuideRows(dayOrder, rows =>
+      rows.map((row, index) => {
+        if (index !== rowIndex) return row;
+        if (row.required && !enabled) {
+          notifyInfo("Guide is required when pax is 6 or more.");
+          return row;
+        }
+
+        return {
+          ...row,
+          enabled,
+          GUIDE_TYPE: enabled ? row.GUIDE_TYPE || getId(guideTypes[0]) || "" : "",
+        };
+      })
+    );
+  };
+
+  const handleGuideRowTypeChange = (dayOrder, rowIndex, value) => {
+    updateGuideRows(dayOrder, rows =>
+      rows.map((row, index) =>
+        index === rowIndex
+          ? {
+              ...row,
+              enabled: Boolean(value) || row.enabled || row.required,
+              GUIDE_TYPE: value,
+            }
+          : row
+      )
+    );
   };
 
   const handleToggleMeals = (dayOrder, enabled) => {
@@ -864,7 +1687,7 @@ const PlanQuotation = () => {
   };
 
   const getDayEntranceFeePlaces = day => {
-    const { uniqueCities, unknownNames } = parseRouteCities(day.ROUTE_TEXT);
+    const { uniqueCities, unknownNames } = parseRouteCities(day);
     const merged = [];
     const seen = new Set();
 
@@ -885,10 +1708,11 @@ const PlanQuotation = () => {
     return { uniqueCities, unknownNames, places: merged };
   };
 
-  const toggleEntranceFeePlace = (dayOrder, placeId, checked) => {
+  const toggleEntranceFeePlace = (dayOrder, place, checked) => {
     if (!canEditQuotation) return;
 
     setDayValue(dayOrder, current => {
+      const placeId = getId(place);
       const currentIds = Array.isArray(current.selectedEntranceFeePlaceIds)
         ? current.selectedEntranceFeePlaceIds
         : [];
@@ -896,19 +1720,104 @@ const PlanQuotation = () => {
       const nextIds = checked
         ? Array.from(new Set([...currentIds, placeId]))
         : currentIds.filter(idValue => idValue !== placeId);
+      const currentStops = getRouteStopsForDay(current);
+      const nextStops = checked
+        ? insertPlaceStopAfterCity(currentStops, place, cities)
+        : removePlaceFromRouteStops(currentStops, placeId, cities);
 
       return {
         ...current,
         selectedEntranceFeePlaceIds: nextIds,
+        ROUTE_STOPS: nextStops,
+        ROUTE_TEXT: buildRouteTextFromStops(nextStops) || current.ROUTE_TEXT,
+        ROUTE_DISTANCE: {
+          available: false,
+          totalKm: null,
+          segments: [],
+          message: "",
+        },
+        ROUTE_DISTANCE_SIGNATURE: "",
+        TRANSPORTATION_ROWS: [],
+        ...clearTransportationRateFields(),
         touched: {
           ...current.touched,
+          selectedEntranceFeePlaceIds: true,
+          ROUTE_STOPS: true,
+        },
+      };
+    });
+  };
+
+  const moveRouteStop = (dayOrder, index, direction) => {
+    if (!canEditQuotation) return;
+
+    setDayValue(dayOrder, current => {
+      const stops = getRouteStopsForDay(current);
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= stops.length) return current;
+
+      const nextStops = [...stops];
+      const [moved] = nextStops.splice(index, 1);
+      nextStops.splice(nextIndex, 0, moved);
+      const normalizedStops = normalizeRouteStops(nextStops);
+
+      return {
+        ...current,
+        ROUTE_STOPS: normalizedStops,
+        ROUTE_TEXT: buildRouteTextFromStops(normalizedStops),
+        ROUTE_DISTANCE: {
+          available: false,
+          totalKm: null,
+          segments: [],
+          message: "",
+        },
+        ROUTE_DISTANCE_SIGNATURE: "",
+        TRANSPORTATION_ROWS: [],
+        ...clearTransportationRateFields(),
+        touched: {
+          ...current.touched,
+          ROUTE_STOPS: true,
+        },
+      };
+    });
+  };
+
+  const removeRouteStop = (dayOrder, index) => {
+    if (!canEditQuotation) return;
+
+    setDayValue(dayOrder, current => {
+      const stops = getRouteStopsForDay(current);
+      const removed = stops[index];
+      const nextStops = normalizeRouteStops(stops.filter((_, stopIndex) => stopIndex !== index));
+      const nextSelectedPlaceIds =
+        removed?.placeId
+          ? (current.selectedEntranceFeePlaceIds || []).filter(idValue => idValue !== removed.placeId)
+          : current.selectedEntranceFeePlaceIds || [];
+
+      return {
+        ...current,
+        ROUTE_STOPS: nextStops,
+        ROUTE_TEXT: buildRouteTextFromStops(nextStops),
+        selectedEntranceFeePlaceIds: nextSelectedPlaceIds,
+        ROUTE_DISTANCE: {
+          available: false,
+          totalKm: null,
+          segments: [],
+          message: "",
+        },
+        ROUTE_DISTANCE_SIGNATURE: "",
+        TRANSPORTATION_ROWS: [],
+        ...clearTransportationRateFields(),
+        touched: {
+          ...current.touched,
+          ROUTE_STOPS: true,
           selectedEntranceFeePlaceIds: true,
         },
       };
     });
   };
 
-  const getRouteCitiesForDay = day => parseRouteCities(day.ROUTE_TEXT).uniqueCities;
+  const getRouteCitiesForDay = day => parseRouteCities(day).uniqueCities;
 
   const getRestaurantsForCity = cityId =>
     Array.isArray(restaurantsByCityId?.[cityId]) ? restaurantsByCityId[cityId] : [];
@@ -922,6 +1831,13 @@ const PlanQuotation = () => {
   const buildDaySnapshot = day => {
     const { places: entranceFeePlaces } = getDayEntranceFeePlaces(day);
     const routeCities = getRouteCitiesForDay(day);
+    const routeStops = getRouteStopsForDay(day);
+    const routeDistance = day.ROUTE_DISTANCE || {
+      available: false,
+      totalKm: null,
+      segments: [],
+      message: "",
+    };
 
     const transportationTypeObj =
       transportationTypes.find(x => getId(x) === day.TRANSPORTATION_TYPE) || null;
@@ -961,8 +1877,19 @@ const PlanQuotation = () => {
       };
     });
 
+    const selectedPlaceIds = day.selectedEntranceFeePlaceIds || [];
+    const selectedPlaceOrder = new Map(
+      routeStops
+        .filter(stop => stop.placeId)
+        .map((stop, index) => [stop.placeId, index])
+    );
     const selectedPlaces = entranceFeePlaces
-      .filter(place => (day.selectedEntranceFeePlaceIds || []).includes(getId(place)))
+      .filter(place => selectedPlaceIds.includes(getId(place)))
+      .sort((a, b) => {
+        const aOrder = selectedPlaceOrder.get(getId(a)) ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = selectedPlaceOrder.get(getId(b)) ?? Number.MAX_SAFE_INTEGER;
+        return aOrder - bOrder;
+      })
       .map(place => {
         const placeCityObj = cities.find(x => getId(x) === getId(place?.PLACE_CITY)) || null;
 
@@ -975,9 +1902,18 @@ const PlanQuotation = () => {
         };
       });
 
-    const transportationResolved = day.TRANSPORTATION_BY
+    const transportationRows = Array.isArray(day.TRANSPORTATION_ROWS)
+      ? day.TRANSPORTATION_ROWS
+      : [];
+    const transportationResolved = transportationRows.length
+      ? transportationRows
+      : day.TRANSPORTATION_BY
       ? [
           {
+            PAX_LABEL: quotationPaxGroups[0]?.label || String(quotationPax || ""),
+            PAX_MIN: quotationPaxGroups[0]?.min || quotationPax || null,
+            PAX_MAX: quotationPaxGroups[0]?.max || quotationPax || null,
+            ROUTE_DISTANCE_KM: routeDistance.totalKm ?? null,
             TRANSPORTATION_TYPE_ID: day.TRANSPORTATION_TYPE || null,
             TRANSPORTATION_TYPE_NAME: transportationTypeObj
               ? getTransportationTypeLabel(transportationTypeObj)
@@ -993,8 +1929,26 @@ const PlanQuotation = () => {
             RATE_ID: day.TRANSPORTATION_RATE_ID || null,
             RATE: day.TRANSPORTATION_RATE ?? null,
           },
-        ]
+      ]
       : [];
+    const guideRows = normalizeGuideRows(
+      day.GUIDE_ROWS,
+      quotationPaxGroups,
+      {
+        enabled: day.hasGuide,
+        GUIDE_TYPE: day.GUIDE_TYPE,
+      },
+      getId(guideTypes[0]) || ""
+    ).map(row => {
+      const guideTypeObj = guideTypes.find(item => getId(item) === row.GUIDE_TYPE) || null;
+      return {
+        ...row,
+        GUIDE_TYPE_NAME: row.enabled && guideTypeObj ? getGuideTypeLabel(guideTypeObj) : "",
+      };
+    });
+    const firstEnabledGuideRow = guideRows.find(row => row.enabled);
+    const primaryGuideTypeObj =
+      guideTypes.find(x => getId(x) === firstEnabledGuideRow?.GUIDE_TYPE) || null;
 
     const totalEntranceFees = selectedPlaces.reduce(
       (sum, place) => sum + (Number(place.ENTRANCE_FEE_AMOUNT) || 0),
@@ -1007,14 +1961,16 @@ const PlanQuotation = () => {
         ORIGINAL_QUOTATION_ID: day.ORIGINAL_QUOTATION_ID,
         DAY_ORDER: day.DAY_ORDER,
         DAY_DATE: day.DAY_DATE,
-        ROUTE_TEXT: day.ROUTE_TEXT,
+        ROUTE_TEXT: buildRouteTextFromStops(routeStops) || day.ROUTE_TEXT,
       },
       route: {
-        text: day.ROUTE_TEXT,
+        text: buildRouteTextFromStops(routeStops) || day.ROUTE_TEXT,
         cities: routeCities.map(city => ({
           CITY_ID: getId(city),
           CITY_NAME: getCityLabel(city),
         })),
+        stops: routeStops,
+        distance: routeDistance,
       },
       transportation: {
         ids: {
@@ -1040,9 +1996,10 @@ const PlanQuotation = () => {
         TRANSPORTATION_RESOLVED: transportationResolved,
       },
       guide: {
-        enabled: day.hasGuide,
-        GUIDE_TYPE: day.hasGuide ? day.GUIDE_TYPE || null : null,
-        GUIDE_TYPE_NAME: guideTypeObj ? getGuideTypeLabel(guideTypeObj) : "",
+        enabled: Boolean(firstEnabledGuideRow),
+        GUIDE_TYPE: firstEnabledGuideRow?.GUIDE_TYPE || null,
+        GUIDE_TYPE_NAME: primaryGuideTypeObj ? getGuideTypeLabel(primaryGuideTypeObj) : "",
+        rows: guideRows,
       },
       meals: {
         enabled: day.hasMeals,
@@ -1075,7 +2032,7 @@ const PlanQuotation = () => {
       TRANSPORTATION_RATE_ID: day.TRANSPORTATION_RATE_ID || null,
       TRANSPORTATION_RATE: day.TRANSPORTATION_RATE ?? null,
       TRANSPORTATION_RESOLVED: snapshot.transportation.TRANSPORTATION_RESOLVED,
-      GUIDE_TYPE: day.hasGuide ? day.GUIDE_TYPE || null : null,
+      GUIDE_TYPE: snapshot.guide.enabled ? snapshot.guide.GUIDE_TYPE || null : null,
       MEALS: snapshot.meals.enabled ? snapshot.meals.rows : [],
       PLACES: snapshot.entranceFees.selectedPlaces,
       NTRANCE_FEES: snapshot.entranceFees.selectedPlaces,
@@ -1111,8 +2068,26 @@ const PlanQuotation = () => {
       errors.TRANSPORTATION_BY = "Transportation size is required.";
     }
 
-    if (day.hasGuide && !day.GUIDE_TYPE) {
-      errors.GUIDE_TYPE = "Guide type is required.";
+    if (
+      quotationPaxGroups.length > 1 &&
+      (day.TRANSPORTATION_ROWS || []).length < quotationPaxGroups.length
+    ) {
+      errors.TRANSPORTATION_BY =
+        "Transportation could not be auto-selected for every pax group.";
+    }
+
+    const guideRows = normalizeGuideRows(
+      day.GUIDE_ROWS,
+      quotationPaxGroups,
+      { enabled: day.hasGuide, GUIDE_TYPE: day.GUIDE_TYPE },
+      getId(guideTypes[0]) || ""
+    );
+    const missingRequiredGuide = guideRows.some(row => row.required && !row.enabled);
+    const missingGuideType = guideRows.some(row => row.enabled && !row.GUIDE_TYPE);
+    if (missingRequiredGuide) {
+      errors.GUIDE_TYPE = "Guide is required when pax is 6 or more.";
+    } else if (missingGuideType) {
+      errors.GUIDE_TYPE = "Guide type is required for every enabled pax group.";
     }
 
     if (day.hasMeals) {
@@ -1243,8 +2218,20 @@ const PlanQuotation = () => {
                     <Col md="4">
                       <div>
                         <div className="text-muted small">Pax</div>
-                        <div className="fw-semibold">
-                          {quotationPax || "-"}
+                        <div className="fw-semibold d-flex flex-wrap gap-1">
+                          {quotationPaxDisplayGroups.length ? (
+                            quotationPaxDisplayGroups.map((group, index) => (
+                              <Badge
+                                key={`${group.label || group.min}-${index}`}
+                                color="primary"
+                                className="rounded-pill px-2 py-1"
+                              >
+                                {formatPaxGroupLabel(group)}
+                              </Badge>
+                            ))
+                          ) : (
+                            "-"
+                          )}
                         </div>
                       </div>
                     </Col>
@@ -1312,6 +2299,17 @@ const PlanQuotation = () => {
               const isSavingThisDay = savingDayOrder === day.DAY_ORDER;
               const { places: entranceFeePlaces } = getDayEntranceFeePlaces(day);
               const routeCities = getRouteCitiesForDay(day);
+              const routeStops = getRouteStopsForDay(day);
+              const routeDistanceLoading = !!routeDistanceLoadingByDay?.[day.DAY_ORDER];
+              const transportationRows = Array.isArray(day.TRANSPORTATION_ROWS)
+                ? day.TRANSPORTATION_ROWS
+                : [];
+              const guideRows = normalizeGuideRows(
+                day.GUIDE_ROWS,
+                quotationPaxGroups,
+                { enabled: day.hasGuide, GUIDE_TYPE: day.GUIDE_TYPE },
+                getId(guideTypes[0]) || ""
+              );
               const currentBestRateLoading =
                 !!transportationBestRateLoadingByKey?.[
                   bestRateKey(day.TRANSPORTATION_TYPE, quotationPax, day.TRANSPORTATION_COMPANY_ID)
@@ -1397,6 +2395,98 @@ const PlanQuotation = () => {
                                   </Col>
 
                                   <Col lg="12">
+                                    <div className="border rounded p-3">
+                                      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                                        <div>
+                                          <div className="fw-semibold">Route Order</div>
+                                          <div className="text-muted small">
+                                            Cities and inserted places are calculated in this order.
+                                          </div>
+                                        </div>
+                                        <Badge color="info" className="rounded-pill px-3 py-2">
+                                          {routeDistanceLoading ? (
+                                            <>
+                                              <Spinner size="sm" className="me-1" />
+                                              Calculating
+                                            </>
+                                          ) : day.ROUTE_DISTANCE?.totalKm !== null &&
+                                            day.ROUTE_DISTANCE?.totalKm !== undefined ? (
+                                            `${day.ROUTE_DISTANCE.totalKm} KM`
+                                          ) : (
+                                            "Distance pending"
+                                          )}
+                                        </Badge>
+                                      </div>
+
+                                      {routeStops.length ? (
+                                        <div className="d-flex flex-column gap-2">
+                                          {routeStops.map((stop, stopIndex) => (
+                                            <div
+                                              key={`${stop.id}-${stopIndex}`}
+                                              className="d-flex flex-wrap align-items-center justify-content-between gap-2 bg-light rounded px-3 py-2"
+                                            >
+                                              <div className="d-flex align-items-center gap-2">
+                                                <Badge color={stop.type === "place" ? "primary" : "secondary"} pill>
+                                                  {stopIndex + 1}
+                                                </Badge>
+                                                <div>
+                                                  <div className="fw-semibold">{stop.label}</div>
+                                                  <div className="text-muted small">
+                                                    {stop.type === "place" ? "Place" : "City"}
+                                                    {stop.cityName ? ` • ${stop.cityName}` : ""}
+                                                  </div>
+                                                </div>
+                                              </div>
+
+                                              <div className="d-flex gap-1">
+                                                <Button
+                                                  type="button"
+                                                  color="light"
+                                                  size="sm"
+                                                  className="border"
+                                                  onClick={() => moveRouteStop(day.DAY_ORDER, stopIndex, -1)}
+                                                  disabled={readOnly || stopIndex === 0}
+                                                >
+                                                  <i className="bx bx-up-arrow-alt" />
+                                                </Button>
+                                                <Button
+                                                  type="button"
+                                                  color="light"
+                                                  size="sm"
+                                                  className="border"
+                                                  onClick={() => moveRouteStop(day.DAY_ORDER, stopIndex, 1)}
+                                                  disabled={readOnly || stopIndex === routeStops.length - 1}
+                                                >
+                                                  <i className="bx bx-down-arrow-alt" />
+                                                </Button>
+                                                <Button
+                                                  type="button"
+                                                  color="danger"
+                                                  size="sm"
+                                                  onClick={() => removeRouteStop(day.DAY_ORDER, stopIndex)}
+                                                  disabled={readOnly}
+                                                >
+                                                  <i className="bx bx-trash" />
+                                                </Button>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="text-muted small">
+                                          Enter a route to build the ordered city/place list.
+                                        </div>
+                                      )}
+
+                                      {day.ROUTE_DISTANCE?.message ? (
+                                        <div className="text-muted small mt-2">
+                                          {day.ROUTE_DISTANCE.message}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </Col>
+
+                                  <Col lg="12">
                                     <div className="bg-light rounded p-3">
                                       <div className="d-flex align-items-center mb-3">
                                         <i className="bx bx-receipt text-primary font-size-18 me-2" />
@@ -1473,7 +2563,7 @@ const PlanQuotation = () => {
                                                           onClick={() =>
                                                             toggleEntranceFeePlace(
                                                               day.DAY_ORDER,
-                                                              placeId,
+                                                              place,
                                                               !selected
                                                             )
                                                           }
@@ -1607,7 +2697,44 @@ const PlanQuotation = () => {
                                     <div>
                                       <Label className="form-label">Transportation By</Label>
 
-                                      {!day.TRANSPORTATION_TYPE ? (
+                                      {transportationRows.length ? (
+                                        <div className="table-responsive">
+                                          <table className="table table-bordered table-nowrap align-middle mb-0 bg-white">
+                                            <thead className="table-light">
+                                              <tr>
+                                                <th>Pax</th>
+                                                <th>Type</th>
+                                                <th>Company</th>
+                                                <th>Size</th>
+                                                <th>Capacity</th>
+                                                {canViewPrices ? <th>Rate</th> : null}
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {transportationRows.map((row, rowIndex) => (
+                                                <tr key={`${row.PAX_LABEL}-${row.RATE_ID || rowIndex}`}>
+                                                  <td>
+                                                    {formatPaxGroupLabel({ label: row.PAX_LABEL }) || "-"}
+                                                  </td>
+                                                  <td>{row.TRANSPORTATION_TYPE_NAME || "-"}</td>
+                                                  <td>{row.TRANSPORTATION_COMPANY_NAME || "-"}</td>
+                                                  <td>{row.TRANSPORTATION_BY || "-"}</td>
+                                                  <td>
+                                                    {row.MINIMUM_CAPACITY ?? "-"} - {row.MAXIMUM_CAPACITY ?? "-"}
+                                                  </td>
+                                                  {canViewPrices ? (
+                                                    <td>
+                                                      {row.RATE !== null && row.RATE !== undefined
+                                                        ? formatMoney(row.RATE)
+                                                        : "-"}
+                                                    </td>
+                                                  ) : null}
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : !day.TRANSPORTATION_TYPE ? (
                                         <div className="bg-light rounded p-3 text-muted small">
                                           Select transportation type first.
                                         </div>
@@ -1688,54 +2815,99 @@ const PlanQuotation = () => {
                               <SectionCard
                                 icon="bx-user-check"
                                 title="Guide"
-                                subtitle="Enable a guide for the day, then select the guide type if needed."
+                                subtitle="Choose guide requirements separately for every pax group."
                               >
-                                <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                                  <div>
-                                    <div className="fw-semibold">Guide Required</div>
-                                    <div className="text-muted small">
-                                      Choose whether this day includes a guide.
-                                    </div>
-                                  </div>
-
-                                  <DayToggle
-                                    active={day.hasGuide}
-                                    onYes={() => handleToggleGuide(day.DAY_ORDER, true)}
-                                    onNo={() => handleToggleGuide(day.DAY_ORDER, false)}
-                                    disabled={readOnly}
-                                  />
-                                </div>
-
-                                {day.hasGuide ? (
-                                  <div>
-                                    <Label className="form-label">Guide Type</Label>
-                                    <Input
-                                      type="select"
-                                      value={day.GUIDE_TYPE}
-                                      onChange={e =>
-                                        handleFieldChange(
-                                          day.DAY_ORDER,
-                                          "GUIDE_TYPE",
-                                          e.target.value
-                                        )
-                                      }
-                                      invalid={
-                                        !!(day.touched.GUIDE_TYPE && dayErrors.GUIDE_TYPE)
-                                      }
-                                      disabled={lookupsLoading || readOnly}
-                                    >
-                                      <option value="">Select Guide Type</option>
-                                      {guideTypes.map(item => (
-                                        <option key={getId(item)} value={getId(item)}>
-                                          {getGuideTypeLabel(item)}
-                                        </option>
-                                      ))}
-                                    </Input>
-                                    <FormFeedback>{dayErrors.GUIDE_TYPE}</FormFeedback>
+                                {guideRows.length ? (
+                                  <div className="table-responsive">
+                                    <table className="table table-bordered table-nowrap align-middle mb-0 bg-white">
+                                      <thead className="table-light">
+                                        <tr>
+                                          <th style={{ width: 130 }}>Pax</th>
+                                          <th style={{ width: 140 }}>Guide</th>
+                                          <th>Guide Type</th>
+                                          <th style={{ width: 130 }}>Rule</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {guideRows.map((row, rowIndex) => (
+                                          <tr key={`${row.PAX_LABEL}-${rowIndex}`}>
+                                            <td>{formatPaxGroupLabel({ label: row.PAX_LABEL })}</td>
+                                            <td>
+                                              <DayToggle
+                                                active={row.enabled}
+                                                onYes={() =>
+                                                  handleToggleGuideRow(
+                                                    day.DAY_ORDER,
+                                                    rowIndex,
+                                                    true
+                                                  )
+                                                }
+                                                onNo={() =>
+                                                  handleToggleGuideRow(
+                                                    day.DAY_ORDER,
+                                                    rowIndex,
+                                                    false
+                                                  )
+                                                }
+                                                disabled={readOnly || row.required}
+                                              />
+                                            </td>
+                                            <td>
+                                              <Input
+                                                type="select"
+                                                value={row.GUIDE_TYPE || ""}
+                                                onChange={e =>
+                                                  handleGuideRowTypeChange(
+                                                    day.DAY_ORDER,
+                                                    rowIndex,
+                                                    e.target.value
+                                                  )
+                                                }
+                                                invalid={
+                                                  !!(
+                                                    row.enabled &&
+                                                    day.touched.GUIDE_TYPE &&
+                                                    !row.GUIDE_TYPE
+                                                  )
+                                                }
+                                                disabled={
+                                                  lookupsLoading ||
+                                                  readOnly ||
+                                                  !row.enabled
+                                                }
+                                              >
+                                                <option value="">Select Guide Type</option>
+                                                {guideTypes.map(item => (
+                                                  <option key={getId(item)} value={getId(item)}>
+                                                    {getGuideTypeLabel(item)}
+                                                  </option>
+                                                ))}
+                                              </Input>
+                                            </td>
+                                            <td>
+                                              {row.required ? (
+                                                <Badge color="warning" className="rounded-pill">
+                                                  Required
+                                                </Badge>
+                                              ) : (
+                                                <Badge color="light" className="rounded-pill text-dark">
+                                                  Optional
+                                                </Badge>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                    {day.touched.GUIDE_TYPE && dayErrors.GUIDE_TYPE ? (
+                                      <div className="text-danger small mt-2">
+                                        {dayErrors.GUIDE_TYPE}
+                                      </div>
+                                    ) : null}
                                   </div>
                                 ) : (
                                   <div className="text-muted small bg-light rounded p-3">
-                                    Guide is disabled for this day.
+                                    Create pax groups first to configure guides.
                                   </div>
                                 )}
                               </SectionCard>

@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -15,12 +15,15 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  Nav,
+  NavItem,
+  NavLink,
   Row,
   Spinner,
   Table,
 } from "reactstrap";
 import Breadcrumbs from "../../components/Common/Breadcrumb";
-import { get, patch } from "../../helpers/api_helper";
+import { get, patch, post } from "../../helpers/api_helper";
 import { decodeJwt } from "../../helpers/coe_jwt";
 import { getAccessToken } from "../../helpers/coe_token_storage";
 import {
@@ -38,7 +41,6 @@ import {
   buildGuideLanguageOptions,
   buildGuideNameOptions,
   buildHotelNameOptions,
-  buildManifestDisplayRows,
   buildRouteOptions,
   buildVehicleSizeOptions,
   filterFileByAccommodationOption,
@@ -46,9 +48,11 @@ import {
   mergeReservationMetadata,
   withCurrentOption,
 } from "../../helpers/reservation_options";
+import { buildReservationSaveValidationPlan } from "../../helpers/reservation_save_validation";
 import {
   RESERVATION_FILE_BY_ID,
   RESERVATION_FILE_STATUS as RESERVATION_FILE_STATUS_URL,
+  RESERVATION_FILE_SUPPLIER_CONFIRMATION_EMAIL,
   USER_BY_ID,
   USERS,
 } from "../../helpers/url_helper";
@@ -82,6 +86,143 @@ const RESERVATION_SECTIONS = [
 ];
 
 const asArray = value => (Array.isArray(value) ? value : []);
+
+const ARR_DEP_SCHEDULE_TYPES = {
+  SINGLE: "singlePeriod",
+  MULTIPLE: "multipleDates",
+  WEEKLY: "weeklyRecurring",
+};
+
+const LEGACY_ARR_DEP_SCHEDULE_TYPES = {
+  SINGLE: "SINGLE",
+  MULTIPLE: "MULTIPLE",
+  WEEKLY: "WEEKLY",
+};
+
+const scheduleTypeOptions = [
+  {
+    value: "singlePeriod",
+    label: "Single Period",
+  },
+  {
+    value: "multipleDates",
+    label: "Multiple Dates",
+  },
+  {
+    value: "weeklyRecurring",
+    label: "Weekly Recurring",
+  },
+];
+
+const ARR_DEP_SCHEDULE_TYPE_VALUES = Object.values(ARR_DEP_SCHEDULE_TYPES);
+
+const normalizeArrDepScheduleTypeValue = type => {
+  if (ARR_DEP_SCHEDULE_TYPE_VALUES.includes(type)) return type;
+  if (type === LEGACY_ARR_DEP_SCHEDULE_TYPES.SINGLE) return ARR_DEP_SCHEDULE_TYPES.SINGLE;
+  if (type === LEGACY_ARR_DEP_SCHEDULE_TYPES.MULTIPLE) return ARR_DEP_SCHEDULE_TYPES.MULTIPLE;
+  if (type === LEGACY_ARR_DEP_SCHEDULE_TYPES.WEEKLY) return ARR_DEP_SCHEDULE_TYPES.WEEKLY;
+  return "";
+};
+
+const getLegacyArrDepScheduleTypeValue = type => {
+  if (type === ARR_DEP_SCHEDULE_TYPES.SINGLE) return LEGACY_ARR_DEP_SCHEDULE_TYPES.SINGLE;
+  if (type === ARR_DEP_SCHEDULE_TYPES.MULTIPLE) return LEGACY_ARR_DEP_SCHEDULE_TYPES.MULTIPLE;
+  if (type === ARR_DEP_SCHEDULE_TYPES.WEEKLY) return LEGACY_ARR_DEP_SCHEDULE_TYPES.WEEKLY;
+  return "";
+};
+
+const sanitizeArrDepScheduleTypes = types =>
+  asArray(types)
+    .map(normalizeArrDepScheduleTypeValue)
+    .filter(Boolean);
+
+const normalizeArrDepScheduleTypes = schedule => {
+  if (Array.isArray(schedule?.types)) {
+    return sanitizeArrDepScheduleTypes(schedule.types);
+  }
+
+  return ARR_DEP_SCHEDULE_TYPE_VALUES.includes(schedule?.type)
+    ? [schedule.type]
+    : normalizeArrDepScheduleTypeValue(schedule?.type)
+    ? [normalizeArrDepScheduleTypeValue(schedule?.type)]
+    : [ARR_DEP_SCHEDULE_TYPES.SINGLE];
+};
+
+const getArrDepRowsForType = (draft, type) => {
+  const rowsByType = draft?.arrDepSchedule?.rowsByType || {};
+  return asArray(rowsByType?.[type] || rowsByType?.[getLegacyArrDepScheduleTypeValue(type)]);
+};
+
+const buildCombinedArrDepRows = (rowsByType = {}, selectedTypes = []) =>
+  sanitizeArrDepScheduleTypes(selectedTypes).flatMap(type =>
+    asArray(rowsByType?.[type]).map(row => ({
+      ...row,
+      scheduleType: type,
+    }))
+  );
+
+const ARR_DEP_MOVEMENT_OPTIONS = [
+  { value: "Arrival", label: "Arrival" },
+  { value: "Departure", label: "Departure" },
+];
+
+const WEEKDAY_OPTIONS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+].map(day => ({ value: day, label: day }));
+
+const CLIENTS_INTERNAL_TABS = {
+  MANIFEST: "manifest",
+  ROOMING_LIST: "roomingList",
+};
+
+const CLIENT_TITLE_OPTIONS = ["Mr.", "Mrs.", "Ms."];
+
+const ROOMING_AGE_OPTIONS = [
+  { value: "ADL", label: "ADL — Adult" },
+  { value: "CHD", label: "CHD — Child" },
+  { value: "INF", label: "INF — Infant" },
+];
+
+const ROOMING_ROOM_OPTIONS = ["SGL", "DBL", "TRP"];
+
+const SPECIAL_RATES_SECTIONS = [
+  "hotels",
+  "transportation",
+  "guides",
+  "restaurants",
+  "extras",
+];
+
+const SPECIAL_RATES_ACCEPT_EXTENSIONS = [
+  ".pdf",
+  ".xls",
+  ".xlsx",
+  ".doc",
+  ".docx",
+  ".jpg",
+  ".jpeg",
+  ".png",
+];
+
+const SPECIAL_RATES_ACCEPT = SPECIAL_RATES_ACCEPT_EXTENSIONS.join(",");
+
+const SPECIAL_RATES_ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "image/jpeg",
+  "image/png",
+]);
+
+const SPECIAL_RATES_MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 const getId = value => {
   if (!value) return "";
@@ -261,6 +402,7 @@ const buildHotelRows = (file, quotation) => {
             nights,
             notes: "",
             specialRates: "",
+            specialRatesFile: null,
             additionalNotes: "",
             roomType: "",
             meal: getBoardBasis(entry),
@@ -336,6 +478,7 @@ const buildDraftDefaults = file => {
       driverName: "",
       notes: "",
       specialRates: "",
+      specialRatesFile: null,
       fromDate: toDateInput(day.dayDate),
       toDate: toDateInput(day.dayDate),
       status: "",
@@ -361,6 +504,7 @@ const buildDraftDefaults = file => {
       language: "",
       notes: "",
       specialRates: "",
+      specialRatesFile: null,
       fromDate: toDateInput(day.dayDate),
       toDate: toDateInput(day.dayDate),
       status: "",
@@ -393,6 +537,7 @@ const buildDraftDefaults = file => {
       price: meal?.MEAL_PRICE_PER_PERSON ?? "",
       notes: "",
       specialRates: "",
+      specialRatesFile: null,
       itinerary: day.dayOrder ? `Day ${day.dayOrder}` : "",
       date: toDateInput(day.dayDate),
       day: dayName(day.dayDate),
@@ -412,6 +557,7 @@ const buildDraftDefaults = file => {
       supplier: "",
       notes: "",
       specialRates: "",
+      specialRatesFile: null,
       itinerary: "",
       classification: "",
       date: "",
@@ -488,6 +634,17 @@ const buildDraftDefaults = file => {
       entries: "",
       tips: "",
     },
+    arrDepSchedule: {
+      type: ARR_DEP_SCHEDULE_TYPES.SINGLE,
+      types: [ARR_DEP_SCHEDULE_TYPES.SINGLE],
+      repeatFrom: arrivalDate,
+      repeatUntil: departureDate,
+      rowsByType: {
+        [ARR_DEP_SCHEDULE_TYPES.SINGLE]: arrDep,
+        [ARR_DEP_SCHEDULE_TYPES.MULTIPLE]: [],
+        [ARR_DEP_SCHEDULE_TYPES.WEEKLY]: [],
+      },
+    },
     arrDep,
     hotels: hotelRows,
     transportation,
@@ -498,6 +655,7 @@ const buildDraftDefaults = file => {
     itineraries,
     inclusions,
     clients,
+    roomingList: [],
     reminders: [],
     logs: [
       {
@@ -608,6 +766,7 @@ const getRowLabel = (section, row, index) => {
   if (section === "restaurants") return row?.restaurantName || `Row ${index + 1}`;
   if (section === "extras") return row?.serviceName || `Row ${index + 1}`;
   if (section === "clients") return row?.name || row?.passportNo || `Client ${index + 1}`;
+  if (section === "roomingList") return row?.clientName || `Rooming row ${index + 1}`;
   if (section === "reminders") return `Reminder ${index + 1}`;
   if (section === "inclusions") return row?.inclusion || `Row ${index + 1}`;
   return `Row ${index + 1}`;
@@ -629,6 +788,7 @@ const buildReservationChangeLogs = ({ beforeDraft, afterDraft, userName }) => {
     "extras",
     "inclusions",
     "clients",
+    "roomingList",
   ];
 
   sections.forEach(section => {
@@ -754,11 +914,57 @@ const mergeRows = (defaults, savedRows) => {
   ];
 };
 
-const mergeDraft = (defaults, saved = {}) =>
-  mergeReservationMetadata(
+const buildMergedArrDepSchedule = (defaults, saved = {}) => {
+  const defaultSchedule = defaults?.arrDepSchedule || {};
+  const savedSchedule = saved?.arrDepSchedule || {};
+  const selectedTypes = normalizeArrDepScheduleTypes(savedSchedule);
+  const legacyType = ARR_DEP_SCHEDULE_TYPE_VALUES.includes(savedSchedule?.type)
+    ? savedSchedule.type
+    : normalizeArrDepScheduleTypeValue(savedSchedule?.type) ||
+      ARR_DEP_SCHEDULE_TYPES.SINGLE;
+  const savedRowsByType = savedSchedule?.rowsByType || {};
+  const getSavedRows = type =>
+    savedRowsByType?.[type] ||
+    savedRowsByType?.[getLegacyArrDepScheduleTypeValue(type)] ||
+    (legacyType === type ? saved?.arrDep : []);
+
+  const rowsByType = {
+    [ARR_DEP_SCHEDULE_TYPES.SINGLE]: mergeRows(
+      defaultSchedule?.rowsByType?.[ARR_DEP_SCHEDULE_TYPES.SINGLE] ||
+        defaults?.arrDep ||
+        [],
+      getSavedRows(ARR_DEP_SCHEDULE_TYPES.SINGLE)
+    ),
+    [ARR_DEP_SCHEDULE_TYPES.MULTIPLE]: mergeRows(
+      defaultSchedule?.rowsByType?.[ARR_DEP_SCHEDULE_TYPES.MULTIPLE] || [],
+      getSavedRows(ARR_DEP_SCHEDULE_TYPES.MULTIPLE)
+    ),
+    [ARR_DEP_SCHEDULE_TYPES.WEEKLY]: mergeRows(
+      defaultSchedule?.rowsByType?.[ARR_DEP_SCHEDULE_TYPES.WEEKLY] || [],
+      getSavedRows(ARR_DEP_SCHEDULE_TYPES.WEEKLY)
+    ),
+  };
+
+  return {
+    ...defaultSchedule,
+    ...savedSchedule,
+    type: selectedTypes[0],
+    types: selectedTypes,
+    rowsByType,
+  };
+};
+
+const mergeDraft = (defaults, saved = {}) => {
+  const arrDepSchedule = buildMergedArrDepSchedule(defaults, saved);
+
+  return mergeReservationMetadata(
     {
       general: { ...defaults.general, ...(saved?.general || {}) },
-      arrDep: mergeRows(defaults.arrDep, saved?.arrDep),
+      arrDepSchedule,
+      arrDep: buildCombinedArrDepRows(
+        arrDepSchedule.rowsByType,
+        arrDepSchedule.types
+      ),
       hotels: mergeRows(defaults.hotels, saved?.hotels),
       transportation: mergeRows(defaults.transportation, saved?.transportation),
       guides: mergeRows(defaults.guides, saved?.guides),
@@ -768,6 +974,7 @@ const mergeDraft = (defaults, saved = {}) =>
       itineraries: mergeRows(defaults.itineraries, saved?.itineraries),
       inclusions: mergeRows(defaults.inclusions, saved?.inclusions),
       clients: mergeRows(defaults.clients, saved?.clients),
+      roomingList: mergeRows(defaults.roomingList, saved?.roomingList),
       reminders: mergeRows(defaults.reminders, saved?.reminders),
       logs: mergeRows(defaults.logs, saved?.logs),
       attach: {
@@ -777,15 +984,18 @@ const mergeDraft = (defaults, saved = {}) =>
     },
     saved
   );
+};
 
 const newKey = prefix => `${prefix}-manual-${Date.now()}-${Math.random()}`;
 
 const emptyRow = {
   arrDep: () => ({
     _sourceKey: newKey("arrdep"),
+    movementType: "Arrival",
     arr: false,
     dep: false,
     date: "",
+    weekday: "",
     from: "",
     to: "",
     border: "",
@@ -805,6 +1015,7 @@ const emptyRow = {
     nights: "",
     notes: "",
     specialRates: "",
+    specialRatesFile: null,
     additionalNotes: "",
     roomType: "",
     meal: "",
@@ -826,6 +1037,7 @@ const emptyRow = {
     driverName: "",
     notes: "",
     specialRates: "",
+    specialRatesFile: null,
     fromDate: "",
     toDate: "",
     status: "",
@@ -842,6 +1054,7 @@ const emptyRow = {
     language: "",
     notes: "",
     specialRates: "",
+    specialRatesFile: null,
     fromDate: "",
     toDate: "",
     status: "",
@@ -869,6 +1082,7 @@ const emptyRow = {
     price: "",
     notes: "",
     specialRates: "",
+    specialRatesFile: null,
     itinerary: "",
     date: "",
     day: "",
@@ -877,6 +1091,7 @@ const emptyRow = {
     bookedBy: "",
     pax: "",
     confirmationNo: "",
+    ref: "",
     invoiceReceived: false,
   }),
   extras: () => ({
@@ -885,6 +1100,7 @@ const emptyRow = {
     supplier: "",
     notes: "",
     specialRates: "",
+    specialRatesFile: null,
     itinerary: "",
     classification: "",
     date: "",
@@ -910,6 +1126,21 @@ const emptyRow = {
     placeOfBirth: "",
     authority: "",
   }),
+  roomingList: () => ({
+    _sourceKey: newKey("rooming"),
+    show: true,
+    title: "",
+    clientName: "",
+    ageCategory: "",
+    roomType: "",
+    roomNo: "",
+    meal: "",
+    code1: "",
+    code2: "",
+    code3: "",
+    comments: "",
+    isMN: false,
+  }),
   reminders: () => ({
     _sourceKey: newKey("reminder"),
     note: "",
@@ -931,6 +1162,9 @@ const Field = ({
   options = null,
   readOnly = false,
   rows = 2,
+  onKeyDown,
+  onFocus,
+  onMouseDown,
 }) => (
   <div className="mb-3">
     <Label className="form-label fw-semibold">{label}</Label>
@@ -947,6 +1181,9 @@ const Field = ({
         type="select"
         value={text(value)}
         disabled={readOnly}
+        onKeyDown={onKeyDown}
+        onFocus={onFocus}
+        onMouseDown={onMouseDown}
         onChange={e => onChange?.(e.target.value)}
       >
         {options.map(option => (
@@ -961,6 +1198,9 @@ const Field = ({
         rows={type === "textarea" ? rows : undefined}
         value={text(value)}
         readOnly={readOnly}
+        onKeyDown={onKeyDown}
+        onFocus={onFocus}
+        onMouseDown={onMouseDown}
         onChange={e => onChange?.(e.target.value)}
       />
     )}
@@ -994,6 +1234,12 @@ const SectionHeader = ({ title, fileReference, children }) => (
   </div>
 );
 
+const SaveChangesButton = ({ onClick, disabled }) => (
+  <Button color="primary" onClick={onClick} disabled={disabled}>
+    Save Changes
+  </Button>
+);
+
 const RowPanel = ({ row, children, onRemove, removeLabel }) => (
   <div className="rounded border bg-light p-3 p-lg-4 mb-4">
     <div className="d-flex justify-content-end mb-2">
@@ -1020,13 +1266,33 @@ const TableCheckbox = ({ checked, onChange }) => (
 );
 
 const getArrDepLabel = (row, index) => {
+  if (row?.movementType) return row.movementType;
   if (row?._sourceKey === "arrival" || row?.arr) return "Arrival";
   if (row?._sourceKey === "departure" || row?.dep) return "Departure";
   return index === 0 ? "Arrival" : index === 1 ? "Departure" : `Row ${index + 1}`;
 };
 
-const getArrDepTripDates = arrDepRows => {
+const getArrDepTripDates = (arrDepRows, arrDepSchedule = {}) => {
+  if (arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.WEEKLY) {
+    return {
+      arrivalDate: toDateInput(arrDepSchedule?.repeatFrom),
+      departureDate: toDateInput(arrDepSchedule?.repeatUntil),
+    };
+  }
+
   const rows = asArray(arrDepRows);
+  if (arrDepSchedule?.type === ARR_DEP_SCHEDULE_TYPES.MULTIPLE) {
+    const dates = rows
+      .map(row => toDateInput(row?.date))
+      .filter(Boolean)
+      .sort((a, b) => dateToUtcMs(a) - dateToUtcMs(b));
+
+    return {
+      arrivalDate: dates[0] || "",
+      departureDate: dates[dates.length - 1] || "",
+    };
+  }
+
   const arrivalRow = rows.find(
     (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
   );
@@ -1174,63 +1440,290 @@ const getQuotationAllowedTripDays = quotation => {
   return diffDaysInclusive(startDate, endDate) || 0;
 };
 
-const validateReservationDates = ({ draft, quotation }) => {
-  if (!draft) return null;
+const isNonNegativeIntegerValue = value => {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return true;
+  return /^\d+$/.test(raw) && Number(raw) >= 0;
+};
+
+const normalizeBoolean = value => value === true || value === "true" || value === 1;
+
+const normalizeRoomingRow = row => ({
+  _sourceKey: row?._sourceKey || newKey("rooming"),
+  show: normalizeBoolean(row?.show),
+  title: String(row?.title || "").trim(),
+  clientName: String(row?.clientName || "").trim(),
+  ageCategory: String(row?.ageCategory || "").trim(),
+  roomType: String(row?.roomType || "").trim(),
+  roomNo: String(row?.roomNo || "").trim(),
+  meal: String(row?.meal || "").trim(),
+  code1: String(row?.code1 || "").trim(),
+  code2: String(row?.code2 || "").trim(),
+  code3: String(row?.code3 || "").trim(),
+  comments: String(row?.comments || "").trim(),
+  isMN: normalizeBoolean(row?.isMN),
+});
+
+const isRoomingRowEmpty = row => {
+  const normalized = normalizeRoomingRow(row);
+  return [
+    normalized.title,
+    normalized.clientName,
+    normalized.ageCategory,
+    normalized.roomType,
+    normalized.roomNo,
+    normalized.meal,
+    normalized.code1,
+    normalized.code2,
+    normalized.code3,
+    normalized.comments,
+  ].every(value => !value) && !normalized.isMN && normalized.show === true;
+};
+
+const validateAndNormalizeRoomingList = rows => {
+  const normalizedRows = [];
+
+  for (const [index, row] of asArray(rows).entries()) {
+    if (isRoomingRowEmpty(row)) continue;
+
+    const normalized = normalizeRoomingRow(row);
+    if (!normalized.clientName) {
+      return {
+        error: `Client Name is required in Rooming List row ${index + 1}.`,
+      };
+    }
+
+    if (
+      normalized.ageCategory &&
+      !ROOMING_AGE_OPTIONS.some(option => option.value === normalized.ageCategory)
+    ) {
+      return {
+        error: `Invalid Age value in Rooming List row ${index + 1}.`,
+      };
+    }
+
+    if (
+      normalized.roomType &&
+      !ROOMING_ROOM_OPTIONS.includes(normalized.roomType)
+    ) {
+      return {
+        error: `Invalid Room value in Rooming List row ${index + 1}.`,
+      };
+    }
+
+    normalizedRows.push(normalized);
+  }
+
+  return { rows: normalizedRows };
+};
+
+const getSpecialRatesFileId = file =>
+  text(file?.id || file?.attachmentId || file?._id);
+
+const hasSpecialRatesFile = row => !!getSpecialRatesFileId(row?.specialRatesFile);
+
+const formatFileSize = size => {
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / 1024 / 102.4) / 10} MB`;
+};
+
+const getFileExtension = fileName => {
+  const name = String(fileName || "").trim().toLowerCase();
+  const dotIndex = name.lastIndexOf(".");
+  return dotIndex >= 0 ? name.slice(dotIndex) : "";
+};
+
+const validateSpecialRatesFile = file => {
+  if (!file) return "Please choose a Special Rates file.";
+
+  const extension = getFileExtension(file.name);
+  if (!SPECIAL_RATES_ACCEPT_EXTENSIONS.includes(extension)) {
+    return "Unsupported file type. Please upload PDF, Excel, Word, JPG, JPEG, or PNG.";
+  }
+
+  if (file.type && !SPECIAL_RATES_ALLOWED_MIME_TYPES.has(file.type)) {
+    return "Unsupported file type. Please upload PDF, Excel, Word, JPG, JPEG, or PNG.";
+  }
+
+  if (file.size > SPECIAL_RATES_MAX_FILE_SIZE) {
+    return "Special Rates file must be 25 MB or smaller.";
+  }
+
+  return "";
+};
+
+const buildSpecialRatesFileMeta = attachment => ({
+  id: text(attachment?._id),
+  fileName: text(attachment?.FILE_NAME),
+  originalName: text(attachment?.FILE_NAME),
+  mimeType: text(attachment?.MIME_TYPE),
+  size: Number(attachment?.FILE_SIZE || 0),
+  uploadedOn: attachment?.CREATED_ON || new Date().toISOString(),
+});
+
+const validateReservationDates = ({
+  draft,
+  quotation,
+  selectedScheduleTypes,
+  sections,
+}) => {
+  const validationSections = new Set(asArray(sections));
+  if (!draft || !validationSections.size) return null;
 
   const quotationStartDate = toDateInput(quotation?.QUOTATION_START_DATE);
   const quotationEndDate = toDateInput(quotation?.QUOTATION_END_DATE);
   const quotationTripDays = getQuotationAllowedTripDays(quotation);
-  const arrivalRow = asArray(draft?.arrDep).find(
-    row => getArrDepLabel(row).toLowerCase() === "arrival"
+  const schedule = draft?.arrDepSchedule || {};
+  const selectedTypes = sanitizeArrDepScheduleTypes(selectedScheduleTypes);
+  const rowsByType = schedule?.rowsByType || {};
+  const combinedRows = buildCombinedArrDepRows(rowsByType, selectedTypes);
+  const tripDateRanges = selectedTypes.map(type =>
+    getArrDepTripDates(getArrDepRowsForType(draft, type), {
+      ...schedule,
+      type,
+    })
   );
-  const departureRow = asArray(draft?.arrDep).find(
-    row => getArrDepLabel(row).toLowerCase() === "departure"
-  );
-  const arrivalDate = toDateInput(arrivalRow?.date);
-  const departureDate = toDateInput(departureRow?.date);
+  const arrivalDates = tripDateRanges
+    .map(range => toDateInput(range.arrivalDate))
+    .filter(Boolean)
+    .sort((a, b) => dateToUtcMs(a) - dateToUtcMs(b));
+  const departureDates = tripDateRanges
+    .map(range => toDateInput(range.departureDate))
+    .filter(Boolean)
+    .sort((a, b) => dateToUtcMs(a) - dateToUtcMs(b));
+  const arrivalDate = arrivalDates[0] || "";
+  const departureDate = departureDates[departureDates.length - 1] || "";
 
-  if (!quotationStartDate || !quotationEndDate) {
-    return "Quotation dates are missing or invalid.";
+  if (validationSections.has("arrDep")) {
+    if (!quotationStartDate || !quotationEndDate) {
+      return "Quotation dates are missing or invalid.";
+    }
+
+    if (!selectedTypes.length) {
+      return null;
+    }
+
+    if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.SINGLE)) {
+      const singleRows = getArrDepRowsForType(
+        draft,
+        ARR_DEP_SCHEDULE_TYPES.SINGLE
+      );
+      const arrivalRows = singleRows.filter(
+        (row, index) => getArrDepLabel(row, index).toLowerCase() === "arrival"
+      );
+      const departureRows = singleRows.filter(
+        (row, index) => getArrDepLabel(row, index).toLowerCase() === "departure"
+      );
+
+      if (arrivalRows.length !== 1 || departureRows.length !== 1) {
+        return "Single Period must contain exactly one Arrival row and one Departure row.";
+      }
+    }
+
+    if (
+      selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.MULTIPLE) &&
+      !getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.MULTIPLE).length
+    ) {
+      return "At least one Arrival / Departure row is required for Multiple Dates.";
+    }
+
+    if (selectedTypes.includes(ARR_DEP_SCHEDULE_TYPES.WEEKLY)) {
+      if (!toDateInput(schedule?.repeatFrom)) {
+        return "Weekly Repeat From date is required.";
+      }
+      if (!toDateInput(schedule?.repeatUntil)) {
+        return "Weekly Repeat Until date is required.";
+      }
+      if (
+        dateToUtcMs(toDateInput(schedule.repeatFrom)) >
+        dateToUtcMs(toDateInput(schedule.repeatUntil))
+      ) {
+        return "Weekly Repeat From date must not be after Repeat Until date.";
+      }
+      if (!getArrDepRowsForType(draft, ARR_DEP_SCHEDULE_TYPES.WEEKLY).length) {
+        return "At least one weekly Arrival / Departure row is required.";
+      }
+    }
+
+    for (const [index, row] of combinedRows.entries()) {
+      const rowLabel = getArrDepLabel(row, index);
+      if (!["arrival", "departure"].includes(rowLabel.toLowerCase())) {
+        return `Type is required for Arrival / Departure row ${index + 1}.`;
+      }
+      if (!isNonNegativeIntegerValue(row?.pax)) {
+        return `Pax must be a valid non-negative integer in Arrival / Departure (${rowLabel}).`;
+      }
+      if (
+        row.scheduleType === ARR_DEP_SCHEDULE_TYPES.MULTIPLE &&
+        !toDateInput(row?.date)
+      ) {
+        return `Date is required for Arrival / Departure (${rowLabel}).`;
+      }
+      if (
+        row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY &&
+        !String(row?.weekday || "").trim()
+      ) {
+        return `Weekday is required for weekly Arrival / Departure (${rowLabel}).`;
+      }
+    }
+
+    if (!arrivalDate) {
+      return "At least one valid arrival / departure date is required.";
+    }
+
+    if (!departureDate) {
+      return "At least one valid departure / schedule end date is required.";
+    }
+
+    if (dateToUtcMs(departureDate) < dateToUtcMs(arrivalDate)) {
+      return "Departure date cannot be before arrival date.";
+    }
+
+    if (
+      dateToUtcMs(arrivalDate) < dateToUtcMs(quotationStartDate) ||
+      dateToUtcMs(arrivalDate) > dateToUtcMs(quotationEndDate)
+    ) {
+      return "Arrival date is not within the quotation period.";
+    }
+
+    if (
+      dateToUtcMs(departureDate) < dateToUtcMs(quotationStartDate) ||
+      dateToUtcMs(departureDate) > dateToUtcMs(quotationEndDate)
+    ) {
+      return "Departure date is not within the quotation period.";
+    }
+
+    const selectedTripDays = diffDaysInclusive(arrivalDate, departureDate);
+    if (quotationTripDays > 0 && selectedTripDays > quotationTripDays) {
+      return `Arrival and departure dates cannot exceed the quotation trip length (${quotationTripDays} day${quotationTripDays === 1 ? "" : "s"}).`;
+    }
   }
 
-  if (!arrivalDate) {
-    return "Arrival date is required.";
-  }
-
-  if (!departureDate) {
-    return "Departure date is required.";
-  }
-
-  if (dateToUtcMs(departureDate) < dateToUtcMs(arrivalDate)) {
-    return "Departure date cannot be before arrival date.";
-  }
-
-  if (
-    dateToUtcMs(arrivalDate) < dateToUtcMs(quotationStartDate) ||
-    dateToUtcMs(arrivalDate) > dateToUtcMs(quotationEndDate)
-  ) {
-    return "Arrival date is not within the quotation period.";
-  }
-
-  if (
-    dateToUtcMs(departureDate) < dateToUtcMs(quotationStartDate) ||
-    dateToUtcMs(departureDate) > dateToUtcMs(quotationEndDate)
-  ) {
-    return "Departure date is not within the quotation period.";
-  }
-
-  const selectedTripDays = diffDaysInclusive(arrivalDate, departureDate);
-  if (quotationTripDays > 0 && selectedTripDays > quotationTripDays) {
-    return `Arrival and departure dates cannot exceed the quotation trip length (${quotationTripDays} day${quotationTripDays === 1 ? "" : "s"}).`;
-  }
+  const hasUsableArrDepRange =
+    arrivalDate &&
+    departureDate &&
+    dateToUtcMs(departureDate) >= dateToUtcMs(arrivalDate) &&
+    (!quotationStartDate ||
+      dateToUtcMs(arrivalDate) >= dateToUtcMs(quotationStartDate)) &&
+    (!quotationEndDate ||
+      dateToUtcMs(departureDate) <= dateToUtcMs(quotationEndDate));
+  const validationStartDate = hasUsableArrDepRange
+    ? arrivalDate
+    : quotationStartDate;
+  const validationEndDate = hasUsableArrDepRange
+    ? departureDate
+    : quotationEndDate;
 
   const validateSingleDate = (sectionLabel, rowLabel, fieldLabel, value) => {
     const dateStr = toDateInput(value);
-    if (!dateStr) return null;
+    if (!dateStr || !validationStartDate || !validationEndDate) return null;
 
     if (
-      dateToUtcMs(dateStr) < dateToUtcMs(arrivalDate) ||
-      dateToUtcMs(dateStr) > dateToUtcMs(departureDate)
+      dateToUtcMs(dateStr) < dateToUtcMs(validationStartDate) ||
+      dateToUtcMs(dateStr) > dateToUtcMs(validationEndDate)
     ) {
       return `${fieldLabel} in ${sectionLabel} (${rowLabel}) is not within the arrival/departure period.`;
     }
@@ -1272,90 +1765,105 @@ const validateReservationDates = ({ draft, quotation }) => {
     return null;
   };
 
-  for (const [index, row] of asArray(draft?.arrDep).entries()) {
-    const rowLabel = getArrDepLabel(row, index);
-    const rangeError = validateSingleDate("Arrival / Departure", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("arrDep")) {
+    for (const [index, row] of combinedRows.entries()) {
+      if (row.scheduleType === ARR_DEP_SCHEDULE_TYPES.WEEKLY) continue;
+      const rowLabel = getArrDepLabel(row, index);
+      const rangeError = validateSingleDate("Arrival / Departure", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.hotels).entries()) {
-    const rowLabel = row?.hotelName || `Hotel ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Hotels",
-      rowLabel,
-      "Check In",
-      row?.checkIn,
-      "Check Out",
-      row?.checkOut
-    );
-    if (rangeError) return rangeError;
-
-    const checkIn = toDateInput(row?.checkIn);
-    const checkOut = toDateInput(row?.checkOut);
-    const nights = String(row?.nights || "").trim();
-    if (checkIn && checkOut && nights) {
-      const actualNights = Math.max(
-        0,
-        Math.floor((dateToUtcMs(checkOut) - dateToUtcMs(checkIn)) / 86400000)
+  if (validationSections.has("hotels")) {
+    for (const [index, row] of asArray(draft?.hotels).entries()) {
+      const rowLabel = row?.hotelName || `Hotel ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Hotels",
+        rowLabel,
+        "Check In",
+        row?.checkIn,
+        "Check Out",
+        row?.checkOut
       );
-      if (toNumber(nights) !== actualNights) {
-        return `Nights in Hotels (${rowLabel}) must match the difference between Check In and Check Out.`;
+      if (rangeError) return rangeError;
+
+      const checkIn = toDateInput(row?.checkIn);
+      const checkOut = toDateInput(row?.checkOut);
+      const nights = String(row?.nights || "").trim();
+      if (checkIn && checkOut && nights) {
+        const actualNights = Math.max(
+          0,
+          Math.floor((dateToUtcMs(checkOut) - dateToUtcMs(checkIn)) / 86400000)
+        );
+        if (toNumber(nights) !== actualNights) {
+          return `Nights in Hotels (${rowLabel}) must match the difference between Check In and Check Out.`;
+        }
       }
     }
   }
 
-  for (const [index, row] of asArray(draft?.transportation).entries()) {
-    const rowLabel = row?.companyName || `Transportation ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Transportation",
-      rowLabel,
-      "From Date",
-      row?.fromDate,
-      "To Date",
-      row?.toDate
-    );
-    if (rangeError) return rangeError;
+  if (validationSections.has("transportation")) {
+    for (const [index, row] of asArray(draft?.transportation).entries()) {
+      const rowLabel = row?.companyName || `Transportation ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Transportation",
+        rowLabel,
+        "From Date",
+        row?.fromDate,
+        "To Date",
+        row?.toDate
+      );
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.guides).entries()) {
-    const rowLabel = row?.guideName || `Guide ${index + 1}`;
-    const rangeError = validateDateRange(
-      "Guides",
-      rowLabel,
-      "From Date",
-      row?.fromDate,
-      "To Date",
-      row?.toDate
-    );
-    if (rangeError) return rangeError;
+  if (validationSections.has("guides")) {
+    for (const [index, row] of asArray(draft?.guides).entries()) {
+      const rowLabel = row?.guideName || `Guide ${index + 1}`;
+      const rangeError = validateDateRange(
+        "Guides",
+        rowLabel,
+        "From Date",
+        row?.fromDate,
+        "To Date",
+        row?.toDate
+      );
+      if (rangeError) return rangeError;
 
-    const fromDate = toDateInput(row?.fromDate);
-    const toDate = toDateInput(row?.toDate);
-    const days = String(row?.days || "").trim();
-    if (fromDate && toDate && days) {
-      const actualDays = diffDaysInclusive(fromDate, toDate);
-      if (actualDays !== null && toNumber(days) !== actualDays) {
-        return `Days in Guides (${rowLabel}) must match the number of days between From Date and To Date.`;
+      const fromDate = toDateInput(row?.fromDate);
+      const toDate = toDateInput(row?.toDate);
+      const days = String(row?.days || "").trim();
+      if (fromDate && toDate && days) {
+        const actualDays = diffDaysInclusive(fromDate, toDate);
+        if (actualDays !== null && toNumber(days) !== actualDays) {
+          return `Days in Guides (${rowLabel}) must match the number of days between From Date and To Date.`;
+        }
       }
     }
   }
 
-  for (const [index, row] of asArray(draft?.entrance).entries()) {
-    const rowLabel = row?.entrance || `Entrance ${index + 1}`;
-    const rangeError = validateSingleDate("Entrance", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("entrance")) {
+    for (const [index, row] of asArray(draft?.entrance).entries()) {
+      const rowLabel = row?.entrance || `Entrance ${index + 1}`;
+      const rangeError = validateSingleDate("Entrance", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.restaurants).entries()) {
-    const rowLabel = row?.restaurantName || row?.meal || `Restaurant ${index + 1}`;
-    const rangeError = validateSingleDate("Restaurants", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("restaurants")) {
+    for (const [index, row] of asArray(draft?.restaurants).entries()) {
+      const rowLabel = row?.restaurantName || row?.meal || `Restaurant ${index + 1}`;
+      const rangeError = validateSingleDate("Restaurants", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
-  for (const [index, row] of asArray(draft?.extras).entries()) {
-    const rowLabel = row?.serviceName || `Extra ${index + 1}`;
-    const rangeError = validateSingleDate("Extras", rowLabel, "Date", row?.date);
-    if (rangeError) return rangeError;
+  if (validationSections.has("extras")) {
+    for (const [index, row] of asArray(draft?.extras).entries()) {
+      const rowLabel = row?.serviceName || `Extra ${index + 1}`;
+      const rangeError = validateSingleDate("Extras", rowLabel, "Date", row?.date);
+      if (rangeError) return rangeError;
+    }
   }
 
   return null;
@@ -1461,8 +1969,11 @@ const DocumentGenerationPanel = ({
   </div>
 );
 
-const TripTimeline = ({ arrDepRows }) => {
-  const { arrivalDate, departureDate } = getArrDepTripDates(arrDepRows);
+const TripTimeline = ({ arrDepRows, arrDepSchedule }) => {
+  const { arrivalDate, departureDate } = getArrDepTripDates(
+    arrDepRows,
+    arrDepSchedule
+  );
 
   if (!arrivalDate || !departureDate) return null;
 
@@ -1551,9 +2062,17 @@ const ReservationFileDetails = () => {
   );
   const [activeSection, setActiveSection] = useState("RES Details");
   const [draft, setDraft] = useState(null);
+  const [selectedScheduleTypes, setSelectedScheduleTypes] = useState([]);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
-  const [manifestOpen, setManifestOpen] = useState(false);
+  const [activeClientsTab, setActiveClientsTab] = useState(
+    CLIENTS_INTERNAL_TABS.MANIFEST
+  );
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmDeleting, setConfirmDeleting] = useState(false);
+  const [specialRatesUploads, setSpecialRatesUploads] = useState({});
+  const [supplierEmailSending, setSupplierEmailSending] = useState({});
+  const specialRatesUploadRefs = useRef({});
   const [offerUploadFile, setOfferUploadFile] = useState(null);
   const [offerUploadSaving, setOfferUploadSaving] = useState(false);
   const [emailUploadFile, setEmailUploadFile] = useState(null);
@@ -1594,6 +2113,7 @@ const ReservationFileDetails = () => {
     () => (defaults ? mergeDraft(defaults, selected?.RESERVATION_DATA || {}) : null),
     [defaults, selected?.RESERVATION_DATA]
   );
+  const loadedReservationId = getId(selected?._id);
   const initialCurrentUserName = useMemo(() => getCurrentUserName(), []);
   const [currentUserName, setCurrentUserName] = useState(initialCurrentUserName);
   const currentUserEmail = useMemo(() => getCurrentUserEmail(), []);
@@ -1684,12 +2204,15 @@ const ReservationFileDetails = () => {
   }, [dispatch]);
 
   useEffect(() => {
-    if (!defaults) {
-      setDraft(null);
-      return;
-    }
+    if (!loadedReservationId || !savedDraft) return;
+
     setDraft(savedDraft);
-  }, [defaults, savedDraft]);
+    setSelectedScheduleTypes(
+      normalizeArrDepScheduleTypes(savedDraft?.arrDepSchedule)
+    );
+    // Schedule selection is initialized only when a different reservation loads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedReservationId]);
 
   useEffect(() => {
     if (!pendingAccommodationOptionKey && accommodationOptionChoices.length) {
@@ -1758,6 +2281,468 @@ const ReservationFileDetails = () => {
     }));
   };
 
+  const updateArrDepSchedule = (field, value) => {
+    setDraft(prev => ({
+      ...prev,
+      arrDepSchedule: {
+        ...(prev?.arrDepSchedule || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const updateArrDepScheduleRows = (type, rows) => {
+    setDraft(prev => {
+      const rowsByType = {
+        ...(prev?.arrDepSchedule?.rowsByType || {}),
+        [type]: rows,
+      };
+
+      return {
+        ...prev,
+        arrDepSchedule: {
+          ...(prev?.arrDepSchedule || {}),
+          rowsByType,
+        },
+        arrDep: buildCombinedArrDepRows(rowsByType, selectedScheduleTypes),
+      };
+    });
+  };
+
+  const updateArrDepRow = (type, index, field, value) => {
+    setDraft(prev => {
+      const rowsByType = { ...(prev?.arrDepSchedule?.rowsByType || {}) };
+      rowsByType[type] = asArray(rowsByType[type]).map((row, rowIndex) =>
+        rowIndex === index ? { ...row, [field]: value } : row
+      );
+
+      return {
+        ...prev,
+        arrDepSchedule: {
+          ...(prev?.arrDepSchedule || {}),
+          rowsByType,
+        },
+        arrDep: buildCombinedArrDepRows(rowsByType, selectedScheduleTypes),
+      };
+    });
+  };
+
+  const addArrDepRow = type => {
+    const row = emptyRow.arrDep();
+    if (type === ARR_DEP_SCHEDULE_TYPES.WEEKLY) {
+      row.date = "";
+    }
+
+    updateArrDepScheduleRows(type, [
+      ...getArrDepRowsForType(draft, type),
+      row,
+    ]);
+  };
+
+  const removeArrDepRowNow = (type, index) => {
+    updateArrDepScheduleRows(
+      type,
+      getArrDepRowsForType(draft, type).filter((_, rowIndex) => rowIndex !== index)
+    );
+  };
+
+  const removeArrDepRow = (type, index) => {
+    const row = getArrDepRowsForType(draft, type)[index];
+    const rowLabel = getArrDepLabel(row, index);
+    const typeLabel =
+      scheduleTypeOptions.find(option => option.value === type)?.label ||
+      "Arrival / Departure";
+    setConfirmDelete({
+      itemName: rowLabel,
+      message: `Are you sure you want to delete this ${typeLabel} row${rowLabel ? ` (${rowLabel})` : ""}?`,
+      onConfirm: () => removeArrDepRowNow(type, index),
+    });
+  };
+
+  const toggleScheduleType = type => {
+    setSelectedScheduleTypes(current => {
+      if (current.includes(type)) {
+        return current.filter(item => item !== type);
+      }
+
+      return [...current, type];
+    });
+  };
+
+  const handleArrDepTypeChange = (type, index, movementType) => {
+    setDraft(prev => {
+      const rowsByType = { ...(prev?.arrDepSchedule?.rowsByType || {}) };
+      rowsByType[type] = asArray(rowsByType[type]).map((row, rowIndex) =>
+        rowIndex === index
+          ? {
+              ...row,
+              movementType,
+              arr: movementType === "Arrival",
+              dep: movementType === "Departure",
+            }
+          : row
+      );
+
+      return {
+        ...prev,
+        arrDepSchedule: {
+          ...(prev?.arrDepSchedule || {}),
+          rowsByType,
+        },
+        arrDep: buildCombinedArrDepRows(rowsByType, selectedScheduleTypes),
+      };
+    });
+  };
+
+  const getSpecialRatesRowKey = (section, row, index) =>
+    `${section}:${row?._sourceKey || index}`;
+
+  const setSpecialRatesUploadState = (key, patchValues) => {
+    setSpecialRatesUploads(prev => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        ...patchValues,
+      },
+    }));
+  };
+
+  const focusSpecialRatesUpload = key => {
+    window.setTimeout(() => {
+      specialRatesUploadRefs.current[key]?.focus?.();
+    }, 0);
+  };
+
+  const blockSpecialRatesContinuation = (section, row, index, event) => {
+    if (hasSpecialRatesFile(row)) return false;
+
+    if (event) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+    }
+
+    const key = getSpecialRatesRowKey(section, row, index);
+    setSpecialRatesUploadState(key, {
+      error: "Please upload a Special Rates file before continuing.",
+    });
+    notifyError("Please upload a Special Rates file before continuing.");
+    focusSpecialRatesUpload(key);
+    return true;
+  };
+
+  const getSpecialRatesGuardProps = (section, row, index) => {
+    if (hasSpecialRatesFile(row)) return {};
+
+    return {
+      onMouseDownCapture: event =>
+        blockSpecialRatesContinuation(section, row, index, event),
+      onFocusCapture: event =>
+        blockSpecialRatesContinuation(section, row, index, event),
+      onKeyDownCapture: event =>
+        blockSpecialRatesContinuation(section, row, index, event),
+    };
+  };
+
+  const handleSpecialRatesFileSelect = (section, row, index, file) => {
+    const key = getSpecialRatesRowKey(section, row, index);
+    const error = validateSpecialRatesFile(file);
+    setSpecialRatesUploadState(key, {
+      file: error ? null : file,
+      error,
+      status: error ? "" : "Ready to upload",
+    });
+  };
+
+  const handleSpecialRatesUpload = async (section, row, index) => {
+    const key = getSpecialRatesRowKey(section, row, index);
+    const selectedFile = specialRatesUploads[key]?.file;
+    const validationError = validateSpecialRatesFile(selectedFile);
+
+    if (validationError) {
+      setSpecialRatesUploadState(key, { error: validationError });
+      notifyError(validationError);
+      focusSpecialRatesUpload(key);
+      return;
+    }
+
+    if (specialRatesUploads[key]?.uploading) return;
+
+    setSpecialRatesUploadState(key, {
+      uploading: true,
+      error: "",
+      status: "Uploading...",
+    });
+
+    try {
+      const attachment = await uploadAttachment({
+        file: selectedFile,
+        ATTACHMENT_TYPE: ATTACHMENT_TYPES.RESERVATION_SPECIAL_RATES,
+        META: {
+          reservationFileId: id,
+          section,
+          rowKey: row?._sourceKey || index,
+          purpose: "SPECIAL_RATES_FILE",
+        },
+      });
+
+      updateRow(section, index, "specialRatesFile", buildSpecialRatesFileMeta(attachment));
+      setSpecialRatesUploadState(key, {
+        file: null,
+        uploading: false,
+        error: "",
+        status: "Uploaded",
+      });
+      notifySuccess("Special Rates file uploaded. Save changes to persist it.");
+    } catch (error) {
+      const message = extractAttachmentErrorMessage(
+        error,
+        "Failed to upload Special Rates file."
+      );
+      setSpecialRatesUploadState(key, {
+        uploading: false,
+        error: message,
+        status: "",
+      });
+      notifyError(message);
+      focusSpecialRatesUpload(key);
+    }
+  };
+
+  const handleRemoveSpecialRatesFile = (section, row, index) => {
+    const file = row?.specialRatesFile || {};
+    const fileName = file.fileName || file.originalName || "Special Rates file";
+
+    setConfirmDelete({
+      itemName: fileName,
+      message: `Are you sure you want to remove this Special Rates file (${fileName})?`,
+      successMessage:
+        "Special Rates file removed from this row. Save changes to persist this update.",
+      onConfirm: () => {
+        updateRow(section, index, "specialRatesFile", null);
+        const key = getSpecialRatesRowKey(section, row, index);
+        setSpecialRatesUploadState(key, {
+          error: "Please upload a Special Rates file before continuing.",
+          status: "",
+        });
+        focusSpecialRatesUpload(key);
+      },
+    });
+  };
+
+  const handleOpenSpecialRatesFile = async row => {
+    const attachmentId = getSpecialRatesFileId(row?.specialRatesFile);
+    if (!attachmentId) {
+      notifyError("Special Rates file is missing.");
+      return;
+    }
+
+    try {
+      await openAttachment(attachmentId);
+    } catch (error) {
+      notifyError(
+        extractAttachmentErrorMessage(error, "Failed to open Special Rates file.")
+      );
+    }
+  };
+
+  const validateSpecialRatesFilesForSave = (
+    reservationDraft,
+    sections = SPECIAL_RATES_SECTIONS
+  ) => {
+    for (const section of sections) {
+      for (const [index, row] of asArray(reservationDraft?.[section]).entries()) {
+        if (!hasSpecialRatesFile(row)) {
+          const key = getSpecialRatesRowKey(section, row, index);
+          return {
+            key,
+            message: `Please upload a Special Rates file for ${humanizeFieldName(section)} (${getRowLabel(section, row, index)}).`,
+          };
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const renderSpecialRatesField = (section, row, index) => {
+    const key = getSpecialRatesRowKey(section, row, index);
+    const uploadState = specialRatesUploads[key] || {};
+    const savedFile = row?.specialRatesFile || {};
+    const savedFileId = getSpecialRatesFileId(savedFile);
+    const selectedFile = uploadState.file;
+    const missingFile = !savedFileId;
+    const message = uploadState.error || (missingFile ? "Special Rates file is required." : "");
+
+    return (
+      <div className="mb-3">
+        <Field
+          label="Special Rates"
+          value={row.specialRates}
+          onChange={value => updateRow(section, index, "specialRates", value)}
+          onKeyDown={event => {
+            if (event.key === "Tab" || event.key === "Enter") {
+              blockSpecialRatesContinuation(section, row, index, event);
+            }
+          }}
+        />
+        <div className="border rounded bg-white p-3">
+          <Label className="form-label fw-semibold mb-2">
+            Special Rates File <span className="text-danger">*</span>
+          </Label>
+          <div className="d-flex flex-column flex-lg-row align-items-stretch gap-2">
+            <Input
+              innerRef={element => {
+                if (element) specialRatesUploadRefs.current[key] = element;
+              }}
+              className="flex-grow-1"
+              style={{ minWidth: 0 }}
+              type="file"
+              accept={SPECIAL_RATES_ACCEPT}
+              disabled={!!uploadState.uploading}
+              onChange={event =>
+                handleSpecialRatesFileSelect(
+                  section,
+                  row,
+                  index,
+                  event.target.files?.[0] || null
+                )
+              }
+            />
+            <Button
+              color="primary"
+              size="sm"
+              type="button"
+              className="flex-shrink-0"
+              style={{ minWidth: 190, whiteSpace: "nowrap" }}
+              disabled={!selectedFile || !!uploadState.uploading}
+              onClick={() => handleSpecialRatesUpload(section, row, index)}
+            >
+              {uploadState.uploading ? <Spinner size="sm" className="me-2" /> : null}
+              {savedFileId ? "Replace File" : "Upload Special Rates File"}
+            </Button>
+          </div>
+
+          {selectedFile ? (
+            <div className="small text-muted mt-2">
+              Selected: {selectedFile.name}
+              {selectedFile.size ? ` (${formatFileSize(selectedFile.size)})` : ""}
+            </div>
+          ) : null}
+
+          {savedFileId ? (
+            <div className="mt-2 border rounded bg-light px-3 py-2 d-flex flex-column flex-lg-row align-items-start align-items-lg-center justify-content-between gap-2">
+              <div>
+              <div className="small fw-semibold">
+                {savedFile.fileName || savedFile.originalName || "Special Rates file"}
+              </div>
+              <div className="small text-muted">
+                Saved
+                {savedFile.size ? ` • ${formatFileSize(savedFile.size)}` : ""}
+              </div>
+              </div>
+              <div className="d-flex flex-wrap gap-2">
+                <Button
+                  color="info"
+                  size="sm"
+                  type="button"
+                  onClick={() => handleOpenSpecialRatesFile(row)}
+                >
+                  Open / Download
+                </Button>
+                <Button
+                  color="danger"
+                  size="sm"
+                  type="button"
+                  onClick={() => handleRemoveSpecialRatesFile(section, row, index)}
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="d-flex flex-wrap align-items-center gap-2 mt-2">
+            {uploadState.status ? (
+              <span className="small text-muted">{uploadState.status}</span>
+            ) : null}
+          </div>
+
+          {message ? <div className="text-danger small mt-2">{message}</div> : null}
+        </div>
+      </div>
+    );
+  };
+
+  const getSupplierEmailKey = (section, row, index) =>
+    `${section}:${row?._sourceKey || index}`;
+
+  const handleSendSupplierEmail = async (section, row, index) => {
+    if (!id) return;
+
+    if (!hasSpecialRatesFile(row)) {
+      notifyError("Upload the Special Rates file before sending the email.");
+      return;
+    }
+
+    const key = getSupplierEmailKey(section, row, index);
+    if (supplierEmailSending[key]) return;
+
+    const saved = await handleSave({ validateSpecialRates: false });
+    if (!saved) return;
+
+    setSupplierEmailSending(current => ({ ...current, [key]: true }));
+    try {
+      const response = await post(RESERVATION_FILE_SUPPLIER_CONFIRMATION_EMAIL(id), {
+        section,
+        rowKey: row?._sourceKey || "",
+        rowIndex: index,
+      });
+      updateRowFields(section, index, {
+        supplierConfirmation: {
+          ...(row?.supplierConfirmation || {}),
+          token: response?.token || row?.supplierConfirmation?.token || "",
+          code: response?.code || "",
+          status: "sent",
+          sentTo: response?.sentTo || "",
+          sentOn: new Date().toISOString(),
+        },
+      });
+      notifySuccess(`Email sent to ${response?.sentTo || "supplier"}.`);
+    } catch (error) {
+      notifyError(error?.response?.data?.message || "Failed to send email.");
+    } finally {
+      setSupplierEmailSending(current => ({ ...current, [key]: false }));
+    }
+  };
+
+  const renderSupplierEmailControls = (section, row, index) => {
+    const key = getSupplierEmailKey(section, row, index);
+    const confirmation = row?.supplierConfirmation || {};
+    const status = confirmation?.status || "";
+
+    return (
+      <div className="d-flex align-items-center flex-wrap gap-2 mt-3">
+        <Button
+          color="info"
+          type="button"
+          onClick={() => handleSendSupplierEmail(section, row, index)}
+          disabled={!!supplierEmailSending[key] || !hasSpecialRatesFile(row)}
+        >
+          {supplierEmailSending[key] ? <Spinner size="sm" className="me-2" /> : null}
+          Send Email
+        </Button>
+        {status ? (
+          <Badge color={status === "submitted" ? "success" : "info"} pill>
+            {status === "submitted" ? "Submitted" : "Email Sent"}
+          </Badge>
+        ) : null}
+        {confirmation?.sentTo ? (
+          <span className="text-muted small">To: {confirmation.sentTo}</span>
+        ) : null}
+      </div>
+    );
+  };
+
   const handleGuideNameChange = (index, guideName) => {
     const firstLanguage = getFirstGuideLanguage(guideDirectory, guideName);
 
@@ -1789,6 +2774,37 @@ const ReservationFileDetails = () => {
     }));
   };
 
+  const handleApplyGuideForAllDays = () => {
+    const guides = asArray(draft?.guides);
+    if (guides.length < 2) {
+      notifyError("Add another guide row first.");
+      return;
+    }
+
+    const sourceGuide = guides[0] || {};
+    setDraft(prev => ({
+      ...prev,
+      guides: asArray(prev?.guides).map((row, index) =>
+        index === 0
+          ? row
+          : {
+              ...row,
+              guideName: sourceGuide.guideName || "",
+              language: sourceGuide.language || "",
+              notes: sourceGuide.notes || "",
+              specialRates: sourceGuide.specialRates || "",
+              fromDate: sourceGuide.fromDate || "",
+              toDate: sourceGuide.toDate || "",
+              status: sourceGuide.status || "",
+              days: sourceGuide.days || "",
+              overnight: sourceGuide.overnight || "",
+              invoiceReceived: sourceGuide.invoiceReceived || "",
+            }
+      ),
+    }));
+    notifySuccess("Guide information applied to all remaining guide rows.");
+  };
+
   const addRow = section => {
     setDraft(prev => ({
       ...prev,
@@ -1796,39 +2812,127 @@ const ReservationFileDetails = () => {
     }));
   };
 
-  const removeRow = (section, index) => {
+  const removeRowNow = (section, index) => {
     setDraft(prev => ({
       ...prev,
       [section]: asArray(prev?.[section]).filter((_, rowIndex) => rowIndex !== index),
     }));
   };
 
-  const handleSave = async () => {
+  const removeRow = (section, index) => {
+    const row = asArray(draft?.[section])[index];
+    const rowLabel = getRowLabel(section, row, index);
+    setConfirmDelete({
+      section,
+      index,
+      itemName: rowLabel,
+      message: `Are you sure you want to delete this ${humanizeFieldName(section).toLowerCase()} row${rowLabel ? ` (${rowLabel})` : ""}?`,
+    });
+  };
+
+  const closeDeleteConfirmation = () => {
+    if (confirmDeleting) return;
+    setConfirmDelete(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDelete || confirmDeleting) return;
+
+    setConfirmDeleting(true);
+    try {
+      if (confirmDelete.onConfirm) {
+        await confirmDelete.onConfirm();
+      } else {
+        removeRowNow(confirmDelete.section, confirmDelete.index);
+      }
+      notifySuccess(
+        confirmDelete.successMessage ||
+          `${confirmDelete.itemName || "Row"} removed. Save changes to persist this update.`
+      );
+      setConfirmDelete(null);
+    } catch (error) {
+      notifyError(error?.message || "Failed to delete the selected row.");
+    } finally {
+      setConfirmDeleting(false);
+    }
+  };
+
+  const handleSave = async (options = {}) => {
     if (!draft || !id) return false;
+
+    const validationPlan = buildReservationSaveValidationPlan({
+      activeSection: options?.activeSection || activeSection,
+      activeClientsTab: options?.activeClientsTab || activeClientsTab,
+      fullReservation: options?.fullReservation === true,
+    });
 
     const reservationDateError = validateReservationDates({
       draft,
       quotation,
+      selectedScheduleTypes,
+      sections: validationPlan.dateSections,
     });
     if (reservationDateError) {
       notifyError(reservationDateError);
       return false;
     }
 
+    if (
+      options?.validateSpecialRates !== false &&
+      validationPlan.specialRatesSections.length
+    ) {
+      const specialRatesError = validateSpecialRatesFilesForSave(
+        draft,
+        validationPlan.specialRatesSections
+      );
+      if (specialRatesError) {
+        setSpecialRatesUploadState(specialRatesError.key, {
+          error: specialRatesError.message,
+        });
+        notifyError(specialRatesError.message);
+        focusSpecialRatesUpload(specialRatesError.key);
+        return false;
+      }
+    }
+
+    let roomingList = draft?.roomingList;
+    if (validationPlan.validateRoomingList) {
+      const roomingListResult = validateAndNormalizeRoomingList(roomingList);
+      if (roomingListResult.error) {
+        notifyError(roomingListResult.error);
+        return false;
+      }
+      roomingList = roomingListResult.rows;
+    }
+    const draftForSave = {
+      ...draft,
+      arrDepSchedule: {
+        ...(draft?.arrDepSchedule || {}),
+        type: selectedScheduleTypes[0] || ARR_DEP_SCHEDULE_TYPES.SINGLE,
+        types: selectedScheduleTypes,
+      },
+      arrDep: buildCombinedArrDepRows(
+        draft?.arrDepSchedule?.rowsByType || {},
+        selectedScheduleTypes
+      ),
+      roomingList,
+    };
+
     setSaving(true);
     try {
       const changeLogs = buildReservationChangeLogs({
         beforeDraft: savedDraft,
-        afterDraft: draft,
+        afterDraft: draftForSave,
         userName: currentUserName,
       });
       const nextDraft = {
-        ...draft,
-        logs: [...asArray(draft?.logs), ...changeLogs],
+        ...draftForSave,
+        logs: [...asArray(draftForSave?.logs), ...changeLogs],
       };
 
       await patch(RESERVATION_FILE_BY_ID(id), {
         RESERVATION_DATA: nextDraft,
+        VALIDATION_SCOPE: validationPlan.validationScope,
       });
       setDraft(nextDraft);
       notifySuccess(
@@ -1872,10 +2976,17 @@ const ReservationFileDetails = () => {
   };
 
   const handleSaveManifest = async () => {
-    const saved = await handleSave();
-    if (saved) {
-      setManifestOpen(false);
-    }
+    await handleSave({
+      activeSection: "Clients",
+      activeClientsTab: CLIENTS_INTERNAL_TABS.MANIFEST,
+    });
+  };
+
+  const handleSaveRoomingList = async () => {
+    await handleSave({
+      activeSection: "Clients",
+      activeClientsTab: CLIENTS_INTERNAL_TABS.ROOMING_LIST,
+    });
   };
 
   const handleApplyAccommodationOption = async () => {
@@ -2178,15 +3289,14 @@ const ReservationFileDetails = () => {
 
   const handleSectionChange = section => {
     setActiveSection(section);
-    if (section === "Clients") {
-      setManifestOpen(true);
-    }
   };
 
   const renderResDetails = () => (
     <>
+      <SectionHeader title="Reservation Details" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 p-lg-4 mb-4">
-        <h4 className="mb-3">Reservation Details</h4>
         <Row className="g-3">
           <Col md="4">
             <div>File No.</div>
@@ -2246,7 +3356,9 @@ const ReservationFileDetails = () => {
 
   const renderGeneral = () => (
     <>
-      <SectionHeader title="General" fileReference={referenceTitle} />
+      <SectionHeader title="General" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 p-lg-4" style={{ maxWidth: 760 }}>
         <Field label="Group Name" value={draft?.general?.groupName} onChange={v => updateGeneral("groupName", v)} />
         <Field label="Agent Name" value={draft?.general?.agentName} readOnly />
@@ -2295,76 +3407,249 @@ const ReservationFileDetails = () => {
           onChange={v => updateGeneral("tips", v)}
         />
         <div className="d-flex gap-2">
-          <Button color="primary" onClick={handleSave} disabled={saving}>
-            Save General Data
-          </Button>
           <Button color="success" onClick={() => updateGeneral("groupName", draft?.general?.groupName || referenceTitle)}>
             Set Group Name
           </Button>
         </div>
       </div>
-      <TripTimeline arrDepRows={draft?.arrDep} />
+      <TripTimeline
+        arrDepRows={draft?.arrDep}
+        arrDepSchedule={draft?.arrDepSchedule}
+      />
     </>
   );
 
-  const renderArrDep = () => (
-    <>
-      <SectionHeader title="Arrival / Departure" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>
-          Save Changes
-        </Button>
-      </SectionHeader>
-      <div className="table-responsive">
-        <Table bordered className="align-middle bg-light">
-          <thead>
-            <tr>
-              {["Type", "Date", "From", "To", "Border", "Flight", "Time", "Pax", "Meet By", "Driver Name", "Notes"].map(head => (
-                <th key={head}>{head}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {asArray(draft?.arrDep).map((row, index) => (
-              <tr key={row._sourceKey || index}>
-                <td className="fw-semibold">{getArrDepLabel(row, index)}</td>
-                <td><Input type="date" value={text(row.date)} onChange={e => updateRow("arrDep", index, "date", e.target.value)} /></td>
-                <td><Input value={text(row.from)} onChange={e => updateRow("arrDep", index, "from", e.target.value)} /></td>
-                <td><Input value={text(row.to)} onChange={e => updateRow("arrDep", index, "to", e.target.value)} /></td>
-                <td><Input value={text(row.border)} onChange={e => updateRow("arrDep", index, "border", e.target.value)} /></td>
-                <td><Input value={text(row.flight)} onChange={e => updateRow("arrDep", index, "flight", e.target.value)} /></td>
-                <td><Input type="time" value={text(row.time)} onChange={e => updateRow("arrDep", index, "time", e.target.value)} /></td>
-                <td><Input type="number" value={text(row.pax)} onChange={e => updateRow("arrDep", index, "pax", e.target.value)} /></td>
-                <td>
-                  <Input
-                    type="select"
-                    value={text(row.meetBy)}
-                    onChange={e =>
-                      updateRow("arrDep", index, "meetBy", e.target.value)
-                    }
-                  >
-                    {withCurrentOption(
-                      contractingUserOptions,
-                      row.meetBy
-                    ).map(option => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Input>
-                </td>
-                <td><Input value={text(row.driverName)} onChange={e => updateRow("arrDep", index, "driverName", e.target.value)} /></td>
-                <td><Input type="textarea" value={text(row.notes)} onChange={e => updateRow("arrDep", index, "notes", e.target.value)} /></td>
+  const renderArrDepTable = type => {
+    const option = scheduleTypeOptions.find(item => item.value === type);
+    const rows = getArrDepRowsForType(draft, type);
+    const isSingle = type === ARR_DEP_SCHEDULE_TYPES.SINGLE;
+    const isWeekly = type === ARR_DEP_SCHEDULE_TYPES.WEEKLY;
+
+    return (
+      <div className="rounded border bg-white p-3 mb-3" key={type}>
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h5 className="mb-1">{option?.label || "Schedule"}</h5>
+            <div className="text-muted small">
+              {isSingle
+                ? "One arrival row and one departure row."
+                : isWeekly
+                ? "Recurring movements by weekday."
+                : "Separate arrival/departure movements by date."}
+            </div>
+          </div>
+          {!isSingle ? (
+            <Button color="success" type="button" onClick={() => addArrDepRow(type)}>
+              Add Row
+            </Button>
+          ) : null}
+        </div>
+
+        {isWeekly ? (
+          <Row className="g-3 mb-3">
+            <Col md="3">
+              <Label className="form-label">Repeat From</Label>
+              <Input
+                type="date"
+                value={text(draft?.arrDepSchedule?.repeatFrom)}
+                onChange={e => updateArrDepSchedule("repeatFrom", e.target.value)}
+              />
+            </Col>
+            <Col md="3">
+              <Label className="form-label">Repeat Until</Label>
+              <Input
+                type="date"
+                value={text(draft?.arrDepSchedule?.repeatUntil)}
+                onChange={e => updateArrDepSchedule("repeatUntil", e.target.value)}
+              />
+            </Col>
+          </Row>
+        ) : null}
+
+        <div className="table-responsive">
+          <Table bordered className="align-middle bg-light mb-0">
+            <thead>
+              <tr>
+                {[
+                  "Type",
+                  isWeekly ? "Weekday" : "Date",
+                  "From",
+                  "To",
+                  "Border",
+                  "Flight",
+                  "Time",
+                  "Pax",
+                  "Meet By",
+                  "Driver Name",
+                  "Notes",
+                  isSingle ? "" : "Action",
+                ].map(head => (
+                  <th key={head}>{head}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={row._sourceKey || index}>
+                  <td>
+                    {isSingle ? (
+                      <span className="fw-semibold">{getArrDepLabel(row, index)}</span>
+                    ) : (
+                      <Input
+                        type="select"
+                        value={getArrDepLabel(row, index)}
+                        onChange={e =>
+                          handleArrDepTypeChange(type, index, e.target.value)
+                        }
+                      >
+                        {ARR_DEP_MOVEMENT_OPTIONS.map(item => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </Input>
+                    )}
+                  </td>
+                  <td>
+                    {isWeekly ? (
+                      <Input
+                        type="select"
+                        value={text(row.weekday)}
+                        onChange={e =>
+                          updateArrDepRow(type, index, "weekday", e.target.value)
+                        }
+                      >
+                        <option value="">Select weekday</option>
+                        {WEEKDAY_OPTIONS.map(item => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </Input>
+                    ) : (
+                      <Input
+                        type="date"
+                        value={text(row.date)}
+                        onChange={e =>
+                          updateArrDepRow(type, index, "date", e.target.value)
+                        }
+                      />
+                    )}
+                  </td>
+                  <td><Input value={text(row.from)} onChange={e => updateArrDepRow(type, index, "from", e.target.value)} /></td>
+                  <td><Input value={text(row.to)} onChange={e => updateArrDepRow(type, index, "to", e.target.value)} /></td>
+                  <td><Input value={text(row.border)} onChange={e => updateArrDepRow(type, index, "border", e.target.value)} /></td>
+                  <td><Input value={text(row.flight)} onChange={e => updateArrDepRow(type, index, "flight", e.target.value)} /></td>
+                  <td><Input type="time" value={text(row.time)} onChange={e => updateArrDepRow(type, index, "time", e.target.value)} /></td>
+                  <td><Input type="number" value={text(row.pax)} onChange={e => updateArrDepRow(type, index, "pax", e.target.value)} /></td>
+                  <td>
+                    <Input
+                      type="select"
+                      value={text(row.meetBy)}
+                      onChange={e =>
+                        updateArrDepRow(type, index, "meetBy", e.target.value)
+                      }
+                    >
+                      {withCurrentOption(contractingUserOptions, row.meetBy).map(item => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </Input>
+                  </td>
+                  <td><Input value={text(row.driverName)} onChange={e => updateArrDepRow(type, index, "driverName", e.target.value)} /></td>
+                  <td><Input type="textarea" value={text(row.notes)} onChange={e => updateArrDepRow(type, index, "notes", e.target.value)} /></td>
+                  {isSingle ? (
+                    <td />
+                  ) : (
+                    <td>
+                      <Button
+                        color="danger"
+                        size="sm"
+                        type="button"
+                        onClick={() => removeArrDepRow(type, index)}
+                      >
+                        Remove
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {!rows.length ? (
+                <tr>
+                  <td colSpan="12" className="text-center text-muted py-4">
+                    No arrival / departure rows found.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </Table>
+        </div>
       </div>
-    </>
-  );
+    );
+  };
+
+  const renderArrDep = () => {
+    return (
+      <>
+        <SectionHeader title="Arrival / Departure" fileReference={referenceTitle}>
+          <Button color="primary" onClick={handleSave} disabled={saving}>
+            Save Changes
+          </Button>
+        </SectionHeader>
+        <div className="rounded border bg-light p-3 mb-3">
+          <Label className="form-label fw-semibold d-block mb-2">
+            Schedule Type
+          </Label>
+          <div className="schedule-type-options d-flex flex-wrap gap-2">
+            {scheduleTypeOptions.map(option => {
+              const isSelected = selectedScheduleTypes.includes(option.value);
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={isSelected}
+                  className={`schedule-type-option btn d-inline-flex align-items-center justify-content-center ${
+                    isSelected ? "btn-primary" : "btn-outline-secondary"
+                  }`}
+                  style={{ minWidth: "190px" }}
+                  onClick={() => toggleScheduleType(option.value)}
+                >
+                  <span
+                    className={`schedule-type-indicator d-inline-flex align-items-center justify-content-center rounded-circle border me-2 ${
+                      isSelected
+                        ? "schedule-type-indicator--active border-white"
+                        : "border-secondary"
+                    }`}
+                    style={{ width: "20px", height: "20px", flexShrink: 0 }}
+                    aria-hidden="true"
+                  >
+                    {isSelected ? "✓" : ""}
+                  </span>
+
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {selectedScheduleTypes.includes("singlePeriod") &&
+          renderArrDepTable("singlePeriod")}
+        {selectedScheduleTypes.includes("multipleDates") &&
+          renderArrDepTable("multipleDates")}
+        {selectedScheduleTypes.includes("weeklyRecurring") &&
+          renderArrDepTable("weeklyRecurring")}
+      </>
+    );
+  };
 
   const renderHotels = () => (
     <>
-      <SectionHeader title="Hotels" fileReference={referenceTitle} />
+      <SectionHeader title="Hotels" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.hotels?.length ? <EmptySection label="hotel" /> : null}
       {asArray(draft?.hotels).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Hotel" onRemove={() => removeRow("hotels", index)}>
@@ -2375,23 +3660,24 @@ const ReservationFileDetails = () => {
             <Col md="2"><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} options={YES_NO_OPTIONS} onChange={v => updateRow("hotels", index, "invoiceReceived", v)} /></Col>
             <Col md="2"><Field label="Nights" type="number" value={row.nights} onChange={v => updateRow("hotels", index, "nights", v)} /></Col>
             <Col md="2"><Field label="Notes" value={row.notes} onChange={v => updateRow("hotels", index, "notes", v)} /></Col>
-            <Col md="2"><Field label="Special Rates" value={row.specialRates} onChange={v => updateRow("hotels", index, "specialRates", v)} /></Col>
-            <Col md="2"><Field label="Additional Notes" value={row.additionalNotes} onChange={v => updateRow("hotels", index, "additionalNotes", v)} /></Col>
-            <Col md="2"><Field label="Room Type" value={row.roomType} onChange={v => updateRow("hotels", index, "roomType", v)} /></Col>
-            <Col md="2"><Field label="Status" value={row.status} onChange={v => updateRow("hotels", index, "status", v)} /></Col>
-            <Col md="2"><Field label="Booked By" value={row.bookedBy} onChange={v => updateRow("hotels", index, "bookedBy", v)} /></Col>
-            <Col md="2"><Field label="Cancel Date" type="date" value={row.cancelDate} onChange={v => updateRow("hotels", index, "cancelDate", v)} /></Col>
+            <Col md="6" lg="4">{renderSpecialRatesField("hotels", row, index)}</Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Additional Notes" value={row.additionalNotes} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "additionalNotes", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Room Type" value={row.roomType} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "roomType", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Status" value={row.status} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "status", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Booked By" value={row.bookedBy} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "bookedBy", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Cancel Date" type="date" value={row.cancelDate} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "cancelDate", v)} /></Col>
           </Row>
           <hr />
           <Row>
-            <Col md="2"><Field label="Pax" type="number" value={row.pax} onChange={v => updateRow("hotels", index, "pax", v)} /></Col>
-            <Col md="2"><Field label="SGL" value={row.sgl} onChange={v => updateRow("hotels", index, "sgl", v)} /></Col>
-            <Col md="2"><Field label="DBL" value={row.dbl} onChange={v => updateRow("hotels", index, "dbl", v)} /></Col>
-            <Col md="2"><Field label="TRP" value={row.trp} onChange={v => updateRow("hotels", index, "trp", v)} /></Col>
-            <Col md="2"><Field label="Other" value={row.other} onChange={v => updateRow("hotels", index, "other", v)} /></Col>
-            <Col md="2"><Field label="Conf. No." value={row.confirmationNo} onChange={v => updateRow("hotels", index, "confirmationNo", v)} /></Col>
-            <Col md="2"><Field label="Ref" value={row.ref} onChange={v => updateRow("hotels", index, "ref", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Pax" type="number" value={row.pax} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "pax", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="SGL" value={row.sgl} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "sgl", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="DBL" value={row.dbl} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "dbl", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="TRP" value={row.trp} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "trp", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Other" value={row.other} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "other", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Conf. No." value={row.confirmationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "confirmationNo", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("hotels", row, index)}><Field label="Ref" value={row.ref} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("hotels", index, "ref", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("hotels", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("hotels")}>Add Another Hotel</Button>
@@ -2401,7 +3687,7 @@ const ReservationFileDetails = () => {
   const renderTransportation = () => (
     <>
       <SectionHeader title="Transportation" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       {!draft?.transportation?.length ? <EmptySection label="transportation" /> : null}
       {asArray(draft?.transportation).map((row, index) => (
@@ -2411,16 +3697,18 @@ const ReservationFileDetails = () => {
             <Col md="3"><Field label="Type of Vehicle" value={row.vehicleType} options={withCurrentOption(buildVehicleSizeOptions(transportationCompanies, transportationLookups, row.companyName), row.vehicleType)} onChange={v => updateRow("transportation", index, "vehicleType", v)} /></Col>
             <Col md="3"><Field label="Driver Name" value={row.driverName} onChange={v => updateRow("transportation", index, "driverName", v)} /></Col>
             <Col md="3"><Field label="Notes" value={row.notes} onChange={v => updateRow("transportation", index, "notes", v)} /></Col>
-            <Col md="3"><Field label="From Date" type="date" value={row.fromDate} onChange={v => updateRow("transportation", index, "fromDate", v)} /></Col>
-            <Col md="3"><Field label="To Date" type="date" value={row.toDate} onChange={v => updateRow("transportation", index, "toDate", v)} /></Col>
-            <Col md="3"><Field label="Status" value={row.status} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("transportation", index, "status", v)} /></Col>
-            <Col md="2"><Field label="Pax" type="number" value={row.pax} onChange={v => updateRow("transportation", index, "pax", v)} /></Col>
-            <Col md="2"><Field label="Conf. No." value={row.confirmationNo} onChange={v => updateRow("transportation", index, "confirmationNo", v)} /></Col>
-            <Col md="2"><Field label="Pickup" value={row.pickup} options={withCurrentOption(routeOptions, row.pickup)} onChange={v => updateRow("transportation", index, "pickup", v)} /></Col>
-            <Col md="2"><Field label="Drop Off" value={row.dropOff} options={withCurrentOption(routeOptions, row.dropOff)} onChange={v => updateRow("transportation", index, "dropOff", v)} /></Col>
-            <Col md="2"><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} options={YES_NO_OPTIONS} onChange={v => updateRow("transportation", index, "invoiceReceived", v)} /></Col>
-            <Col md="2"><Field label="Resv. No." value={row.reservationNo} onChange={v => updateRow("transportation", index, "reservationNo", v)} /></Col>
+            <Col md="6" lg="4">{renderSpecialRatesField("transportation", row, index)}</Col>
+            <Col md="3" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="From Date" type="date" value={row.fromDate} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("transportation", index, "fromDate", v)} /></Col>
+            <Col md="3" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="To Date" type="date" value={row.toDate} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("transportation", index, "toDate", v)} /></Col>
+            <Col md="3" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Status" value={row.status} readOnly={!hasSpecialRatesFile(row)} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("transportation", index, "status", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Pax" type="number" value={row.pax} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("transportation", index, "pax", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Conf. No." value={row.confirmationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("transportation", index, "confirmationNo", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Pickup" value={row.pickup} readOnly={!hasSpecialRatesFile(row)} options={withCurrentOption(routeOptions, row.pickup)} onChange={v => updateRow("transportation", index, "pickup", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Drop Off" value={row.dropOff} readOnly={!hasSpecialRatesFile(row)} options={withCurrentOption(routeOptions, row.dropOff)} onChange={v => updateRow("transportation", index, "dropOff", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("transportation", index, "invoiceReceived", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("transportation", row, index)}><Field label="Resv. No." value={row.reservationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("transportation", index, "reservationNo", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("transportation", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("transportation")}>Add Another Transportation</Button>
@@ -2429,7 +3717,16 @@ const ReservationFileDetails = () => {
 
   const renderGuides = () => (
     <>
-      <SectionHeader title="Guides" fileReference={referenceTitle} />
+      <SectionHeader title="Guides" fileReference={referenceTitle}>
+        <Button
+          color="info"
+          onClick={handleApplyGuideForAllDays}
+          disabled={asArray(draft?.guides).length < 2}
+        >
+          Guides for all days
+        </Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.guides?.length ? <EmptySection label="guide" /> : null}
       {asArray(draft?.guides).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Guide" onRemove={() => removeRow("guides", index)}>
@@ -2437,15 +3734,16 @@ const ReservationFileDetails = () => {
             <Col md="3"><Field label="Guide Name" value={row.guideName} options={withCurrentOption(guideNameOptions, row.guideName)} onChange={v => handleGuideNameChange(index, v)} /></Col>
             <Col md="3"><Field label="Language" value={row.language} options={withCurrentOption(buildGuideLanguageOptions(guideDirectory, row.guideName, guideLanguageDirectory), row.language)} onChange={v => updateRow("guides", index, "language", v)} /></Col>
             <Col md="3"><Field label="Notes" value={row.notes} onChange={v => updateRow("guides", index, "notes", v)} /></Col>
-            <Col md="3"><Field label="Special Rates" value={row.specialRates} onChange={v => updateRow("guides", index, "specialRates", v)} /></Col>
-            <Col md="2"><Field label="From Date" type="date" value={row.fromDate} onChange={v => updateRow("guides", index, "fromDate", v)} /></Col>
-            <Col md="2"><Field label="To Date" type="date" value={row.toDate} onChange={v => updateRow("guides", index, "toDate", v)} /></Col>
-            <Col md="2"><Field label="Status" value={row.status} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("guides", index, "status", v)} /></Col>
-            <Col md="2"><Field label="Days" type="number" value={row.days} onChange={v => updateRow("guides", index, "days", v)} /></Col>
-            <Col md="2">
+            <Col md="6" lg="4">{renderSpecialRatesField("guides", row, index)}</Col>
+            <Col md="2" {...getSpecialRatesGuardProps("guides", row, index)}><Field label="From Date" type="date" value={row.fromDate} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("guides", index, "fromDate", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("guides", row, index)}><Field label="To Date" type="date" value={row.toDate} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("guides", index, "toDate", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("guides", row, index)}><Field label="Status" value={row.status} readOnly={!hasSpecialRatesFile(row)} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("guides", index, "status", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("guides", row, index)}><Field label="Days" type="number" value={row.days} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("guides", index, "days", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("guides", row, index)}>
               <Field
                 label="Overnight"
                 value={row.overnight}
+                readOnly={!hasSpecialRatesFile(row)}
                 options={[
                   { value: "", label: "Select" },
                   { value: "Yes", label: "Yes" },
@@ -2454,7 +3752,7 @@ const ReservationFileDetails = () => {
                 onChange={v => updateRow("guides", index, "overnight", v)}
               />
             </Col>
-            <Col md="2"><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} options={YES_NO_OPTIONS} onChange={v => updateRow("guides", index, "invoiceReceived", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("guides", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("guides", index, "invoiceReceived", v)} /></Col>
           </Row>
         </RowPanel>
       ))}
@@ -2464,7 +3762,9 @@ const ReservationFileDetails = () => {
 
   const renderEntrance = () => (
     <>
-      <SectionHeader title="Entrance" fileReference={referenceTitle} />
+      <SectionHeader title="Entrance" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.entrance?.length ? <EmptySection label="entrance" /> : null}
       {asArray(draft?.entrance).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Entrance" onRemove={() => removeRow("entrance", index)}>
@@ -2481,14 +3781,13 @@ const ReservationFileDetails = () => {
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("entrance")}>Add Another Entrance</Button>
-      <Button color="primary" className="ms-2" onClick={handleSave} disabled={saving}>Save Entrance Data</Button>
     </>
   );
 
   const renderRestaurants = () => (
     <>
       <SectionHeader title="Restaurants" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       {!draft?.restaurants?.length ? <EmptySection label="restaurant/meal" /> : null}
       {asArray(draft?.restaurants).map((row, index) => (
@@ -2500,17 +3799,19 @@ const ReservationFileDetails = () => {
             <Col md="2"><Field label="Type of Meal" value={row.typeOfMeal} onChange={v => updateRow("restaurants", index, "typeOfMeal", v)} /></Col>
             <Col md="2"><Field label="Price" value={row.price} onChange={v => updateRow("restaurants", index, "price", v)} /></Col>
             <Col md="2"><Field label="Notes" value={row.notes} onChange={v => updateRow("restaurants", index, "notes", v)} /></Col>
-            <Col md="2"><Field label="Special Rates" value={row.specialRates} onChange={v => updateRow("restaurants", index, "specialRates", v)} /></Col>
-            <Col md="2"><Field label="Itinerary" value={row.itinerary} onChange={v => updateRow("restaurants", index, "itinerary", v)} /></Col>
-            <Col md="2"><Field label="Date" type="date" value={row.date} onChange={v => updateRow("restaurants", index, "date", v)} /></Col>
-            <Col md="2"><Field label="Day" value={row.day} onChange={v => updateRow("restaurants", index, "day", v)} /></Col>
-            <Col md="2"><Field label="Time" type="time" value={row.time} onChange={v => updateRow("restaurants", index, "time", v)} /></Col>
-            <Col md="2"><Field label="Status" value={row.status} onChange={v => updateRow("restaurants", index, "status", v)} /></Col>
-            <Col md="2"><Field label="Booked By" value={row.bookedBy} onChange={v => updateRow("restaurants", index, "bookedBy", v)} /></Col>
-            <Col md="2"><Field label="Pax" type="number" value={row.pax} onChange={v => updateRow("restaurants", index, "pax", v)} /></Col>
-            <Col md="2"><Field label="Conf. No." value={row.confirmationNo} onChange={v => updateRow("restaurants", index, "confirmationNo", v)} /></Col>
-            <Col md="2"><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} options={YES_NO_OPTIONS} onChange={v => updateRow("restaurants", index, "invoiceReceived", v)} /></Col>
+            <Col md="6" lg="4">{renderSpecialRatesField("restaurants", row, index)}</Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Itinerary" value={row.itinerary} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "itinerary", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Date" type="date" value={row.date} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "date", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Day" value={row.day} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "day", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Time" type="time" value={row.time} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "time", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Status" value={row.status} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "status", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Booked By" value={row.bookedBy} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "bookedBy", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Pax" type="number" value={row.pax} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "pax", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Conf. No." value={row.confirmationNo} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "confirmationNo", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Ref. No." value={row.ref} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("restaurants", index, "ref", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("restaurants", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("restaurants", index, "invoiceReceived", v)} /></Col>
           </Row>
+          {renderSupplierEmailControls("restaurants", row, index)}
         </RowPanel>
       ))}
       <Button color="success" onClick={() => addRow("restaurants")}>Add Another Restaurant</Button>
@@ -2519,7 +3820,9 @@ const ReservationFileDetails = () => {
 
   const renderExtras = () => (
     <>
-      <SectionHeader title="Extras" fileReference={referenceTitle} />
+      <SectionHeader title="Extras" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       {!draft?.extras?.length ? <EmptySection label="extra service" /> : null}
       {asArray(draft?.extras).map((row, index) => (
         <RowPanel key={row._sourceKey || index} row={row} removeLabel="Remove Extra" onRemove={() => removeRow("extras", index)}>
@@ -2527,17 +3830,17 @@ const ReservationFileDetails = () => {
             <Col md="2"><Field label="Service Name" value={row.serviceName} onChange={v => updateRow("extras", index, "serviceName", v)} /></Col>
             <Col md="2"><Field label="Supplier" value={row.supplier} onChange={v => updateRow("extras", index, "supplier", v)} /></Col>
             <Col md="2"><Field label="Notes" value={row.notes} onChange={v => updateRow("extras", index, "notes", v)} /></Col>
-            <Col md="2"><Field label="Special Rates" value={row.specialRates} onChange={v => updateRow("extras", index, "specialRates", v)} /></Col>
-            <Col md="2"><Field label="Itinerary" value={row.itinerary} onChange={v => updateRow("extras", index, "itinerary", v)} /></Col>
-            <Col md="2"><Field label="Classification" value={row.classification} onChange={v => updateRow("extras", index, "classification", v)} /></Col>
-            <Col md="2"><Field label="Date" type="date" value={row.date} onChange={v => updateRow("extras", index, "date", v)} /></Col>
-            <Col md="2"><Field label="Day" value={row.day} onChange={v => updateRow("extras", index, "day", v)} /></Col>
-            <Col md="2"><Field label="Time" type="time" value={row.time} onChange={v => updateRow("extras", index, "time", v)} /></Col>
-            <Col md="2"><Field label="Status" value={row.status} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("extras", index, "status", v)} /></Col>
-            <Col md="2"><Field label="Pax" type="number" value={row.pax} onChange={v => updateRow("extras", index, "pax", v)} /></Col>
-            <Col md="2"><Field label="Pickup" value={row.pickup} options={withCurrentOption(routeOptions, row.pickup)} onChange={v => updateRow("extras", index, "pickup", v)} /></Col>
-            <Col md="2"><Field label="Drop Off" value={row.dropOff} options={withCurrentOption(routeOptions, row.dropOff)} onChange={v => updateRow("extras", index, "dropOff", v)} /></Col>
-            <Col md="2"><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} options={YES_NO_OPTIONS} onChange={v => updateRow("extras", index, "invoiceReceived", v)} /></Col>
+            <Col md="6" lg="4">{renderSpecialRatesField("extras", row, index)}</Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Itinerary" value={row.itinerary} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("extras", index, "itinerary", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Classification" value={row.classification} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("extras", index, "classification", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Date" type="date" value={row.date} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("extras", index, "date", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Day" value={row.day} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("extras", index, "day", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Time" type="time" value={row.time} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("extras", index, "time", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Status" value={row.status} readOnly={!hasSpecialRatesFile(row)} options={withCurrentOption(RESERVATION_STATUS_OPTIONS, row.status)} onChange={v => updateRow("extras", index, "status", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Pax" type="number" value={row.pax} readOnly={!hasSpecialRatesFile(row)} onChange={v => updateRow("extras", index, "pax", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Pickup" value={row.pickup} readOnly={!hasSpecialRatesFile(row)} options={withCurrentOption(routeOptions, row.pickup)} onChange={v => updateRow("extras", index, "pickup", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Drop Off" value={row.dropOff} readOnly={!hasSpecialRatesFile(row)} options={withCurrentOption(routeOptions, row.dropOff)} onChange={v => updateRow("extras", index, "dropOff", v)} /></Col>
+            <Col md="2" {...getSpecialRatesGuardProps("extras", row, index)}><Field label="Invoice Received" value={normalizeYesNoValue(row.invoiceReceived)} readOnly={!hasSpecialRatesFile(row)} options={YES_NO_OPTIONS} onChange={v => updateRow("extras", index, "invoiceReceived", v)} /></Col>
           </Row>
         </RowPanel>
       ))}
@@ -2548,7 +3851,7 @@ const ReservationFileDetails = () => {
   const renderInclusions = () => (
     <>
       <SectionHeader title="Inclusions" fileReference={referenceTitle}>
-        <Button color="primary" onClick={handleSave} disabled={saving}>Save Changes</Button>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
       </SectionHeader>
       <div className="table-responsive">
         <Table bordered className="align-middle bg-light">
@@ -2576,104 +3879,61 @@ const ReservationFileDetails = () => {
     </>
   );
 
-  const renderClients = () => {
-    const manifestRows = buildManifestDisplayRows(draft?.clients);
-
-    return (
+  const renderClients = () => (
     <>
-      <SectionHeader title="Clients" fileReference={referenceTitle} />
-      <div className="rounded border bg-light p-4 mb-3">
-        <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
-          <div>
-            <h5 className="mb-1">Manifest</h5>
-            <div className="text-muted">
-              Passport and identity details saved for this reservation.
+      <SectionHeader title="Clients" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
+
+      <Nav tabs className="mb-3">
+        <NavItem>
+          <NavLink
+            href="#"
+            className={
+              activeClientsTab === CLIENTS_INTERNAL_TABS.MANIFEST
+                ? "active"
+                : ""
+            }
+            onClick={event => {
+              event.preventDefault();
+              setActiveClientsTab(CLIENTS_INTERNAL_TABS.MANIFEST);
+            }}
+          >
+            Manifest
+          </NavLink>
+        </NavItem>
+        <NavItem>
+          <NavLink
+            href="#"
+            className={
+              activeClientsTab === CLIENTS_INTERNAL_TABS.ROOMING_LIST
+                ? "active"
+                : ""
+            }
+            onClick={event => {
+              event.preventDefault();
+              setActiveClientsTab(CLIENTS_INTERNAL_TABS.ROOMING_LIST);
+            }}
+          >
+            Rooming List
+          </NavLink>
+        </NavItem>
+      </Nav>
+
+      {activeClientsTab === CLIENTS_INTERNAL_TABS.MANIFEST ? (
+        <div className="rounded border bg-light p-3">
+          <div className="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+            <div>
+              <h5 className="mb-1">Manifest</h5>
+              <div className="text-muted">
+                Passport and identity details saved for this reservation.
+              </div>
             </div>
-          </div>
-          <div className="d-flex gap-2 align-items-center">
             <Badge color="info" pill>
               {asArray(draft?.clients).length} client{asArray(draft?.clients).length === 1 ? "" : "s"}
             </Badge>
-            <Button color="primary" onClick={() => setManifestOpen(true)}>
-              Open Manifest
-            </Button>
           </div>
-        </div>
-      </div>
-      {manifestRows.length ? (
-        <div className="rounded border bg-white overflow-hidden mb-3">
-          <div className="table-responsive">
-            <Table className="align-middle mb-0">
-              <thead className="table-light">
-                <tr>
-                  <th style={{ width: 56 }}>#</th>
-                  {manifestRows[0].fields.map(field => (
-                    <th key={field.field}>{field.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {manifestRows.map(row => (
-                  <tr key={row.key}>
-                    <td className="fw-semibold">{row.index + 1}</td>
-                    {row.fields.map(field => (
-                      <td
-                        key={field.field}
-                        className={
-                          field.field === "name" || field.field === "passportNo"
-                            ? "fw-semibold text-dark"
-                            : ""
-                        }
-                      >
-                        {field.value}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-        </div>
-      ) : (
-        <div className="rounded border bg-white p-4 text-muted mb-3">
-          No manifest information has been added yet.
-        </div>
-      )}
-      <Row className="g-3">
-        {manifestRows.map(row => (
-          <Col xl="4" md="6" key={`${row.key}-card`}>
-            <div className="rounded border bg-white p-3 h-100">
-              <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
-                <div>
-                  <div className="text-muted small">Client {row.index + 1}</div>
-                  <h5 className="mb-1">{row.name}</h5>
-                  <div className="text-muted small">
-                    Passport: {row.passportNo || "-"}
-                  </div>
-                </div>
-                <Badge color="secondary" pill>
-                  Manifest
-                </Badge>
-              </div>
-              <Row className="g-2">
-                {row.fields.map(field => (
-                  <Col xs="6" key={field.field}>
-                    <div className="border rounded p-2 h-100">
-                      <div className="text-muted small">{field.label}</div>
-                      <div className="fw-semibold text-break">{field.value}</div>
-                    </div>
-                  </Col>
-                ))}
-              </Row>
-            </div>
-          </Col>
-        ))}
-      </Row>
-      <Modal isOpen={manifestOpen} toggle={() => setManifestOpen(false)} size="xl" scrollable>
-        <ModalHeader toggle={() => setManifestOpen(false)}>
-          Manifest - Client Passport Information
-        </ModalHeader>
-        <ModalBody>
+
           <div className="table-responsive">
             <Table bordered className="align-middle bg-light">
               <thead>
@@ -2724,38 +3984,274 @@ const ReservationFileDetails = () => {
                     <td><Input value={text(row.placeOfBirth)} onChange={e => updateRow("clients", index, "placeOfBirth", e.target.value)} /></td>
                     <td><Input value={text(row.authority)} onChange={e => updateRow("clients", index, "authority", e.target.value)} /></td>
                     <td>
-                      <Button color="danger" size="sm" onClick={() => removeRow("clients", index)}>
-                        X
+                      <Button
+                        color="danger"
+                        size="sm"
+                        onClick={() => removeRow("clients", index)}
+                      >
+                        Remove
                       </Button>
                     </td>
                   </tr>
                 ))}
+                {!asArray(draft?.clients).length ? (
+                  <tr>
+                    <td colSpan="12" className="text-center text-muted py-4">
+                      No manifest clients have been added yet.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </Table>
           </div>
-        </ModalBody>
-        <ModalFooter className="justify-content-between">
-          <Button color="success" onClick={() => addRow("clients")}>
-            Add Another Client
-          </Button>
-          <div className="d-flex gap-2">
-            <Button color="light" className="border" onClick={() => setManifestOpen(false)}>
-              Close
+
+          <div className="d-flex justify-content-between flex-wrap gap-2 mt-3">
+            <Button color="success" onClick={() => addRow("clients")}>
+              Add Another Client
             </Button>
             <Button color="primary" onClick={handleSaveManifest} disabled={saving}>
               {saving ? <Spinner size="sm" className="me-2" /> : null}
               Save Manifest
             </Button>
           </div>
-        </ModalFooter>
-      </Modal>
+        </div>
+      ) : (
+        <div className="rounded border bg-light p-3">
+          <div className="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+            <div>
+              <h5 className="mb-1">Rooming List</h5>
+              <div className="text-muted">
+                Manage rooming details independently from Manifest passport data.
+              </div>
+            </div>
+            <Button color="success" onClick={() => addRow("roomingList")}>
+              Add Client / Add Row
+            </Button>
+          </div>
+
+          <div className="table-responsive">
+            <Table bordered className="align-middle bg-light">
+              <thead>
+                <tr>
+                  {[
+                    "Show",
+                    "Title",
+                    "Client Name",
+                    "Age",
+                    "Room",
+                    "R No.",
+                    "Meal",
+                    "Code 1",
+                    "Code 2",
+                    "Code 3",
+                    "Comments",
+                    "Is MN",
+                    "Remove",
+                  ].map(head => (
+                    <th key={head}>{head}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {asArray(draft?.roomingList).map((row, index) => {
+                  const isNonEmpty = !isRoomingRowEmpty(row);
+                  const missingName = isNonEmpty && !text(row.clientName);
+
+                  return (
+                    <tr key={row._sourceKey || index}>
+                      <td>
+                        <TableCheckbox
+                          checked={normalizeBoolean(row.show)}
+                          onChange={value =>
+                            updateRow("roomingList", index, "show", value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          type="select"
+                          value={text(row.title)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "title", e.target.value)
+                          }
+                        >
+                          <option value="">Select</option>
+                          {CLIENT_TITLE_OPTIONS.map(option => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Input>
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.clientName)}
+                          invalid={missingName}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "clientName",
+                              e.target.value
+                            )
+                          }
+                        />
+                        {missingName ? (
+                          <div className="text-danger small mt-1">
+                            Client Name is required.
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <Input
+                          type="select"
+                          value={text(row.ageCategory)}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "ageCategory",
+                              e.target.value
+                            )
+                          }
+                        >
+                          <option value="">Select</option>
+                          {ROOMING_AGE_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </Input>
+                      </td>
+                      <td>
+                        <Input
+                          type="select"
+                          value={text(row.roomType)}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "roomType",
+                              e.target.value
+                            )
+                          }
+                        >
+                          <option value="">Select</option>
+                          {ROOMING_ROOM_OPTIONS.map(option => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Input>
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.roomNo)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "roomNo", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.meal)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "meal", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.code1)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "code1", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.code2)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "code2", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          value={text(row.code3)}
+                          onChange={e =>
+                            updateRow("roomingList", index, "code3", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Input
+                          type="textarea"
+                          value={text(row.comments)}
+                          onChange={e =>
+                            updateRow(
+                              "roomingList",
+                              index,
+                              "comments",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <TableCheckbox
+                          checked={normalizeBoolean(row.isMN)}
+                          onChange={value =>
+                            updateRow("roomingList", index, "isMN", value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <Button
+                          color="danger"
+                          size="sm"
+                          onClick={() => removeRow("roomingList", index)}
+                        >
+                          Remove
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!asArray(draft?.roomingList).length ? (
+                  <tr>
+                    <td colSpan="13" className="text-center text-muted py-4">
+                      No rooming list rows have been added yet.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </Table>
+          </div>
+
+          <div className="d-flex justify-content-between flex-wrap gap-2 mt-3">
+            <Button color="success" onClick={() => addRow("roomingList")}>
+              Add Client / Add Row
+            </Button>
+            <Button
+              color="primary"
+              onClick={handleSaveRoomingList}
+              disabled={saving}
+            >
+              {saving ? <Spinner size="sm" className="me-2" /> : null}
+              Save Rooming List
+            </Button>
+          </div>
+        </div>
+      )}
     </>
-    );
-  };
+  );
 
   const renderAttach = () => (
     <>
-      <SectionHeader title="Attach" fileReference={referenceTitle} />
+      <SectionHeader title="Attach" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-3 mb-3">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
           <h5 className="mb-0">Updated/Attached Offers</h5>
@@ -2884,7 +4380,9 @@ const ReservationFileDetails = () => {
 
   const renderReminder = () => (
     <>
-      <SectionHeader title="Reminder" fileReference={referenceTitle} />
+      <SectionHeader title="Reminder" fileReference={referenceTitle}>
+        <SaveChangesButton onClick={handleSave} disabled={saving} />
+      </SectionHeader>
       <div className="rounded border bg-light p-4">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div className="text-muted">
@@ -2966,7 +4464,9 @@ const ReservationFileDetails = () => {
 
     return (
       <>
-        <SectionHeader title="Activity Log" fileReference={referenceTitle} />
+        <SectionHeader title="Activity Log" fileReference={referenceTitle}>
+          <SaveChangesButton onClick={handleSave} disabled={saving} />
+        </SectionHeader>
         <div className="rounded border bg-light p-3">
           <Row className="g-3 mb-3">
             <Col md="3">
@@ -3135,6 +4635,36 @@ const ReservationFileDetails = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <Modal isOpen={!!confirmDelete} toggle={closeDeleteConfirmation} centered>
+        <ModalHeader toggle={closeDeleteConfirmation}>Confirm Delete</ModalHeader>
+        <ModalBody>
+          <p className="mb-2">
+            {confirmDelete?.message ||
+              "Are you sure you want to delete this item?"}
+          </p>
+          <p className="text-muted mb-0">This action cannot be undone.</p>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            color="light"
+            className="border"
+            onClick={closeDeleteConfirmation}
+            disabled={confirmDeleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="danger"
+            onClick={handleConfirmDelete}
+            disabled={confirmDeleting}
+          >
+            {confirmDeleting ? <Spinner size="sm" className="me-2" /> : null}
+            Confirm Delete
+          </Button>
+        </ModalFooter>
+      </Modal>
+
       <div className="page-content">
         <Container fluid>
           <Breadcrumbs title="Reservations File" breadcrumbItem="Details" />
@@ -3162,7 +4692,11 @@ const ReservationFileDetails = () => {
                   Approve
                 </Button>
               ) : null}
-              <Button color="success" onClick={handleSave} disabled={saving || loading || !draft}>
+              <Button
+                color="success"
+                onClick={() => handleSave({ fullReservation: true })}
+                disabled={saving || loading || !draft}
+              >
                 {saving ? <Spinner size="sm" className="me-2" /> : null}
                 Save Full Reservation
               </Button>
