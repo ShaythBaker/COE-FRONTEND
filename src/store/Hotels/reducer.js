@@ -14,6 +14,7 @@ const initialState = {
     HOTELSTARS: [],
     HOTELCHAINS: [],
     HOTELSEASONS: [],
+    ROOM_TYPES: [],
   },
 
   seasonRatesLoading: false,

@@ -36,7 +36,8 @@ function extractErrorMessage(error, fallback = "Request failed") {
 function* onFetchListItems({ payload }) {
   try {
     const listKey = payload?.listKey;
-    const res = yield call(getListItems, listKey);
+    const options = payload?.options || {};
+    const res = yield call(getListItems, listKey, options);
 
     // Backend may return {data:[...]} or [...]. Normalize to array.
     const items = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];

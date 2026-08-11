@@ -40,10 +40,16 @@ const ALLOWED_LIST_KEYS = [
   "RESTAURANTS_MEALS",
   "GUIDE_TYPE",
   "QUOTATION_TYPE",
+  "ROOMS",
+  "ROOM_TYPES",
+  "ENTRIES",
 ];
 
 const LIST_LABELS = {
   GUIDE_TYPE: "Guide",
+  ROOMS: "Room",
+  ROOM_TYPES: "Room Type",
+  ENTRIES: "Entry",
 };
 
 const DynamicListsPage = ({
@@ -184,7 +190,7 @@ const DynamicListsPage = ({
 
   // Fetch on load and when list key changes
   useEffect(() => {
-    dispatch(fetchListItems(listKey));
+    dispatch(fetchListItems(listKey, { includeInactive: true }));
   }, [dispatch, listKey]);
 
   // After create/update/delete success -> close modals and refetch
@@ -196,7 +202,7 @@ const DynamicListsPage = ({
     if (isDeleteOpen) closeDelete();
 
     // Refresh list
-    dispatch(fetchListItems(listKey));
+    dispatch(fetchListItems(listKey, { includeInactive: true }));
 
     // Reset flags so this effect doesn't re-trigger
     dispatch(resetListItemsFlags());

@@ -104,14 +104,15 @@ function* onDeleteHotel({ payload }) {
   }
 }
 
-// Lookups (CITIES, HOTELSTARS, HOTELCHAINS, HOTELSEASONS)
+// Lookups (CITIES, HOTELSTARS, HOTELCHAINS, HOTELSEASONS, ROOM_TYPES)
 function* onFetchLookups() {
   try {
-    const [cities, stars, chains, seasons] = yield all([
+    const [cities, stars, chains, seasons, roomTypes] = yield all([
       call(getListItems, "CITIES"),
       call(getListItems, "HOTELSTARS"),
       call(getListItems, "HOTELCHAINS"),
       call(getListItems, "HOTELSEASONS"),
+      call(getListItems, "ROOM_TYPES"),
     ]);
 
     yield put(
@@ -120,6 +121,7 @@ function* onFetchLookups() {
         HOTELSTARS: Array.isArray(stars) ? stars : [],
         HOTELCHAINS: Array.isArray(chains) ? chains : [],
         HOTELSEASONS: Array.isArray(seasons) ? seasons : [],
+        ROOM_TYPES: Array.isArray(roomTypes) ? roomTypes : [],
       })
     );
   } catch (e) {
