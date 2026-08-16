@@ -1,5 +1,5 @@
 // path: src/pages/Hotels/HotelDetails.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -17,6 +17,9 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  Nav,
+  NavItem,
+  NavLink,
   Row,
   Spinner,
   Table,
@@ -30,6 +33,7 @@ import {
 } from "../../components/Common/PublishedReviews";
 import { hasAnyRole } from "../../helpers/coe_roles";
 import { notifyError } from "../../helpers/notify";
+import SpecialRatesTab from "./SpecialRatesTab";
 
 import {
   fetchHotel,
@@ -59,6 +63,7 @@ const RATE_SERIES_META = [
 
 const emptyRate = {
   SEASON_NAME: "",
+  ROOM_TYPE_ID: "",
   BB_RATE_AMOUNT: "",
   HB_RATE_AMOUNT: "",
   FB_RATE_AMOUNT: "",
@@ -66,6 +71,8 @@ const emptyRate = {
   START_DATE: "",
   END_DATE: "",
 };
+
+const idOf = (value) => String(value?._id || value || "");
 
 const toRateNumber = (value) => {
   const parsed = Number(value);
@@ -113,7 +120,10 @@ const HotelDetails = () => {
 
   const roles = useSelector((s) => s.Login?.roles || []);
   const canMutate = hasAnyRole(roles, ALLOWED_ROLES);
-  const rates = seasonRatesByHotel[id] || [];
+  const rates = useMemo(
+    () => seasonRatesByHotel[id] || [],
+    [id, seasonRatesByHotel]
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -124,6 +134,7 @@ const HotelDetails = () => {
   const [deleting, setDeleting] = useState(null);
   const [touched, setTouched] = useState({});
   const [rateChartView, setRateChartView] = useState("all");
+  const [activeRatesTab, setActiveRatesTab] = useState("season");
 
   useEffect(() => {
     dispatch(fetchHotelsLookups());
@@ -149,6 +160,15 @@ const HotelDetails = () => {
     return map;
   }, [lookups?.HOTELSEASONS]);
 
+  const roomTypeMap = useMemo(() => {
+    const map = new Map();
+    (lookups?.ROOM_TYPES || []).forEach((x) => map.set(String(x._id), x.ITEM_VALUE));
+    return map;
+  }, [lookups?.ROOM_TYPES]);
+
+  const roomTypeLabel = (value) =>
+    value?.ITEM_VALUE || roomTypeMap.get(idOf(value)) || "Legacy (not assigned)";
+
   const normalizedRates = useMemo(
     () =>
       [...rates]
@@ -158,7 +178,8 @@ const HotelDetails = () => {
 
           return {
             ...rate,
-            seasonLabel: seasonMap.get(rate?.SEASON_NAME) || rate?.SEASON_NAME || "Season",
+            seasonLabel:
+              seasonMap.get(idOf(rate?.SEASON_NAME)) || rate?.SEASON_NAME || "Season",
             startDate,
             endDate,
             amounts: {
@@ -393,6 +414,7 @@ const HotelDetails = () => {
     const e = {};
 
     if (!data.SEASON_NAME) e.SEASON_NAME = "Required";
+    if (!data.ROOM_TYPE_ID) e.ROOM_TYPE_ID = "Required";
     if (!data.START_DATE) e.START_DATE = "Required";
     if (!data.END_DATE) e.END_DATE = "Required";
 
@@ -431,7 +453,8 @@ const HotelDetails = () => {
     setTouched({});
     setEditing(r);
     setForm({
-      SEASON_NAME: r?.SEASON_NAME || "",
+      SEASON_NAME: idOf(r?.SEASON_NAME),
+      ROOM_TYPE_ID: idOf(r?.ROOM_TYPE_ID),
       BB_RATE_AMOUNT: r?.BB_RATE_AMOUNT ?? "",
       HB_RATE_AMOUNT: r?.HB_RATE_AMOUNT ?? "",
       FB_RATE_AMOUNT: r?.FB_RATE_AMOUNT ?? "",
@@ -456,6 +479,7 @@ const HotelDetails = () => {
 
     setTouched({
       SEASON_NAME: true,
+      ROOM_TYPE_ID: true,
       START_DATE: true,
       END_DATE: true,
     });
@@ -478,6 +502,7 @@ const HotelDetails = () => {
 
     setTouched({
       SEASON_NAME: true,
+      ROOM_TYPE_ID: true,
       START_DATE: true,
       END_DATE: true,
     });
@@ -591,6 +616,32 @@ const HotelDetails = () => {
                 reviewState={publishedReviews}
               />
 
+              <Nav tabs className="mb-3">
+                <NavItem>
+                  <NavLink
+                    data-testid="season-rates-tab"
+                    tag="button"
+                    type="button"
+                    active={activeRatesTab === "season"}
+                    onClick={() => setActiveRatesTab("season")}
+                  >
+                    Season Rates
+                  </NavLink>
+                </NavItem>
+                <NavItem>
+                  <NavLink
+                    data-testid="special-rates-tab"
+                    tag="button"
+                    type="button"
+                    active={activeRatesTab === "special"}
+                    onClick={() => setActiveRatesTab("special")}
+                  >
+                    Special Rates
+                  </NavLink>
+                </NavItem>
+              </Nav>
+
+              {activeRatesTab === "season" ? (
               <Card>
                 <CardBody>
                   <Row className="mb-3">
@@ -604,7 +655,7 @@ const HotelDetails = () => {
                         disabled={!canMutate}
                       >
                         <i className="bx bx-plus me-1" />
-                        Add Rate
+                        Create Season Rate
                       </Button>
                     </Col>
                   </Row>
@@ -733,6 +784,7 @@ const HotelDetails = () => {
                         <thead className="table-light">
                           <tr>
                             <th>Season</th>
+                            <th>Room Type</th>
                             <th>Start</th>
                             <th>End</th>
                             <th>BB</th>
@@ -745,7 +797,8 @@ const HotelDetails = () => {
                         <tbody>
                           {rates.map((r) => (
                             <tr key={r._id}>
-                              <td>{seasonMap.get(r.SEASON_NAME) || "-"}</td>
+                              <td>{seasonMap.get(idOf(r.SEASON_NAME)) || "-"}</td>
+                              <td>{roomTypeLabel(r.ROOM_TYPE_ID)}</td>
                               <td>{String(r.START_DATE || "").slice(0, 10)}</td>
                               <td>{String(r.END_DATE || "").slice(0, 10)}</td>
                               <td>{r.BB_RATE_AMOUNT ?? "-"}</td>
@@ -781,10 +834,17 @@ const HotelDetails = () => {
                   )}
                 </CardBody>
               </Card>
+              ) : (
+                <SpecialRatesTab
+                  hotelId={id}
+                  canMutate={canMutate}
+                />
+              )}
             </>
           )}
 
           <Modal
+            data-testid="create-season-rate-modal"
             isOpen={createOpen}
             toggle={() => setCreateOpen((v) => !v)}
             size="lg"
@@ -814,6 +874,27 @@ const HotelDetails = () => {
                       ))}
                     </Input>
                     <FormFeedback>{errors.SEASON_NAME}</FormFeedback>
+                  </Col>
+
+                  <Col md={6} className="mb-3">
+                    <Label>Room Type *</Label>
+                    <Input
+                      type="select"
+                      value={form.ROOM_TYPE_ID}
+                      onChange={(e) => onChange("ROOM_TYPE_ID", e.target.value)}
+                      onBlur={() =>
+                        setTouched((t) => ({ ...t, ROOM_TYPE_ID: true }))
+                      }
+                      invalid={!!(touched.ROOM_TYPE_ID && errors.ROOM_TYPE_ID)}
+                    >
+                      <option value="">Select...</option>
+                      {(lookups.ROOM_TYPES || []).map((x) => (
+                        <option key={x._id} value={x._id}>
+                          {x.ITEM_VALUE}
+                        </option>
+                      ))}
+                    </Input>
+                    <FormFeedback>{errors.ROOM_TYPE_ID}</FormFeedback>
                   </Col>
 
                   <Col md={3} className="mb-3">
@@ -926,6 +1007,27 @@ const HotelDetails = () => {
                       ))}
                     </Input>
                     <FormFeedback>{errors.SEASON_NAME}</FormFeedback>
+                  </Col>
+
+                  <Col md={6} className="mb-3">
+                    <Label>Room Type *</Label>
+                    <Input
+                      type="select"
+                      value={form.ROOM_TYPE_ID}
+                      onChange={(e) => onChange("ROOM_TYPE_ID", e.target.value)}
+                      onBlur={() =>
+                        setTouched((t) => ({ ...t, ROOM_TYPE_ID: true }))
+                      }
+                      invalid={!!(touched.ROOM_TYPE_ID && errors.ROOM_TYPE_ID)}
+                    >
+                      <option value="">Select...</option>
+                      {(lookups.ROOM_TYPES || []).map((x) => (
+                        <option key={x._id} value={x._id}>
+                          {x.ITEM_VALUE}
+                        </option>
+                      ))}
+                    </Input>
+                    <FormFeedback>{errors.ROOM_TYPE_ID}</FormFeedback>
                   </Col>
 
                   <Col md={3} className="mb-3">

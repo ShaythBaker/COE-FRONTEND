@@ -57,8 +57,11 @@ export const getAnalyticsOverview = (filters = {}) => {
 // COE Modules List Items
 // =====================
 
-export const getListItems = (listKey) =>
-  get(`${LIST_ITEMS}?LIST_KEY=${encodeURIComponent(listKey)}`);
+export const getListItems = (listKey, options = {}) => {
+  const params = new URLSearchParams({ LIST_KEY: listKey });
+  if (options.includeInactive) params.set("includeInactive", "true");
+  return get(`${LIST_ITEMS}?${params.toString()}`);
+};
 
 export const createListItem = (payload) => post(LIST_ITEMS, payload);
 

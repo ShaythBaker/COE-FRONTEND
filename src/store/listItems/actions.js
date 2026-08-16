@@ -15,9 +15,9 @@ import {
   RESET_LIST_ITEMS_FLAGS,
 } from "./actionTypes";
 
-export const fetchListItems = (listKey) => ({
+export const fetchListItems = (listKey, options = {}) => ({
   type: FETCH_LIST_ITEMS,
-  payload: { listKey },
+  payload: { listKey, options },
 });
 
 export const fetchListItemsSuccess = (items) => ({

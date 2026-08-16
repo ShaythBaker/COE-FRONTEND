@@ -407,6 +407,8 @@ const buildStayFromHotel = (hotel, cityGroup, option, findMatchingSeasonsFn) => 
         ? matchedSeasons.map(item => getSeasonLabel(item)).join(" • ")
         : "",
     SEASONS: matchedSeasons,
+    ROOM_ID: "",
+    ROOM_TYPE_ID: "",
     NIGHTS: "1",
     OVERNIGHT_DATE: cityGroup?.OVERNIGHT_DATE || "",
   };
@@ -510,6 +512,8 @@ const mapSavedToOptions = (savedOptions = [], overnightCities = []) => {
           SEASON_ID: asId(stay?.SEASON_ID),
           SEASON_NAME: stay?.SEASON_NAME || "",
           SEASONS: asArray(stay?.SEASONS),
+          ROOM_ID: asId(stay?.ROOM_ID),
+          ROOM_TYPE_ID: asId(stay?.ROOM_TYPE_ID),
           NIGHTS: String(stay?.NIGHTS ?? ""),
           OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || group?.OVERNIGHT_DATE || "",
         })),
@@ -547,6 +551,8 @@ const mapSavedToOptions = (savedOptions = [], overnightCities = []) => {
           SEASON_ID: asId(stay?.SEASON_ID),
           SEASON_NAME: stay?.SEASON_NAME || "",
           SEASONS: asArray(stay?.SEASONS),
+          ROOM_ID: asId(stay?.ROOM_ID),
+          ROOM_TYPE_ID: asId(stay?.ROOM_TYPE_ID),
           NIGHTS: String(stay?.NIGHTS ?? ""),
           OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || existing.OVERNIGHT_DATE || "",
         },
@@ -582,7 +588,7 @@ const Accommodation = () => {
   const hydratedRef = useRef(false);
 
   const [removeOptionConfirmId, setRemoveOptionConfirmId] = useState("");
-  const [lookupLoading, setLookupLoading] = useState(false);
+  const [, setLookupLoading] = useState(false);
   const [overnightsLoading, setOvernightsLoading] = useState(false);
   const [overnightsLoaded, setOvernightsLoaded] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -596,9 +602,11 @@ const Accommodation = () => {
     HOTELSTARS: [],
     CITIES: [],
     HOTELCHAINS: [],
+    ROOMS: [],
+    ROOM_TYPES: [],
   });
 
-  const [filters, setFilters] = useState({
+  const [filters] = useState({
     HOTEL_STARS: "",
     HOTEL_CITY: "",
     HOTEL_CHAIN: "",
@@ -606,10 +614,10 @@ const Accommodation = () => {
 
   const [searchResults, setSearchResults] = useState([]);
   const [rawOvernightResponse, setRawOvernightResponse] = useState(null);
-  const [searched, setSearched] = useState(false);
+  const [, setSearched] = useState(false);
   const [overnightCities, setOvernightCities] = useState([]);
   const [options, setOptions] = useState([]);
-  const [overnightResponse, setOvernightResponse] = useState(null);
+  const [, setOvernightResponse] = useState(null);
 
   const quotation = useSelector(state => state.Quotations?.selected || null);
   const quotationLoading = useSelector(state => state.Quotations?.loading);
@@ -702,10 +710,12 @@ const Accommodation = () => {
       setLookupLoading(true);
 
       try {
-        const [stars, cities, chains] = await Promise.all([
+        const [stars, cities, chains, rooms, roomTypes] = await Promise.all([
           fetchListItems("HOTELSTARS"),
           fetchListItems("CITIES"),
           fetchListItems("HOTELCHAINS"),
+          fetchListItems("ROOMS"),
+          fetchListItems("ROOM_TYPES"),
         ]);
 
         if (ignore) return;
@@ -714,6 +724,8 @@ const Accommodation = () => {
           HOTELSTARS: asArray(stars),
           CITIES: asArray(cities),
           HOTELCHAINS: asArray(chains),
+          ROOMS: asArray(rooms),
+          ROOM_TYPES: asArray(roomTypes),
         });
       } catch (error) {
         if (!ignore) {
@@ -867,14 +879,6 @@ const Accommodation = () => {
 
       return doDateRangesOverlap(startDate, endDate, from, to);
     });
-  };
-
-  const handleFilterChange = e => {
-    const { name, value } = e.target;
-    setFilters(prev => ({
-      ...prev,
-      [name]: value,
-    }));
   };
 
   const handleSearch = async (silent = false) => {
@@ -1209,6 +1213,12 @@ const Accommodation = () => {
           if (!asId(stay?.HOTEL_ID)) {
             rowError.HOTEL_ID = "Hotel is required.";
           }
+          if (!asId(stay?.ROOM_ID)) {
+            rowError.ROOM_ID = "Room is required.";
+          }
+          if (!asId(stay?.ROOM_TYPE_ID)) {
+            rowError.ROOM_TYPE_ID = "Room Type is required.";
+          }
           if (toNumber(stay?.NIGHTS) < 1) {
             rowError.NIGHTS = "Minimum 1 night is required.";
           }
@@ -1271,6 +1281,8 @@ const Accommodation = () => {
                 ? matchedSeasons.map(item => getSeasonLabel(item)).join(" â€¢ ")
                 : stay?.SEASON_NAME || "",
             SEASONS: matchedSeasons,
+            ROOM_ID: asId(stay?.ROOM_ID),
+            ROOM_TYPE_ID: asId(stay?.ROOM_TYPE_ID),
             NIGHTS: toNumber(stay?.NIGHTS),
             OVERNIGHT_DATE: stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "",
           };
@@ -1812,6 +1824,59 @@ const Accommodation = () => {
                                                                 </div>
                                                               ) : null}
                                                             </div>
+
+                                                            <Row className="g-2 mb-3">
+                                                              <Col md="6">
+                                                                <Label className="form-label mb-1">Room *</Label>
+                                                                <Input
+                                                                  type="select"
+                                                                  value={stay?.ROOM_ID || ""}
+                                                                  invalid={!!rowErrors?.ROOM_ID}
+                                                                  onChange={e =>
+                                                                    handleStayChange(
+                                                                      option.localId,
+                                                                      cityGroup.CITY_ID,
+                                                                      stayIndex,
+                                                                      "ROOM_ID",
+                                                                      e.target.value
+                                                                    )
+                                                                  }
+                                                                  disabled={readOnly}
+                                                                >
+                                                                  <option value="">Select...</option>
+                                                                  {lookups.ROOMS.map(item => (
+                                                                    <option key={item._id} value={item._id}>
+                                                                      {item.ITEM_KEY ? `${item.ITEM_KEY} - ` : ""}{item.ITEM_VALUE}
+                                                                    </option>
+                                                                  ))}
+                                                                </Input>
+                                                                <FormFeedback>{rowErrors?.ROOM_ID}</FormFeedback>
+                                                              </Col>
+                                                              <Col md="6">
+                                                                <Label className="form-label mb-1">Room Type *</Label>
+                                                                <Input
+                                                                  type="select"
+                                                                  value={stay?.ROOM_TYPE_ID || ""}
+                                                                  invalid={!!rowErrors?.ROOM_TYPE_ID}
+                                                                  onChange={e =>
+                                                                    handleStayChange(
+                                                                      option.localId,
+                                                                      cityGroup.CITY_ID,
+                                                                      stayIndex,
+                                                                      "ROOM_TYPE_ID",
+                                                                      e.target.value
+                                                                    )
+                                                                  }
+                                                                  disabled={readOnly}
+                                                                >
+                                                                  <option value="">Select...</option>
+                                                                  {lookups.ROOM_TYPES.map(item => (
+                                                                    <option key={item._id} value={item._id}>{item.ITEM_VALUE}</option>
+                                                                  ))}
+                                                                </Input>
+                                                                <FormFeedback>{rowErrors?.ROOM_TYPE_ID}</FormFeedback>
+                                                              </Col>
+                                                            </Row>
 
                                                             <div className="mb-3">
                                                               <Label className="form-label mb-1">Nights</Label>

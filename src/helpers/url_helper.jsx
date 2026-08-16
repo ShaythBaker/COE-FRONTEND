@@ -131,6 +131,10 @@ export const HOTEL_SEASON_RATES = hotelId =>
   `/hotels/${hotelId}/season-rates`;
 export const HOTEL_SEASON_RATE_BY_ID = (hotelId, rateId) =>
   `/hotels/${hotelId}/season-rates/${rateId}`;
+export const HOTEL_SPECIAL_RATES = hotelId =>
+  `/hotels/${hotelId}/special-rates`;
+export const HOTEL_SPECIAL_RATE_BY_ID = (hotelId, rateId) =>
+  `/hotels/${hotelId}/special-rates/${rateId}`;
 
 // =====================
 // Restaurants
