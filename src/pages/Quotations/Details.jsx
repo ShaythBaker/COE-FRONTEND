@@ -294,6 +294,41 @@ const getDirectAmount = candidates => {
   return 0;
 };
 
+const getObjectId = value => {
+  const unwrapped = unwrapId(value);
+  if (unwrapped) return unwrapped;
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object") return String(value);
+
+  const text = typeof value.toString === "function" ? value.toString() : "";
+  return text && text !== "[object Object]" ? text : "";
+};
+
+const getSeasonId = season =>
+  getObjectId(
+    season?._id ||
+      season?.SEASON_ID ||
+      season?.id ||
+      season?.HOTEL_SEASON_ID ||
+      season?.HOTEL_SEASON
+  );
+
+const getStaySeasonEntries = stay => {
+  const savedSeasons = asArray(stay?.SEASONS);
+  const explicitSeasonRates = stay?.SEASON_RATES ? [stay.SEASON_RATES] : [];
+  const mergedSeasons = [...savedSeasons, ...explicitSeasonRates];
+  const selectedSeasonId = getObjectId(stay?.SEASON_ID || stay?.SEASON || stay?.SEASON_REF);
+
+  if (selectedSeasonId) {
+    const selectedSeasons = mergedSeasons.filter(
+      season => getSeasonId(season) === selectedSeasonId
+    );
+    if (selectedSeasons.length) return selectedSeasons;
+  }
+
+  return mergedSeasons.length ? mergedSeasons : [stay?.SEASON_RATES || stay || {}];
+};
+
 const getHotelRate = (row, boardBasis = "BB", pax = 0) => {
   const board = String(boardBasis || "BB").toUpperCase();
   const bb = getDirectAmount([
@@ -348,9 +383,7 @@ const getOptionHotelRows = (option, boardBasis, pax) => {
 
   cityGroups.forEach(cityGroup => {
     asArray(cityGroup?.STAYS).forEach(stay => {
-      const seasons = asArray(stay?.SEASONS).length
-        ? asArray(stay.SEASONS)
-        : [stay?.SEASON_RATES || stay || {}];
+      const seasons = getStaySeasonEntries(stay);
 
       seasons.forEach((season, seasonIndex) => {
         const nights = toNumber(
@@ -425,6 +458,9 @@ const getOptionHotelRows = (option, boardBasis, pax) => {
             season?.ss,
           ]),
           rate,
+          perPerson: rate,
+          stayPerPerson: rate * nights,
+          costStayPerPerson: rate * nights,
           total: rate * nights,
         });
       });
@@ -869,20 +905,23 @@ const FinalOptionPriceSummary = ({ option }) => {
   );
 };
 
-const getAccommodationOptionHotelRows = option =>
-  asArray(option?.cityGroups).flatMap(cityGroup =>
-    asArray(cityGroup?.stays).map(stay => ({
-      cityName: cityGroup?.cityName || stay?.HOTEL_CITY_VALUE || "-",
-      hotelName: stay?.HOTEL_NAME || "-",
-      hotelStars: stay?.HOTEL_STARS || option?.selectedStars || "",
-      seasonName: stay?.SEASON_NAME || "-",
-      seasonStartDate: stay?.FROM_DATE || stay?.START_DATE || "",
-      seasonEndDate: stay?.TO_DATE || stay?.END_DATE || "",
-      nights: toNumber(stay?.NIGHTS || cityGroup?.totalNights) || 1,
-      rateAfterProfit: 0,
-      afterProfit: 0,
-    }))
-  );
+const getAccommodationOptionHotelRows = (option, boardBasis = "BB", pax = 0) => {
+  const normalizedOption = {
+    SELECTED_HOTEL_STARS: option?.selectedStars || "",
+    CITY_GROUPS: asArray(option?.cityGroups).map(cityGroup => ({
+      CITY_NAME: cityGroup?.cityName || "-",
+      OVERNIGHT_DATE: cityGroup?.overnightDate || "",
+      TOTAL_NIGHTS: cityGroup?.totalNights || 0,
+      STAYS: asArray(cityGroup?.stays),
+    })),
+  };
+
+  return getOptionHotelRows(normalizedOption, boardBasis, pax).map(row => ({
+    ...row,
+    rateAfterProfit: row.rate,
+    afterProfit: row.total,
+  }));
+};
 
 const FinalSeasonSummaryTable = ({ rows }) => {
   if (!rows?.length) return null;
@@ -1350,6 +1389,13 @@ const QuotationsDetails = () => {
             toNumber(option?.pax || option?.paxMax || option?.PAX_MAX) ||
             selected?.NUMBER_OF_PAX ||
             1;
+          const boardBasis = String(
+            finalPricing?.BOARD_BASIS || option?.boardBasis || "BB"
+          ).toUpperCase();
+          const profitType = String(
+            option?.profitType || finalPricing?.PROFIT_TYPE || "PERCENT"
+          ).toUpperCase();
+          const profitValue = toNumber(option?.profitValue ?? finalPricing?.PROFIT_VALUE);
           const sharedRows = [
             { name: "Transportation", amount: option?.transportation },
             { name: "Meals", amount: option?.meals },
@@ -1363,13 +1409,6 @@ const QuotationsDetails = () => {
             amount: toNumber(row?.pricePerPerson ?? row?.amount),
           }));
 
-          const detailRows = [
-            { name: "Accommodation", amount: toNumber(option?.hotelsPerPerson) },
-            ...(otherRows.length ? otherRows : sharedRows),
-          ]
-            .filter(row => toNumber(row.amount) > 0)
-            .map(row => ({ ...row, afterProfit: toNumber(row.amount) }));
-
           const sourceHotelRows = asArray(option?.rows);
           const fallbackAccommodationOption = accommodationOptions.find(
             (item, itemIndex) =>
@@ -1378,7 +1417,9 @@ const QuotationsDetails = () => {
                 String(option?.optionName || "").trim()
           );
           const fallbackAccommodationRows = getAccommodationOptionHotelRows(
-            fallbackAccommodationOption
+            fallbackAccommodationOption,
+            boardBasis,
+            paxForOption
           );
           const hasSourceHotelRows = sourceHotelRows.some(
             row => toNumber(row?.costNights ?? row?.nights) > 0
@@ -1413,17 +1454,24 @@ const QuotationsDetails = () => {
               row?.DATE_TO ||
               "",
             nights: toNumber(row?.costNights ?? row?.nights) || 1,
-            rateAfterProfit: toNumber(row?.perPerson ?? row?.rate),
+            rateAfterProfit: toNumber(row?.rateAfterProfit ?? row?.perPerson ?? row?.rate),
             afterProfit: toNumber(
-              row?.costStayPerPerson ?? row?.stayPerPerson ?? row?.total
+              row?.afterProfit ??
+                row?.costStayPerPerson ??
+                row?.stayPerPerson ??
+                row?.total
             ),
           }));
 
-          const hotelsPerPerson = toNumber(option?.hotelsPerPerson);
+          const recoveredHotelsPerPerson = hotelRows.reduce(
+            (sum, row) => sum + toNumber(row.afterProfit),
+            0
+          );
+          const hotelsPerPerson =
+            toNumber(option?.hotelsPerPerson) || recoveredHotelsPerPerson;
           const sharedPerPerson = toNumber(
             option?.sharedPerPersonTotal ?? option?.sharedPerPerson
           );
-          const finalPerPerson = toNumber(option?.finalTotal ?? option?.finalPerPerson);
           const hotelsDisplayPrice =
             toNumber(option?.hotelsDisplayPrice ?? option?.hotelsPerPerson) ||
             hotelsPerPerson;
@@ -1438,10 +1486,19 @@ const QuotationsDetails = () => {
             hotelsDisplayPrice + sharedDisplayPrice;
           const profitPerPerson =
             toNumber(option?.profitPerPerson) ||
-            Math.max(0, finalPerPerson - basePerPerson);
+            (profitType === "PERCENT"
+              ? basePerPerson * (profitValue / 100)
+              : profitValue);
+          const finalPerPerson = basePerPerson + profitPerPerson;
           const priceFactor = basePerPerson > 0 ? finalPerPerson / basePerPerson : 1;
           const finalHotelsDisplayPrice = hotelsPerPerson * priceFactor;
           const finalSharedDisplayPrice = sharedPerPerson * priceFactor;
+          const detailRows = [
+            { name: "Accommodation", amount: hotelsPerPerson },
+            ...(otherRows.length ? otherRows : sharedRows),
+          ]
+            .filter(row => toNumber(row.amount) > 0)
+            .map(row => ({ ...row, afterProfit: toNumber(row.amount) }));
           const detailRowsAfterAdjustment = detailRows.map(row => ({
             ...row,
             afterProfit: toNumber(row.afterProfit) * priceFactor,
@@ -1452,8 +1509,8 @@ const QuotationsDetails = () => {
             afterProfit: toNumber(row.afterProfit) * priceFactor,
           }));
           const seasonSummaryRows = buildSeasonSummaryRows(
-            option?.rows,
-            finalPricing?.BOARD_BASIS || option?.boardBasis || "BB",
+            hasSourceHotelRows ? option?.rows : hotelRowsSource,
+            boardBasis,
             paxForOption
           );
           const supplementTotals = normalizeOptionSupplementTotals(
@@ -1475,13 +1532,9 @@ const QuotationsDetails = () => {
               option?.selectedStars ||
               option?.hotelStars ||
               "",
-            boardBasis: String(
-              finalPricing?.BOARD_BASIS || option?.boardBasis || "BB"
-            ).toUpperCase(),
-            profitType: String(
-              option?.profitType || finalPricing?.PROFIT_TYPE || "PERCENT"
-            ).toUpperCase(),
-            profitValue: toNumber(option?.profitValue ?? finalPricing?.PROFIT_VALUE),
+            boardBasis,
+            profitType,
+            profitValue,
             paxLabel,
             paxMin: toNumber(option?.paxMin || option?.PAX_MIN),
             paxMax: toNumber(option?.paxMax || option?.PAX_MAX),

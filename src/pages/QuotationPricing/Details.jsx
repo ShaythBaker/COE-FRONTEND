@@ -345,6 +345,15 @@ const getSeasonKey = season =>
     getDateKey(getDateValue(season?.TO_DATE, season?.END_DATE, season?.DATE_TO)),
   ].join("|");
 
+const getSeasonId = season =>
+  getId(
+    season?._id ||
+      season?.SEASON_ID ||
+      season?.id ||
+      season?.HOTEL_SEASON_ID ||
+      season?.HOTEL_SEASON
+  );
+
 const mergeSeasons = (...seasonLists) => {
   const map = new Map();
 
@@ -1043,6 +1052,7 @@ const QuotationPricingDetails = () => {
           const stayStartDate = stay?.OVERNIGHT_DATE || cityGroup?.OVERNIGHT_DATE || "";
           const hotelId = getId(stay?.HOTEL_ID || stay?.HOTEL || stay?.HOTEL_REF);
           const financeSeasonEntries = Array.isArray(stay?.SEASONS) ? stay.SEASONS : [];
+          const explicitSeasonRates = stay?.SEASON_RATES ? [stay.SEASON_RATES] : [];
           const savedSeasonEntries = findSavedSeasons(option, cityGroup, stay);
           const directHotelSeasonEntries = Array.isArray(hotelSeasonRatesById[hotelId])
             ? hotelSeasonRatesById[hotelId]
@@ -1050,9 +1060,19 @@ const QuotationPricingDetails = () => {
           const mergedSeasonEntries = mergeSeasons(
             directHotelSeasonEntries,
             savedSeasonEntries,
-            financeSeasonEntries
+            financeSeasonEntries,
+            explicitSeasonRates
           );
-          const matchingSeasonEntries = mergedSeasonEntries.filter(season => {
+          const selectedSeasonId = getId(stay?.SEASON_ID || stay?.SEASON || stay?.SEASON_REF);
+          const selectedSeasonEntries = selectedSeasonId
+            ? mergedSeasonEntries.filter(season => getSeasonId(season) === selectedSeasonId)
+            : [];
+          const candidateSeasonEntries = selectedSeasonEntries.length
+            ? selectedSeasonEntries
+            : mergedSeasonEntries;
+          const shouldSplitByDate =
+            selectedSeasonEntries.length === 0 && mergedSeasonEntries.length > 1;
+          const matchingSeasonEntries = candidateSeasonEntries.filter(season => {
             if (!stayStartDate || !nights) return true;
 
             const seasonRates = {
@@ -1088,6 +1108,8 @@ const QuotationPricingDetails = () => {
           const seasonEntries =
             matchingSeasonEntries.length > 0
               ? matchingSeasonEntries
+              : selectedSeasonEntries.length > 0
+                ? selectedSeasonEntries
               : mergedSeasonEntries.length > 0
                 ? []
                 : [stay?.SEASON_RATES || {}];
@@ -1118,19 +1140,19 @@ const QuotationPricingDetails = () => {
               stay?.DATE_TO
             );
             const seasonNights =
-              mergedSeasonEntries.length > 1
+              shouldSplitByDate
                 ? getOverlapNights(stayStartDate, nights, seasonStartDate, seasonEndDate)
                 : nights;
 
             const costNights = seasonNights > 0 ? seasonNights : 0;
             const displayNights =
-              mergedSeasonEntries.length > 1
+              shouldSplitByDate
                 ? costNights
                 : seasonNights > 0
                   ? seasonNights
                   : nights;
 
-            if (mergedSeasonEntries.length > 1 && costNights === 0) return;
+            if (shouldSplitByDate && costNights === 0) return;
 
             const stayPerPerson = perPerson * displayNights;
             const costStayPerPerson = perPerson * costNights;
